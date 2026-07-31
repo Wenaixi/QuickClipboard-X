@@ -494,13 +494,13 @@ pub fn snap_to_edge(window: &WebviewWindow, edge: SnapEdge) -> Result<(), String
 
 pub fn hide_snapped_window(window: &WebviewWindow) -> Result<(), String> {
     use tauri::Manager;
-    
+
     let state = super::state::get_window_state();
-    
+
     if !state.is_snapped || state.is_hidden {
         return Ok(());
     }
-    
+
     if crate::is_context_menu_visible() {
         return Ok(());
     }
@@ -512,9 +512,10 @@ pub fn hide_snapped_window(window: &WebviewWindow) -> Result<(), String> {
     let _ = crate::windows::preview_window::close_preview_window(window.app_handle().clone());
     let _ = window.emit("edge-snap-hide", ());
 
+    let settings = crate::get_settings();
+
     let size = window.outer_size().map_err(|e| e.to_string())?;
     let (x, y, _, _) = crate::utils::positioning::get_window_bounds(window)?;
-    let settings = crate::get_settings();
     let ratio = compute_snap_ratio(
         window.app_handle(),
         state.snap_edge,
@@ -536,7 +537,26 @@ pub fn hide_snapped_window(window: &WebviewWindow) -> Result<(), String> {
         size.height as i32,
         settings.edge_hide_offset,
     )?;
-    
+
+    // 关闭"鼠标移到边缘弹出"时,直接真正隐藏窗口,
+    // 不留任何透明条,彻底避免残留透明框拦截点击
+    if !settings.edge_hover_popup_enabled {
+        let _ = window.hide();
+        set_snap_edge(
+            state.snap_edge,
+            Some((x, y)),
+            state.snap_monitor_id.clone(),
+            state.snap_ratio,
+        );
+        set_hidden(true);
+        save_snap_layout(state.snap_edge, state.snap_ratio.unwrap_or(0.5), state.snap_monitor_id.clone());
+        super::state::set_window_state(super::state::WindowState::Hidden);
+        crate::services::memory::schedule_cleanup_after_main_window_hide();
+        crate::input_monitor::disable_mouse_monitoring();
+        crate::input_monitor::disable_navigation_keys();
+        return Ok(());
+    }
+
     // 根据动画配置决定是否使用过渡
     if settings.clipboard_animation_enabled {
         animate_window_position(window, x, y, resolved.x, resolved.y, 200)?;
@@ -544,6 +564,8 @@ pub fn hide_snapped_window(window: &WebviewWindow) -> Result<(), String> {
         window.set_position(tauri::PhysicalPosition::new(resolved.x, resolved.y))
             .map_err(|e| e.to_string())?;
     }
+    // 隐藏状态让透明区域点击穿透,避免残留透明框拦截边缘点击
+    let _ = window.set_ignore_cursor_events(true);
     set_snap_edge(
         resolved.edge,
         Some((resolved.x, resolved.y)),
@@ -552,13 +574,13 @@ pub fn hide_snapped_window(window: &WebviewWindow) -> Result<(), String> {
     );
     set_hidden(true);
     save_snap_layout(resolved.edge, ratio, Some(resolved.monitor_id));
-    
+
     super::state::set_window_state(super::state::WindowState::Hidden);
     crate::services::memory::schedule_cleanup_after_main_window_hide();
-    
+
     crate::input_monitor::disable_mouse_monitoring();
     crate::input_monitor::disable_navigation_keys();
-    
+
     Ok(())
 }
 
@@ -596,9 +618,14 @@ pub fn refresh_hidden_snapped_window(window: &WebviewWindow) -> Result<(), Strin
         settings.edge_hide_offset,
     )?;
 
-    window
-        .set_position(tauri::PhysicalPosition::new(resolved.x, resolved.y))
-        .map_err(|e| e.to_string())?;
+    if settings.edge_hover_popup_enabled {
+        window
+            .set_position(tauri::PhysicalPosition::new(resolved.x, resolved.y))
+            .map_err(|e| e.to_string())?;
+    } else {
+        // 悬浮弹出关闭时窗口已真正隐藏,只更新状态即可
+        let _ = window.hide();
+    }
     set_snap_edge(
         resolved.edge,
         Some((resolved.x, resolved.y)),
@@ -664,6 +691,15 @@ pub fn show_snapped_window(window: &WebviewWindow) -> Result<(), String> {
     let size = window.outer_size().map_err(|e| e.to_string())?;
     let (x, y, _, _) = crate::utils::positioning::get_window_bounds(window)?;
     let settings = crate::get_settings();
+
+    // 显示时恢复鼠标事件捕获,确保窗口可交互
+    let _ = window.set_ignore_cursor_events(false);
+
+    // 鼠标悬浮弹出开关关闭时,窗口用 hide() 真正隐藏,此处需先 show 再移动
+    if !settings.edge_hover_popup_enabled {
+        let _ = window.show();
+    }
+
     let ratio = state
         .snap_ratio
         .or(settings.edge_snap_ratio)
@@ -839,9 +875,16 @@ pub fn restore_edge_snap_on_startup(window: &WebviewWindow) -> Result<(), String
     window.set_position(tauri::PhysicalPosition::new(resolved.x, resolved.y))
         .map_err(|e| e.to_string())?;
     save_snap_layout(resolved.edge, snapped_ratio, Some(resolved.monitor_id));
-    
-    let _ = window.show();
-    let _ = window.set_always_on_top(true);
+
+    if settings.edge_hover_popup_enabled {
+        // 悬浮弹出开启:保持窗口可见(露出透明触发条),鼠标靠近即可弹出
+        let _ = window.show();
+        let _ = window.set_always_on_top(true);
+    } else {
+        // 悬浮弹出关闭:直接真正隐藏,不留透明条
+        let _ = window.hide();
+        let _ = window.set_always_on_top(false);
+    }
     
     super::state::set_window_state(super::state::WindowState::Hidden);
     

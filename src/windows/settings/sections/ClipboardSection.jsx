@@ -118,6 +118,10 @@ function ClipboardSection({
           <Toggle checked={settings.edgeHideEnabled} onChange={checked => onSettingChange('edgeHideEnabled', checked)} />
         </SettingItem>
 
+        <SettingItem label={t('settings.clipboard.edgeHoverPopup')} description={t('settings.clipboard.edgeHoverPopupDesc')}>
+          <Toggle checked={settings.edgeHoverPopupEnabled !== false} onChange={checked => onSettingChange('edgeHoverPopupEnabled', checked)} />
+        </SettingItem>
+
         <SettingItem label={t('settings.clipboard.edgeHideOffset')} description={t('settings.clipboard.edgeHideOffsetDesc')}>
           <Input type="number" value={settings.edgeHideOffset ?? 3} onChange={e => onSettingChange('edgeHideOffset', parseInt(e.target.value))} min={0} max={50} className="w-24" suffix={t('settings.common.pixels')} />
         </SettingItem>

@@ -89,6 +89,7 @@ export const defaultSettings = {
   rememberWindowSize: true,
   titleBarPosition: 'top',
   edgeHideEnabled: true,
+  edgeHoverPopupEnabled: true,
   edgeSnapPosition: null,
   edgeHideOffset: 3,
   autoFocusSearch: false,

@@ -781,6 +781,8 @@
       "positionRight": "Right",
       "edgeHideEnabled": "Enable Edge Snap Hide",
       "edgeHideEnabledDesc": "Automatically hide window when snapped to screen edge",
+      "edgeHoverPopup": "Show on Mouse Hover at Edge",
+      "edgeHoverPopupDesc": "When disabled, hovering the mouse at the screen edge will not show the window; use shortcut key or tray icon instead",
       "edgeHideOffset": "Visible Pixels When Hidden",
       "edgeHideOffsetDesc": "Number of pixels protruding when the window is hidden at edge",
       "autoFocusSearch": "Auto Focus Search Box",

@@ -64,6 +64,13 @@ pub fn start_edge_monitoring() {
                 std::thread::sleep(Duration::from_millis(100));
                 continue;
             }
+
+            // 鼠标悬浮弹出开关:关闭后既不自动弹出,也不自动收回,
+            // 窗口显隐完全由快捷键/托盘等显式操作控制
+            if !crate::get_settings().edge_hover_popup_enabled {
+                std::thread::sleep(Duration::from_millis(50));
+                continue;
+            }
  
             if last_hidden_state != state.is_hidden {
                 last_hidden_state = state.is_hidden;

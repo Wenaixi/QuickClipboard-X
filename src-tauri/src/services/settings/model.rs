@@ -137,6 +137,7 @@ pub struct AppSettings {
 
     // 贴边隐藏设置
     pub edge_hide_enabled: bool,
+    pub edge_hover_popup_enabled: bool,
     pub edge_snap_position: Option<(i32, i32)>,
     pub edge_snap_edge: Option<String>,
     pub edge_snap_ratio: Option<f64>,
@@ -326,6 +327,7 @@ impl Default for AppSettings {
             saved_window_size: None,
 
             edge_hide_enabled: true,
+            edge_hover_popup_enabled: true,
             edge_snap_position: None,
             edge_snap_edge: None,
             edge_snap_ratio: None,

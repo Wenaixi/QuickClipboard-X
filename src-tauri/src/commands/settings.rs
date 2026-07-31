@@ -10,13 +10,33 @@ const DEFAULT_MAIN_WINDOW_HEIGHT: u32 = 520;
 fn handle_disable_edge_hide(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let state = crate::windows::main_window::get_window_state();
-        
+
         if state.is_snapped {
             if state.is_hidden {
                 let _ = crate::windows::main_window::show_snapped_window(&window);
             }
             let _ = crate::windows::main_window::restore_from_snap(&window);
             crate::windows::main_window::stop_edge_monitoring();
+        }
+    }
+}
+
+// 切换"鼠标移到边缘弹出"开关后,若主窗口正处于贴边隐藏状态,立即刷新其形态:
+// 开启 -> 露出透明触发条(保持置顶);关闭 -> 真正隐藏,不留透明条
+fn refresh_edge_hover_mode(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let state = crate::windows::main_window::get_window_state();
+        if state.is_snapped && state.is_hidden {
+            let settings = crate::get_settings();
+            let _ = window.set_ignore_cursor_events(!settings.edge_hover_popup_enabled);
+            if settings.edge_hover_popup_enabled {
+                let _ = window.show();
+                let _ = window.set_always_on_top(true);
+                let _ = crate::windows::main_window::refresh_hidden_snapped_window(&window);
+            } else {
+                let _ = window.hide();
+                let _ = window.set_always_on_top(false);
+            }
         }
     }
 }
@@ -92,6 +112,7 @@ pub fn save_settings(mut settings: AppSettings, app: tauri::AppHandle) -> Result
     settings.normalize_app_filter_blocklist();
     let clipboard_monitor_changed = old_settings.clipboard_monitor != settings.clipboard_monitor;
     let edge_hide_changed = old_settings.edge_hide_enabled != settings.edge_hide_enabled;
+    let edge_hover_changed = old_settings.edge_hover_popup_enabled != settings.edge_hover_popup_enabled;
     let quickpaste_enabled_changed = old_settings.quickpaste_enabled != settings.quickpaste_enabled;
     let remember_window_size_enabled =
         !old_settings.remember_window_size && settings.remember_window_size;
@@ -108,6 +129,10 @@ pub fn save_settings(mut settings: AppSettings, app: tauri::AppHandle) -> Result
         settings.edge_snap_ratio = None;
         settings.edge_snap_monitor_id = None;
         handle_disable_edge_hide(&app);
+    }
+
+    if edge_hover_changed {
+        refresh_edge_hover_mode(&app);
     }
 
     settings.update_check_interval = normalize_update_check_interval(&settings.update_check_interval);
