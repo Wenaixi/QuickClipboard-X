@@ -77,8 +77,10 @@ pub fn start_edge_monitoring() {
             }
 
             // 鼠标悬浮弹出开关:关闭后既不自动弹出,也不自动收回,
-            // 窗口显隐完全由快捷键/托盘等显式操作控制
+            // 窗口显隐完全由快捷键/托盘等显式操作控制。
+            // last_near 置 false:重新开启时若鼠标已在触发区,能走 false→true 弹出
             if !crate::get_settings().edge_hover_popup_enabled {
+                last_near_state = false;
                 std::thread::sleep(Duration::from_millis(50));
                 continue;
             }

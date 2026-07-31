@@ -119,7 +119,11 @@ function ClipboardSection({
         </SettingItem>
 
         <SettingItem label={t('settings.clipboard.edgeHoverPopup')} description={t('settings.clipboard.edgeHoverPopupDesc')}>
-          <Toggle checked={settings.edgeHoverPopupEnabled !== false} onChange={checked => onSettingChange('edgeHoverPopupEnabled', checked)} />
+          <Toggle
+            checked={settings.edgeHoverPopupEnabled !== false}
+            onChange={checked => onSettingChange('edgeHoverPopupEnabled', checked)}
+            disabled={!settings.edgeHideEnabled}
+          />
         </SettingItem>
 
         <SettingItem label={t('settings.clipboard.edgeHideOffset')} description={t('settings.clipboard.edgeHideOffsetDesc')}>

@@ -538,36 +538,7 @@ pub fn hide_snapped_window(window: &WebviewWindow) -> Result<(), String> {
         settings.edge_hide_offset,
     )?;
 
-    // 关闭"鼠标移到边缘弹出"时,直接真正隐藏窗口,
-    // 不留任何透明条,彻底避免残留透明框拦截点击
-    if !settings.edge_hover_popup_enabled {
-        let _ = window.hide();
-        // 与悬浮开启分支保持一致:统一记录屏外隐藏位置,
-        // 避免同一隐藏状态两套坐标记账(屏上 vs 屏外)导致刷新漂移
-        set_snap_edge(
-            resolved.edge,
-            Some((resolved.x, resolved.y)),
-            Some(resolved.monitor_id.clone()),
-            Some(ratio),
-        );
-        set_hidden(true);
-        save_snap_layout(resolved.edge, ratio, Some(resolved.monitor_id));
-        super::state::set_window_state(super::state::WindowState::Hidden);
-        crate::services::memory::schedule_cleanup_after_main_window_hide();
-        crate::input_monitor::disable_mouse_monitoring();
-        crate::input_monitor::disable_navigation_keys();
-        return Ok(());
-    }
-
-    // 根据动画配置决定是否使用过渡
-    if settings.clipboard_animation_enabled {
-        animate_window_position(window, x, y, resolved.x, resolved.y, 200)?;
-    } else {
-        window.set_position(tauri::PhysicalPosition::new(resolved.x, resolved.y))
-            .map_err(|e| e.to_string())?;
-    }
-    // 隐藏状态让透明区域点击穿透,避免残留透明框拦截边缘点击
-    let _ = window.set_ignore_cursor_events(true);
+    // 先统一记账为屏外 resolved,形态(穿透/置顶/显隐)只交给 refresh
     set_snap_edge(
         resolved.edge,
         Some((resolved.x, resolved.y)),
@@ -576,10 +547,36 @@ pub fn hide_snapped_window(window: &WebviewWindow) -> Result<(), String> {
     );
     set_hidden(true);
     save_snap_layout(resolved.edge, ratio, Some(resolved.monitor_id));
-
     super::state::set_window_state(super::state::WindowState::Hidden);
-    crate::services::memory::schedule_cleanup_after_main_window_hide();
 
+    if !settings.edge_hover_popup_enabled {
+        // 关闭悬浮:真正 hide,不留触发条;形态走唯一决策点
+        refresh_hidden_snapped_window(window)?;
+    } else if settings.clipboard_animation_enabled {
+        // 滑入动画期间保持可点,动画结束后再穿透,避免半屏滑入时点穿
+        animate_window_position(window, x, y, resolved.x, resolved.y, 200)?;
+        let window_clone = window.clone();
+        let app = window.app_handle().clone();
+        let anim_version = ANIMATION_VERSION.load(Ordering::SeqCst);
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            if ANIMATION_VERSION.load(Ordering::SeqCst) != anim_version {
+                return;
+            }
+            let _ = app.run_on_main_thread(move || {
+                if super::state::get_window_state().is_hidden {
+                    let _ = window_clone.set_ignore_cursor_events(true);
+                }
+            });
+        });
+    } else {
+        window
+            .set_position(tauri::PhysicalPosition::new(resolved.x, resolved.y))
+            .map_err(|e| e.to_string())?;
+        let _ = window.set_ignore_cursor_events(true);
+    }
+
+    crate::services::memory::schedule_cleanup_after_main_window_hide();
     crate::input_monitor::disable_mouse_monitoring();
     crate::input_monitor::disable_navigation_keys();
 
@@ -621,16 +618,17 @@ pub fn refresh_hidden_snapped_window(window: &WebviewWindow) -> Result<(), Strin
     )?;
 
     // 形态唯一决策点:穿透/置顶/显隐都按开关在此处统一刷新,
-    // 所有调用方(开关切换、显示器变更、恢复默认大小)行为一致
+    // 所有调用方(开关切换、显示器变更、恢复默认大小、hide)行为一致
     if settings.edge_hover_popup_enabled {
-        // 悬浮开启:露出透明触发条,保持置顶并点击穿透,避免拦截边缘点击
-        let _ = window.set_ignore_cursor_events(true);
+        // 悬浮开启:先 show/置顶/落点,最后再穿透(show 可能清扩展样式)
+        let _ = window.show();
         let _ = window.set_always_on_top(true);
         window
             .set_position(tauri::PhysicalPosition::new(resolved.x, resolved.y))
             .map_err(|e| e.to_string())?;
+        let _ = window.set_ignore_cursor_events(true);
     } else {
-        // 悬浮关闭:窗口已真正隐藏,取消置顶并恢复非穿透,保证形态状态一致
+        // 悬浮关闭:真正隐藏,取消置顶并恢复非穿透
         let _ = window.hide();
         let _ = window.set_always_on_top(false);
         let _ = window.set_ignore_cursor_events(false);
@@ -655,6 +653,11 @@ pub fn needs_hidden_snap_refresh(window: &WebviewWindow) -> Result<bool, String>
     }
 
     let settings = crate::get_settings();
+    // 真隐藏无触发条,OS 坐标与 state 屏外坐标本就不对齐,无需按位置刷
+    if !settings.edge_hover_popup_enabled {
+        return Ok(false);
+    }
+
     let size = window.outer_size().map_err(|e| e.to_string())?;
     let (x, y, _, _) = crate::utils::positioning::get_window_bounds(window)?;
     let ratio = state
@@ -881,15 +884,15 @@ pub fn restore_edge_snap_on_startup(window: &WebviewWindow) -> Result<(), String
     save_snap_layout(resolved.edge, snapped_ratio, Some(resolved.monitor_id));
 
     if settings.edge_hover_popup_enabled {
-        // 悬浮弹出开启:保持窗口可见(露出透明触发条),鼠标靠近即可弹出
-        // 触发条需点击穿透,避免透明区域拦截边缘点击
-        let _ = window.set_ignore_cursor_events(true);
+        // 悬浮开启:show/置顶后再写穿透,避免 show 清掉 WS_EX_TRANSPARENT
         let _ = window.show();
         let _ = window.set_always_on_top(true);
+        let _ = window.set_ignore_cursor_events(true);
     } else {
-        // 悬浮弹出关闭:直接真正隐藏,不留透明条
+        // 悬浮关闭:真正隐藏,并清掉置顶/穿透残留
         let _ = window.hide();
         let _ = window.set_always_on_top(false);
+        let _ = window.set_ignore_cursor_events(false);
     }
     
     super::state::set_window_state(super::state::WindowState::Hidden);
