@@ -65,18 +65,20 @@ pub fn start_edge_monitoring() {
                 continue;
             }
 
-            // 鼠标悬浮弹出开关:关闭后既不自动弹出,也不自动收回,
-            // 窗口显隐完全由快捷键/托盘等显式操作控制
-            if !crate::get_settings().edge_hover_popup_enabled {
-                std::thread::sleep(Duration::from_millis(50));
-                continue;
-            }
- 
+            // 显隐状态变化时,重同步鼠标近边状态,
+            // 避免窗口由显式操作(快捷键/托盘)显隐后状态机误判
             if last_hidden_state != state.is_hidden {
                 last_hidden_state = state.is_hidden;
                 if let Ok(is_near) = check_mouse_near_edge(&window, &state) {
                     last_near_state = is_near;
                 }
+                std::thread::sleep(Duration::from_millis(50));
+                continue;
+            }
+
+            // 鼠标悬浮弹出开关:关闭后既不自动弹出,也不自动收回,
+            // 窗口显隐完全由快捷键/托盘等显式操作控制
+            if !crate::get_settings().edge_hover_popup_enabled {
                 std::thread::sleep(Duration::from_millis(50));
                 continue;
             }

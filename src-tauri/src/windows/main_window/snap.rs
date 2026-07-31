@@ -542,14 +542,16 @@ pub fn hide_snapped_window(window: &WebviewWindow) -> Result<(), String> {
     // 不留任何透明条,彻底避免残留透明框拦截点击
     if !settings.edge_hover_popup_enabled {
         let _ = window.hide();
+        // 与悬浮开启分支保持一致:统一记录屏外隐藏位置,
+        // 避免同一隐藏状态两套坐标记账(屏上 vs 屏外)导致刷新漂移
         set_snap_edge(
-            state.snap_edge,
-            Some((x, y)),
-            state.snap_monitor_id.clone(),
-            state.snap_ratio,
+            resolved.edge,
+            Some((resolved.x, resolved.y)),
+            Some(resolved.monitor_id.clone()),
+            Some(ratio),
         );
         set_hidden(true);
-        save_snap_layout(state.snap_edge, state.snap_ratio.unwrap_or(0.5), state.snap_monitor_id.clone());
+        save_snap_layout(resolved.edge, ratio, Some(resolved.monitor_id));
         super::state::set_window_state(super::state::WindowState::Hidden);
         crate::services::memory::schedule_cleanup_after_main_window_hide();
         crate::input_monitor::disable_mouse_monitoring();
@@ -694,11 +696,6 @@ pub fn show_snapped_window(window: &WebviewWindow) -> Result<(), String> {
 
     // 显示时恢复鼠标事件捕获,确保窗口可交互
     let _ = window.set_ignore_cursor_events(false);
-
-    // 鼠标悬浮弹出开关关闭时,窗口用 hide() 真正隐藏,此处需先 show 再移动
-    if !settings.edge_hover_popup_enabled {
-        let _ = window.show();
-    }
 
     let ratio = state
         .snap_ratio
@@ -878,6 +875,8 @@ pub fn restore_edge_snap_on_startup(window: &WebviewWindow) -> Result<(), String
 
     if settings.edge_hover_popup_enabled {
         // 悬浮弹出开启:保持窗口可见(露出透明触发条),鼠标靠近即可弹出
+        // 触发条需点击穿透,避免透明区域拦截边缘点击
+        let _ = window.set_ignore_cursor_events(true);
         let _ = window.show();
         let _ = window.set_always_on_top(true);
     } else {

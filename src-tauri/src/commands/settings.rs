@@ -28,7 +28,8 @@ fn refresh_edge_hover_mode(app: &tauri::AppHandle) {
         let state = crate::windows::main_window::get_window_state();
         if state.is_snapped && state.is_hidden {
             let settings = crate::get_settings();
-            let _ = window.set_ignore_cursor_events(!settings.edge_hover_popup_enabled);
+            // 悬浮开启时触发条需点击穿透(避免拦截边缘点击),关闭时窗口真隐藏无需穿透
+            let _ = window.set_ignore_cursor_events(settings.edge_hover_popup_enabled);
             if settings.edge_hover_popup_enabled {
                 let _ = window.show();
                 let _ = window.set_always_on_top(true);
@@ -131,10 +132,6 @@ pub fn save_settings(mut settings: AppSettings, app: tauri::AppHandle) -> Result
         handle_disable_edge_hide(&app);
     }
 
-    if edge_hover_changed {
-        refresh_edge_hover_mode(&app);
-    }
-
     settings.update_check_interval = normalize_update_check_interval(&settings.update_check_interval);
     if remember_window_size_enabled {
         settings.saved_window_size = capture_main_window_logical_size(&app);
@@ -144,8 +141,13 @@ pub fn save_settings(mut settings: AppSettings, app: tauri::AppHandle) -> Result
     if webdav_crypto_scope_changed {
         crate::services::webdav_sync::crypto::clear_cached_keys();
     }
-    
+
     update_settings(settings.clone())?;
+
+    if edge_hover_changed {
+        // 新值已落地,再按新开关刷新贴边隐藏形态
+        refresh_edge_hover_mode(&app);
+    }
 
     if remember_window_size_disabled {
         restore_main_window_default_size(&app);
