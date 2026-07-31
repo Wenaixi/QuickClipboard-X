@@ -620,13 +620,20 @@ pub fn refresh_hidden_snapped_window(window: &WebviewWindow) -> Result<(), Strin
         settings.edge_hide_offset,
     )?;
 
+    // 形态唯一决策点:穿透/置顶/显隐都按开关在此处统一刷新,
+    // 所有调用方(开关切换、显示器变更、恢复默认大小)行为一致
     if settings.edge_hover_popup_enabled {
+        // 悬浮开启:露出透明触发条,保持置顶并点击穿透,避免拦截边缘点击
+        let _ = window.set_ignore_cursor_events(true);
+        let _ = window.set_always_on_top(true);
         window
             .set_position(tauri::PhysicalPosition::new(resolved.x, resolved.y))
             .map_err(|e| e.to_string())?;
     } else {
-        // 悬浮弹出关闭时窗口已真正隐藏,只更新状态即可
+        // 悬浮关闭:窗口已真正隐藏,取消置顶并恢复非穿透,保证形态状态一致
         let _ = window.hide();
+        let _ = window.set_always_on_top(false);
+        let _ = window.set_ignore_cursor_events(false);
     }
     set_snap_edge(
         resolved.edge,

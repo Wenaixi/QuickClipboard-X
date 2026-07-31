@@ -27,17 +27,12 @@ fn refresh_edge_hover_mode(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let state = crate::windows::main_window::get_window_state();
         if state.is_snapped && state.is_hidden {
-            let settings = crate::get_settings();
-            // 悬浮开启时触发条需点击穿透(避免拦截边缘点击),关闭时窗口真隐藏无需穿透
-            let _ = window.set_ignore_cursor_events(settings.edge_hover_popup_enabled);
-            if settings.edge_hover_popup_enabled {
+            // 穿透/置顶/显隐的完整形态由 refresh_hidden_snapped_window 统一决策,
+            // 这里只需在开启分支先恢复可见,否则透明窗口 show 后触发条位置未刷新
+            if crate::get_settings().edge_hover_popup_enabled {
                 let _ = window.show();
-                let _ = window.set_always_on_top(true);
-                let _ = crate::windows::main_window::refresh_hidden_snapped_window(&window);
-            } else {
-                let _ = window.hide();
-                let _ = window.set_always_on_top(false);
             }
+            let _ = crate::windows::main_window::refresh_hidden_snapped_window(&window);
         }
     }
 }
