@@ -11,14 +11,13 @@ static ANIMATION_VERSION: AtomicU64 = AtomicU64::new(0);
 // 决定 hide 路径是否走滑出动画。抽成纯函数便于 #[cfg(test)] 直接断言,
 // 防止未来有人在条件里塞入 `edge_hover_popup_enabled` 之类导致 hover 关闭时
 // 静默跳过滑出动画(4352887c 报告:动画条件仅由 clipboard_animation_enabled 决定)。
-pub(crate) fn should_play_hide_animation(settings: &crate::services::AppSettings) -> bool {
+fn should_play_hide_animation(settings: &crate::services::AppSettings) -> bool {
     settings.clipboard_animation_enabled
 }
 
 // bump 动画版本号:让正在等待的 post-animation 任务醒来后自行退出,
 // 避免用过期设置改写形态(发现 toggle 反转、半屏滑入点穿等)
-// pub(crate):同文件 #[cfg(test)] 模块需要直接验证版本语义
-pub(crate) fn cancel_pending_animation() {
+fn cancel_pending_animation() {
     ANIMATION_VERSION.fetch_add(1, Ordering::SeqCst);
 }
 
