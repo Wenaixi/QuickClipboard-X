@@ -1,4 +1,68 @@
-logs
+# ============================================================
+# QuickClipboard 项目 .gitignore
+# 按类别组织,每节用 # === 标题 === 标头
+# ============================================================
+
+# === 操作系统文件 ===
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# === 编辑器 / IDE 临时文件 ===
+# VSCode(允许提交 extensions.json 共享推荐扩展)
+.vscode/*
+!.vscode/extensions.json
+
+# JetBrains IDE
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Visual Studio
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.slnx
+
+# Emacs / Vim / 其他
+*~
+*.bak
+*.swp
+*.swo
+.vs/
+
+# === Node / 前端构建产物 ===
+node_modules/
+dist/
+dist-ssr/
+*.local
+.eslintcache
+.stylelintcache
+.parcel-cache
+.vite/
+
+# TypeScript 增量构建
+*.tsbuildinfo
+
+# === Rust / Tauri 构建产物 ===
+# Cargo target(覆盖任何深度的 target/)
+target/
+
+# tauri-build 生成的 capability schemas 与命令绑定
+src-tauri/gen/
+src-tauri/target/
+src-tauri/WixTools/
+src-tauri/bundle/
+
+# Rust 备份
+*.rs.bk
+
+# === 包管理器日志 ===
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -6,38 +70,74 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
+# === 本地环境与密钥 ===
+# 真实部署密钥、API token、用户特定路径配置
+.env
+.env.local
+.env.*.local
+!.env.example
+*.pem
+*.key
+secrets.*
+secrets/
 
-target
+# === 测试产物 / 覆盖率 ===
+coverage/
+*.lcov
+*.lcov.info
+junit.xml
+tarpaulin-report.html
+coverage.json
+.nyc_output/
 
-.vscode/*
-!.vscode/extensions.json
-.idea
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+# === OMC 多智能体编排工具运行时状态 ===
+# 详见 CLAUDE.md §2(故意不入库)
+.omc/
+.omc/build.log
+.omc/*.log
+.omc/artifacts/
+
+# === AI 辅助开发本地规范文件,不入库 ===
+# 详见 CLAUDE.md §2(主人个人本地工作记忆,撤销忽略会让 git add . 误纳)
+CLAUDE.md
+
+# Claude Code 本地配置(只忽略本机覆盖,共享配置正常入仓)
+.claude/settings.local.json
+.claude/commands/local/
+.claude/agents/local/
+
+# === Tauri 私有依赖克隆(SSH git 仓库) ===
+# 详见 CLAUDE.md §15(本机 cargo check/test 需注释掉这两个 dep)
+src-tauri/plugins/gpu-image-viewer/
+src-tauri/plugins/screenshot-suite/
+
+# === 项目本地临时目录(不参与版本控制) ===
+# 截图模块原型的本地副本
+/src/windows/screenshot
+# Konva 截图实验目录
+screenshot_Konva
+# 前端独立子项目(若有)
+QuickClipboardWeb
+# 临时主项目工作区
+scap-main
+# 根级 OMC 协作产物(若直接放根,不入仓)
+/artifacts
+
+# === 历史规则(目录/文件已不存在,保留兼容旧 clone) ===
 **/mosqcg*
 .cu*
 /*ents*
 
-docs
-scap-main
-/plugins
-QuickClipboardWeb
-screenshot_Konva
-/src/windows/screenshot
-/src-tauri/plugins/gpu-image-viewer
+# === Bash 反斜杠误吃导致的泄露日志(本会话发现) ===
+# 见 CLAUDE.md §18 — git checkout 恢复 Cargo.toml 后,bash 把
+# `D:\newC\...cargo-test.log` 当字面路径创建了 21KB 残骸
+D:*.log
+D:newC*
+# === 防止类似泄露:屏蔽任何 Windows 盘符开头的根级文件 ===
+/[A-Z]:*
 
-# AI 辅助开发本地规范文件,不入库
-CLAUDE.md
-
-# OMC 多智能体编排工具运行时状态
-.omc/
-
-# TDD 回归测试已拆分到各源文件的 #[cfg(test)] 模块,不再需要独立 ignore 文件
+# === Cargo / Tauri 测试 workaround 残留文件 ===
+# 跑完 cargo test --lib --no-default-features 后必须 git checkout 恢复;
+# 万一漏恢复,以下规则会兜底,不把工作树改动误纳入 PR
+/src-tauri/Cargo.lock.local
+/src-tauri/Cargo.toml.local
