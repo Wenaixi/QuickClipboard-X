@@ -635,9 +635,9 @@ pub fn refresh_hidden_snapped_window(window: &WebviewWindow) -> Result<(), Strin
     // 取消任何在飞的 post-animation 延迟任务,避免它用过期的设置改写形态
     cancel_pending_animation();
 
-    // 入口快照:若中途被并发 show 抢先改回 is_hidden=false,
-    // 尾部写入必须尊重,不得反手覆盖(否则 toggle 会反复走 hide 路径)
-    let entry_is_hidden = state.is_hidden;
+    // 尾部写入必须尊重并发 show:若中途被抢先 set_hidden_and_window_state(false, Visible),
+    // 跳过本次反手覆盖(否则 toggle 会反复走 hide 路径)。
+    // 入口早返已保证 state.is_hidden=true,只需 re-check 当前状态。
 
     let settings = crate::get_settings();
     let size = window.outer_size().map_err(|e| e.to_string())?;
@@ -697,7 +697,7 @@ pub fn refresh_hidden_snapped_window(window: &WebviewWindow) -> Result<(), Strin
     // is_hidden=true 但 state=Visible 的撕裂态(会误判 should_show)。
     // 写入前 re-check:若中途被并发 show 抢先 set_hidden_and_window_state(false, Visible),
     // 尊重对方的写入,跳过本路径的反手覆盖。
-    if entry_is_hidden && super::state::get_window_state().is_hidden {
+    if super::state::get_window_state().is_hidden {
         set_hidden_and_window_state(true, super::state::WindowState::Hidden);
     }
     save_snap_layout(resolved.edge, ratio, Some(resolved.monitor_id));
