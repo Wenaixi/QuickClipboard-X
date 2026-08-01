@@ -124,7 +124,6 @@ pub fn save_settings(mut settings: AppSettings, app: tauri::AppHandle) -> Result
         settings.edge_snap_edge = None;
         settings.edge_snap_ratio = None;
         settings.edge_snap_monitor_id = None;
-        handle_disable_edge_hide(&app);
     }
 
     settings.update_check_interval = normalize_update_check_interval(&settings.update_check_interval);
@@ -138,6 +137,12 @@ pub fn save_settings(mut settings: AppSettings, app: tauri::AppHandle) -> Result
     }
 
     update_settings(settings.clone())?;
+
+    // §6 铁律 5:形态刷新必须在 update_settings 落地新值之后,
+    // 否则 handle_disable_edge_hide 读到旧 edge_hide_enabled=true 不会解开形态
+    if edge_hide_changed && !settings.edge_hide_enabled {
+        handle_disable_edge_hide(&app);
+    }
 
     if edge_hover_changed {
         // 新值已落地,再按新开关刷新贴边隐藏形态
@@ -224,10 +229,15 @@ pub fn set_edge_hide_enabled(enabled: bool, app: tauri::AppHandle) -> Result<(),
         settings.edge_snap_edge = None;
         settings.edge_snap_ratio = None;
         settings.edge_snap_monitor_id = None;
+    }
+
+    update_settings(settings)?;
+
+    // §6 铁律 5:形态刷新必须在 update_settings 落地新值之后
+    if !enabled {
         handle_disable_edge_hide(&app);
     }
-    
-    update_settings(settings)?;
+
     Ok(())
 }
 
@@ -520,6 +530,75 @@ mod tests {
             body.contains("normalize_edge_hover_invariant"),
             "set_edge_hide_enabled 必须显式调用 normalize_edge_hover_invariant,\
              禁止直接 update_settings(settings) 跳过归一化"
+        );
+    }
+
+    // §6 铁律 5 护栏:形态刷新必须在 update_settings 落地新值之后。
+    // save_settings 函数体内 handle_disable_edge_hide 必须在
+    // "update_settings(settings.clone())?;" 这一行之后。
+    // 当前实现若把 handle_disable_edge_hide 挪到 update_settings 之前,
+    // 读 get_settings().edge_hide_enabled 仍会拿到旧值,行为整体反转
+    // (与 6c197ee9 栽过的同类 footgun 同源)。
+    // 用更具体的代码片段锚点 "update_settings(settings.clone())?;"
+    // 避免函数名被注释误命中。
+    #[test]
+    fn save_settings_handle_disable_edge_hide_runs_after_update_settings() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/commands/settings.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 src/commands/settings.rs 源文件");
+        let start = source
+            .find("pub fn save_settings")
+            .expect("找不到 save_settings 定义");
+        let after = &source[start..];
+        let end_rel = after
+            .find("\n#[tauri::command]")
+            .or_else(|| after.find("\npub fn "))
+            .unwrap_or(after.len());
+        let body = &after[..end_rel];
+        let update_pos = body
+            .find("update_settings(settings.clone())?;")
+            .expect("save_settings 体内必须先有 update_settings(settings.clone())?; 锚点");
+        let disable_pos = body
+            .find("handle_disable_edge_hide(&app);")
+            .expect("save_settings 体内必须出现 handle_disable_edge_hide(&app); 调用");
+        assert!(
+            disable_pos > update_pos,
+            "save_settings 体内 handle_disable_edge_hide 必须在 update_settings 之后,\
+             违反 §6 铁律 5(形态刷新落地新值之后)"
+        );
+    }
+
+    // §6 铁律 5 护栏:set_edge_hide_enabled 函数体内同样必须遵循
+    // update_settings 先于 handle_disable_edge_hide。
+    // 用具体代码片段锚点避免注释误命中。
+    #[test]
+    fn set_edge_hide_enabled_handle_disable_edge_hide_runs_after_update_settings() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/commands/settings.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 src/commands/settings.rs 源文件");
+        let start = source
+            .find("pub fn set_edge_hide_enabled")
+            .expect("找不到 set_edge_hide_enabled 定义");
+        let after = &source[start..];
+        let end_rel = after
+            .find("\n#[tauri::command]")
+            .or_else(|| after.find("\npub fn "))
+            .unwrap_or(after.len());
+        let body = &after[..end_rel];
+        let update_pos = body
+            .find("update_settings(settings)?;")
+            .expect("set_edge_hide_enabled 体内必须先有 update_settings(settings)?; 锚点");
+        let disable_pos = body
+            .find("handle_disable_edge_hide(&app);")
+            .expect("set_edge_hide_enabled 体内必须出现 handle_disable_edge_hide(&app); 调用");
+        assert!(
+            disable_pos > update_pos,
+            "set_edge_hide_enabled 体内 handle_disable_edge_hide 必须在 update_settings 之后,\
+             违反 §6 铁律 5(形态刷新落地新值之后)"
         );
     }
 }
