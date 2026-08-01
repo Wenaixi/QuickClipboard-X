@@ -10,7 +10,7 @@ static ANIMATION_VERSION: AtomicU64 = AtomicU64::new(0);
 
 // bump 动画版本号:让正在等待的 post-animation 任务醒来后自行退出,
 // 避免用过期设置改写形态(发现 toggle 反转、半屏滑入点穿等)
-// pub(crate):tdd_tests 需要直接验证版本语义
+// pub(crate):同文件 #[cfg(test)] 模块需要直接验证版本语义
 pub(crate) fn cancel_pending_animation() {
     ANIMATION_VERSION.fetch_add(1, Ordering::SeqCst);
 }
@@ -828,14 +828,14 @@ pub fn show_snapped_window(window: &WebviewWindow) -> Result<(), String> {
 }
 
 // 动画开始:独占一次 bump,取走当前版本。同一批动画后续的 post-refresh 不得再 bump。
-// pub(crate):tdd_tests 需要直接验证版本语义
+// pub(crate):同文件 #[cfg(test)] 模块需要直接验证版本语义
 pub(crate) fn begin_animation() -> u64 {
     ANIMATION_VERSION.fetch_add(1, Ordering::SeqCst) + 1
 }
 
 // post-animation 刷新共享在飞动画的版本,不 bump。
 // 只有 cancel_pending_animation(同步形态决策)才会 bump,让动画与 post-refresh 一起失效。
-// pub(crate):tdd_tests 需要直接验证版本语义
+// pub(crate):同文件 #[cfg(test)] 模块需要直接验证版本语义
 pub(crate) fn share_animation_version() -> u64 {
     ANIMATION_VERSION.load(Ordering::SeqCst)
 }
