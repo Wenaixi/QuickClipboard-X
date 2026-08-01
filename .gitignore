@@ -34,6 +34,9 @@ screenshot_Konva
 /src/windows/screenshot
 /src-tauri/plugins/gpu-image-viewer
 
+# AI 辅助开发本地规范文件,不入库
+CLAUDE.md
+
 # OMC 多智能体编排工具运行时状态
 .omc/
 
