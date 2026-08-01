@@ -452,7 +452,10 @@ mod tests {
     use super::*;
 
     // 回归:set_edge_hide_enabled(false) 必须连带关闭 hover,
-    // 否则持久化 hide=false/hover=true 违规组合,下次开启 hide 时意外弹出触发条
+    // 否则持久化 hide=false/hover=true 违规组合,下次开启 hide 时意外弹出触发条。
+    // 注意:此测试只覆盖 normalize 本身的语义(单元级),
+    // 端到端护栏(确认 set_edge_hide_enabled 函数体内真的调了 normalize)
+    // 在 tdd_tests.rs 的 set_edge_hide_enabled_calls_normalize_in_body。
     #[test]
     fn disabling_edge_hide_also_disables_hover() {
         let mut settings = AppSettings::default();

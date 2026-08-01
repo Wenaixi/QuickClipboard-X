@@ -40,6 +40,27 @@ fn schedule_post_animation_refresh(
     Ok(())
 }
 
+// 动画结束后写回 ignore=false(打开交互)。
+// show_snapped_window 在动画开启时必须保持穿透,等动画把窗口滑到屏上后再解锁,
+// 避免动画中段在屏外/中间坐标短暂可点。
+// 共享在飞动画版本,任何同步形态决策(cancel_pending_animation)会 bump 使本任务自杀。
+fn schedule_post_animation_set_interactive(
+    window: WebviewWindow,
+    app: tauri::AppHandle,
+    delay_ms: u64,
+) {
+    let version = share_animation_version();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(delay_ms));
+        if ANIMATION_VERSION.load(Ordering::SeqCst) != version {
+            return;
+        }
+        let _ = app.run_on_main_thread(move || {
+            let _ = window.set_ignore_cursor_events(false);
+        });
+    });
+}
+
 #[derive(Clone, Debug)]
 struct MonitorEdgeContext {
     id: String,
@@ -607,6 +628,10 @@ pub fn refresh_hidden_snapped_window(window: &WebviewWindow) -> Result<(), Strin
     // 取消任何在飞的 post-animation 延迟任务,避免它用过期的设置改写形态
     cancel_pending_animation();
 
+    // 入口快照:若中途被并发 show 抢先改回 is_hidden=false,
+    // 尾部写入必须尊重,不得反手覆盖(否则 toggle 会反复走 hide 路径)
+    let entry_is_hidden = state.is_hidden;
+
     let settings = crate::get_settings();
     let size = window.outer_size().map_err(|e| e.to_string())?;
     let (x, y, _, _) = crate::utils::positioning::get_window_bounds(window)?;
@@ -662,8 +687,12 @@ pub fn refresh_hidden_snapped_window(window: &WebviewWindow) -> Result<(), Strin
         Some(ratio),
     );
     // 原子写 is_hidden + WindowState,避免与并发 toggle 交错时出现
-    // is_hidden=true 但 state=Visible 的撕裂态(会误判 should_show)
-    set_hidden_and_window_state(true, super::state::WindowState::Hidden);
+    // is_hidden=true 但 state=Visible 的撕裂态(会误判 should_show)。
+    // 写入前 re-check:若中途被并发 show 抢先 set_hidden_and_window_state(false, Visible),
+    // 尊重对方的写入,跳过本路径的反手覆盖。
+    if entry_is_hidden && super::state::get_window_state().is_hidden {
+        set_hidden_and_window_state(true, super::state::WindowState::Hidden);
+    }
     save_snap_layout(resolved.edge, ratio, Some(resolved.monitor_id));
 
     Ok(())
@@ -731,9 +760,6 @@ pub fn show_snapped_window(window: &WebviewWindow) -> Result<(), String> {
     let (x, y, _, _) = crate::utils::positioning::get_window_bounds(window)?;
     let settings = crate::get_settings();
 
-    // 显示时恢复鼠标事件捕获,确保窗口可交互
-    let _ = window.set_ignore_cursor_events(false);
-
     let ratio = state
         .snap_ratio
         .or(settings.edge_snap_ratio)
@@ -756,19 +782,33 @@ pub fn show_snapped_window(window: &WebviewWindow) -> Result<(), String> {
         size.width as i32,
         size.height as i32,
     )?;
-    
-    if !window.is_visible().unwrap_or(false) {
-        let _ = window.show();
-    }
-    let _ = window.emit("edge-snap-show", ());
-    let _ = crate::commands::window::emit_main_window_refresh_needed_event(&window.app_handle());
-    
-    // 根据动画配置决定是否使用过渡
+
+    // 顺序与 refresh 唯一决策点对齐:先落位(set_position)再打开交互(ignore=false),
+    // 最后 show。避免 set_ignore_cursor_events(false) 早于 set_position 导致
+    // 窗口短暂在屏外坐标变成可点击但不显示,被 raw_input / 无障碍 API 命中触发幽灵 click。
     if settings.clipboard_animation_enabled {
+        // 动画分支:animate 自带 set_position 逐步到位,期间必须保持穿透,
+        // 否则动画中段在屏外/中间坐标可点,被 raw_input 命中再次 hide。
+        // 动画结束后由 schedule_post_animation_set_interactive 写回 ignore=false。
+        if !window.is_visible().unwrap_or(false) {
+            let _ = window.show();
+        }
+        let _ = window.emit("edge-snap-show", ());
+        let _ = crate::commands::window::emit_main_window_refresh_needed_event(&window.app_handle());
         animate_window_position(window, x, y, resolved.x, resolved.y, 200)?;
+        schedule_post_animation_set_interactive(window.clone(), window.app_handle().clone(), 200);
     } else {
-        window.set_position(tauri::PhysicalPosition::new(resolved.x, resolved.y))
+        // 非动画分支:先 set_position 落到屏上,再打开交互,最后 show。
+        // 全程同步无中段,不会暴露屏外可点状态。
+        window
+            .set_position(tauri::PhysicalPosition::new(resolved.x, resolved.y))
             .map_err(|e| e.to_string())?;
+        let _ = window.set_ignore_cursor_events(false);
+        if !window.is_visible().unwrap_or(false) {
+            let _ = window.show();
+        }
+        let _ = window.emit("edge-snap-show", ());
+        let _ = crate::commands::window::emit_main_window_refresh_needed_event(&window.app_handle());
     }
     set_snap_edge(
         resolved.edge,

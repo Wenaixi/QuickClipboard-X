@@ -23,6 +23,9 @@ where
 {
     let mut settings = SETTINGS.write();
     updater(&mut settings);
+    // 守不变量:update_with 是与 update_settings 并列的写入入口,
+    // 必须共享归一化,杜绝 hide=false/hover=true 违规组合落地
+    settings.normalize_edge_hover_invariant();
     SettingsStorage::save(&settings)
 }
 
