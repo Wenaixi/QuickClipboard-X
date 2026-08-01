@@ -8,6 +8,37 @@ const FRONTEND_CONTENT_INSET_LOGICAL: f64 = 5.0;
 
 static ANIMATION_VERSION: AtomicU64 = AtomicU64::new(0);
 
+// bump 动画版本号:让正在等待的 post-animation 任务醒来后自行退出,
+// 避免用过期设置改写形态(发现 toggle 反转、半屏滑入点穿等)
+fn cancel_pending_animation() {
+    ANIMATION_VERSION.fetch_add(1, Ordering::SeqCst);
+}
+
+// 等待动画结束后调 refresh 重新写入形态;等待期间任何同步形态决策
+// (refresh_hidden_snapped_window / hide_snapped_window / restore_edge_snap_on_startup)
+// 都会再次 bump,本 task 醒来即自杀
+fn schedule_post_animation_refresh(
+    window: WebviewWindow,
+    app: tauri::AppHandle,
+    delay_ms: u64,
+) -> Result<(), String> {
+    let version = ANIMATION_VERSION.fetch_add(1, Ordering::SeqCst) + 1;
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(delay_ms));
+        if ANIMATION_VERSION.load(Ordering::SeqCst) != version {
+            return;
+        }
+        let state = super::state::get_window_state();
+        if !state.is_snapped || !state.is_hidden {
+            return;
+        }
+        let _ = app.run_on_main_thread(move || {
+            let _ = refresh_hidden_snapped_window(&window);
+        });
+    });
+    Ok(())
+}
+
 #[derive(Clone, Debug)]
 struct MonitorEdgeContext {
     id: String,
@@ -549,31 +580,13 @@ pub fn hide_snapped_window(window: &WebviewWindow) -> Result<(), String> {
     save_snap_layout(resolved.edge, ratio, Some(resolved.monitor_id));
     super::state::set_window_state(super::state::WindowState::Hidden);
 
-    if !settings.edge_hover_popup_enabled {
-        // 关闭悬浮:真正 hide,不留触发条;形态走唯一决策点
-        refresh_hidden_snapped_window(window)?;
-    } else if settings.clipboard_animation_enabled {
-        // 滑入动画期间保持可点,动画结束后再穿透,避免半屏滑入时点穿
+    // 形态决策(穿透/置顶/显隐)全部交给 refresh_hidden_snapped_window 唯一决策点
+    // 动画分支:先滑到屏外坐标,延迟 200ms 再 refresh,避免半屏状态被穿透导致触发条闪一下
+    if settings.edge_hover_popup_enabled && settings.clipboard_animation_enabled {
         animate_window_position(window, x, y, resolved.x, resolved.y, 200)?;
-        let window_clone = window.clone();
-        let app = window.app_handle().clone();
-        let anim_version = ANIMATION_VERSION.load(Ordering::SeqCst);
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(200));
-            if ANIMATION_VERSION.load(Ordering::SeqCst) != anim_version {
-                return;
-            }
-            let _ = app.run_on_main_thread(move || {
-                if super::state::get_window_state().is_hidden {
-                    let _ = window_clone.set_ignore_cursor_events(true);
-                }
-            });
-        });
+        schedule_post_animation_refresh(window.clone(), window.app_handle().clone(), 200)?;
     } else {
-        window
-            .set_position(tauri::PhysicalPosition::new(resolved.x, resolved.y))
-            .map_err(|e| e.to_string())?;
-        let _ = window.set_ignore_cursor_events(true);
+        refresh_hidden_snapped_window(window)?;
     }
 
     crate::services::memory::schedule_cleanup_after_main_window_hide();
@@ -589,6 +602,9 @@ pub fn refresh_hidden_snapped_window(window: &WebviewWindow) -> Result<(), Strin
     if !state.is_snapped || !state.is_hidden {
         return Ok(());
     }
+
+    // 取消任何在飞的 post-animation 延迟任务,避免它用过期的设置改写形态
+    cancel_pending_animation();
 
     let settings = crate::get_settings();
     let size = window.outer_size().map_err(|e| e.to_string())?;
@@ -617,20 +633,22 @@ pub fn refresh_hidden_snapped_window(window: &WebviewWindow) -> Result<(), Strin
         settings.edge_hide_offset,
     )?;
 
-    // 形态唯一决策点:穿透/置顶/显隐都按开关在此处统一刷新,
-    // 所有调用方(开关切换、显示器变更、恢复默认大小、hide)行为一致
+    // 形态唯一决策点:先落位再统一显隐/置顶/穿透
+    // set_position 必须先做,失败直接 return —— 避免出现停在屏外却已 show + 可点 的窗口
+    window
+        .set_position(tauri::PhysicalPosition::new(resolved.x, resolved.y))
+        .map_err(|e| e.to_string())?;
+
     if settings.edge_hover_popup_enabled {
-        // 悬浮开启:先 show/置顶/落点,最后再穿透(show 可能清扩展样式)
+        // 悬浮开启:触发条停留屏外但需保留可弹出,show 后立刻穿透,避免拦截边缘点击
         let _ = window.show();
         let _ = window.set_always_on_top(true);
-        window
-            .set_position(tauri::PhysicalPosition::new(resolved.x, resolved.y))
-            .map_err(|e| e.to_string())?;
         let _ = window.set_ignore_cursor_events(true);
     } else {
-        // 悬浮关闭:真正隐藏,取消置顶并恢复非穿透
+        // 悬浮关闭:真正 hide,清掉 WS_EX_TRANSPARENT 残影;
+        // 不动 set_always_on_top —— 用户置顶偏好由 show_snapped_window 的
+        // refresh_always_on_top 按 settings.is_pinned 重写,这里吃掉也白吃
         let _ = window.hide();
-        let _ = window.set_always_on_top(false);
         let _ = window.set_ignore_cursor_events(false);
     }
     set_snap_edge(
@@ -653,11 +671,8 @@ pub fn needs_hidden_snap_refresh(window: &WebviewWindow) -> Result<bool, String>
     }
 
     let settings = crate::get_settings();
-    // 真隐藏无触发条,OS 坐标与 state 屏外坐标本就不对齐,无需按位置刷
-    if !settings.edge_hover_popup_enabled {
-        return Ok(false);
-    }
-
+    // 即便 hover 关,显示器变更时也要让 snap_monitor_id 与 state 重同步,
+    // 避免拔屏后 reopen hover 时触发条漂到虚拟坐标
     let size = window.outer_size().map_err(|e| e.to_string())?;
     let (x, y, _, _) = crate::utils::positioning::get_window_bounds(window)?;
     let ratio = state
@@ -878,29 +893,17 @@ pub fn restore_edge_snap_on_startup(window: &WebviewWindow) -> Result<(), String
         Some(snapped_ratio),
     );
     set_hidden(true);
-    
-    window.set_position(tauri::PhysicalPosition::new(resolved.x, resolved.y))
-        .map_err(|e| e.to_string())?;
     save_snap_layout(resolved.edge, snapped_ratio, Some(resolved.monitor_id));
-
-    if settings.edge_hover_popup_enabled {
-        // 悬浮开启:show/置顶后再写穿透,避免 show 清掉 WS_EX_TRANSPARENT
-        let _ = window.show();
-        let _ = window.set_always_on_top(true);
-        let _ = window.set_ignore_cursor_events(true);
-    } else {
-        // 悬浮关闭:真正隐藏,并清掉置顶/穿透残留
-        let _ = window.hide();
-        let _ = window.set_always_on_top(false);
-        let _ = window.set_ignore_cursor_events(false);
-    }
-    
     super::state::set_window_state(super::state::WindowState::Hidden);
-    
+
+    // 形态决策(穿透/置顶/显隐)交给 refresh,与其他隐藏路径保持一致
+    refresh_hidden_snapped_window(window)?;
+
+    crate::services::memory::schedule_cleanup_after_main_window_hide();
     crate::input_monitor::disable_mouse_monitoring();
     crate::input_monitor::disable_navigation_keys();
-    
+
     super::edge_monitor::start_edge_monitoring();
-    
+
     Ok(())
 }
