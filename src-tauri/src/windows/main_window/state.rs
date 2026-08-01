@@ -152,29 +152,52 @@ mod tests {
         );
     }
 
-    // refresh 形态决策后,is_hidden 与 WindowState 必须原子一致
+    // 读取 snap.rs 中 refresh_hidden_snapped_window 的函数体源码。
+    // 该函数需要 WebviewWindow,无法在 lib test 中构造调用,
+    // 故按 §10.3 用源码字面存在性护栏锁死其不变量。
+    // 运行时读源(include_str! 自指会编译期递归,不可用)。
+    fn refresh_hidden_snapped_window_body() -> String {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/windows/main_window/snap.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 src/windows/main_window/snap.rs 源文件");
+        let start = source
+            .find("pub fn refresh_hidden_snapped_window")
+            .expect("找不到 refresh_hidden_snapped_window 定义");
+        let after = &source[start..];
+        let end_rel = after[1..]
+            .find("\npub fn ")
+            .map(|rel| rel + 1)
+            .unwrap_or(after.len());
+        // 剥掉行注释再匹配:否则注释里出现被测字面会误命中(§10.4 记录的陷阱)
+        after[..end_rel]
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    // §5.4 护栏:refresh 的隐藏记账必须走原子入口 set_hidden_and_window_state,
+    // 禁止裸写 set_hidden —— 两次独立 RwLock 写会让并发 toggle
+    // 观测到 is_hidden=true 但 state=Visible 的撕裂态,误判 should_show。
     #[test]
-    fn refresh_accounting_keeps_is_hidden_and_state_atomic() {
-        let _g = lock_serial();
-        set_snap_edge(SnapEdge::Right, Some((0, 0)), None, Some(0.5));
-        set_hidden_and_window_state(true, WindowState::Hidden);
-        let state = get_window_state();
-        assert!(state.is_hidden, "refresh 后必须 is_hidden=true");
-        assert_eq!(
-            state.state,
-            WindowState::Hidden,
-            "refresh 后 WindowState 必须为 Hidden"
+    fn refresh_writes_hidden_accounting_through_atomic_entry() {
+        let body = refresh_hidden_snapped_window_body();
+        assert!(
+            body.contains("set_hidden_and_window_state(true, super::state::WindowState::Hidden)"),
+            "refresh_hidden_snapped_window 必须用原子入口写隐藏记账"
         );
         assert!(
-            state.is_hidden && state.state == WindowState::Hidden,
-            "is_hidden 与 state 不得出现撕裂态"
+            !body.contains("set_hidden("),
+            "refresh_hidden_snapped_window 禁止裸写 set_hidden,必须走原子入口"
         );
     }
 
-    // 防回归:任何路径若绕过原子入口单独写 is_hidden(不写 state),会立刻变红。
-    // 本测试模拟"绕过"——在测试模块内直接 WINDOW_STATE.write().is_hidden = true
-    // 不写 state,断言读者能观测到撕裂中间态,迫使未来加 set_hidden 的人
-    // 必须改成原子入口或额外保证不撕裂。
+    // 文档化演示:说明"绕过原子入口会撕裂"这个前提本身成立。
+    // 注意本测试不拦截生产代码 —— 真正的防回归由
+    // refresh_writes_hidden_accounting_through_atomic_entry 的源码护栏负责。
+    // 此处只固化撕裂的可观测性,让 set_hidden_and_window_state 的存在理由自解释。
     #[test]
     fn bypass_atomic_entry_must_tear_with_visible_state() {
         let _g = lock_serial();
@@ -198,29 +221,28 @@ mod tests {
         );
     }
 
-    // refresh 末尾必须 re-check 状态,尊重并发 show 的写入,不反手覆盖
+    // §5.4 + §6 护栏:refresh 末尾写回 Hidden 之前必须 re-check 当前状态,
+    // 若中途被并发 show 抢先写 (false, Visible),尊重对方写入不反手覆盖,
+    // 否则 toggle 会反复走 hide 路径。
+    // 断言 re-check 的 if 字面存在,且下标严格早于原子写 —— 只 contains
+    // 无法区分"检查在写之前"还是"写完才检查"。
     #[test]
-    fn refresh_state_write_must_recheck_concurrent_change() {
-        let _g = lock_serial();
-        set_snap_edge(SnapEdge::Right, Some((0, 0)), None, Some(0.5));
-        // 显式设置入口状态:refresh 入口必须看到 is_hidden=true,
-        // 串行化后 state 持久,不能依赖上一个 test 残留
-        set_hidden_and_window_state(true, WindowState::Hidden);
-        let entry_is_hidden = get_window_state().is_hidden;
-        assert!(entry_is_hidden, "测试前提:refresh 入口必须 is_hidden=true");
-        // 并发 show 抢占写 false/Visible
-        set_hidden_and_window_state(false, WindowState::Visible);
-        // refresh 末尾 re-check:中途已变 false,必须不再写回 true
-        if entry_is_hidden == get_window_state().is_hidden {
-            set_hidden_and_window_state(true, WindowState::Hidden);
-        }
-        let state = get_window_state();
+    fn refresh_rechecks_state_before_writing_hidden_back() {
+        let body = refresh_hidden_snapped_window_body();
+        let recheck = body
+            .find("if super::state::get_window_state().is_hidden {")
+            .expect(
+                "refresh_hidden_snapped_window 必须在末尾写回前 re-check \
+                 get_window_state().is_hidden,尊重并发 show 的写入",
+            );
+        let write = body
+            .find("set_hidden_and_window_state(true, super::state::WindowState::Hidden)")
+            .expect("找不到 refresh 末尾的原子写");
         assert!(
-            !state.is_hidden && state.state == WindowState::Visible,
-            "refresh 末尾必须尊重并发 show 的写入,不得反手覆盖。\
-             现状 is_hidden={} state={:?}",
-            state.is_hidden,
-            state.state
+            recheck < write,
+            "re-check 必须早于原子写回,现状 recheck={} write={}",
+            recheck,
+            write
         );
     }
 }
