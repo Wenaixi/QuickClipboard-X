@@ -89,9 +89,7 @@ pub fn reload_settings() -> Result<AppSettings, String> {
 pub fn save_settings(mut settings: AppSettings, app: tauri::AppHandle) -> Result<(), String> {
     // 守不变量:贴边悬浮弹出蕴含贴边隐藏,JSON 导入或非 UI 流程若留下 hover=true/hide=false
     // 会在下次开启 hide 时意外弹出触发条 —— 此处一次性规范化
-    if !settings.edge_hide_enabled {
-        settings.edge_hover_popup_enabled = false;
-    }
+    normalize_edge_hover_invariant(&mut settings);
 
     let old_settings = get_settings();
     let webdav_password = std::mem::take(&mut settings.webdav_password);
@@ -208,11 +206,21 @@ pub fn get_settings_cmd() -> AppSettings {
     get_settings()
 }
 
+// 守不变量:贴边悬浮弹出蕴含贴边隐藏。
+// 任何写入设置的非 UI 路径(set_edge_hide_enabled / JSON 导入 / save_settings)
+// 都必须调用此函数,否则会持久化 hover=true/hide=false 的违规组合。
+fn normalize_edge_hover_invariant(settings: &mut AppSettings) {
+    if !settings.edge_hide_enabled {
+        settings.edge_hover_popup_enabled = false;
+    }
+}
+
 #[tauri::command]
 pub fn set_edge_hide_enabled(enabled: bool, app: tauri::AppHandle) -> Result<(), String> {
     let mut settings = get_settings();
     settings.edge_hide_enabled = enabled;
-    
+    normalize_edge_hover_invariant(&mut settings);
+
     if !enabled {
         settings.edge_snap_position = None;
         settings.edge_snap_edge = None;
@@ -439,5 +447,51 @@ pub fn get_one_time_paste_enabled() -> bool {
 pub fn set_one_time_paste_enabled(enabled: bool) -> Result<bool, String> {
     crate::services::store::set(ONE_TIME_PASTE_STORE_KEY, &enabled)?;
     Ok(enabled)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 回归:set_edge_hide_enabled(false) 必须连带关闭 hover,
+    // 否则持久化 hide=false/hover=true 违规组合,下次开启 hide 时意外弹出触发条
+    #[test]
+    fn disabling_edge_hide_also_disables_hover() {
+        let mut settings = AppSettings::default();
+        settings.edge_hide_enabled = true;
+        settings.edge_hover_popup_enabled = true;
+
+        // 模拟 set_edge_hide_enabled(false) 的写入路径
+        settings.edge_hide_enabled = false;
+        normalize_edge_hover_invariant(&mut settings);
+
+        assert!(!settings.edge_hover_popup_enabled, "关闭贴边隐藏必须同时关闭悬浮弹出");
+    }
+
+    // hover 蕴含 hide:仅关闭 hover 不影响 hide
+    #[test]
+    fn disabling_hover_keeps_edge_hide() {
+        let mut settings = AppSettings::default();
+        settings.edge_hide_enabled = true;
+        settings.edge_hover_popup_enabled = true;
+
+        settings.edge_hover_popup_enabled = false;
+        normalize_edge_hover_invariant(&mut settings);
+
+        assert!(settings.edge_hide_enabled, "关闭悬浮弹出不得影响贴边隐藏");
+    }
+
+    // 开启 hide 不强制开启 hover(用户偏好)
+    #[test]
+    fn enabling_edge_hide_keeps_hover_off() {
+        let mut settings = AppSettings::default();
+        settings.edge_hide_enabled = false;
+        settings.edge_hover_popup_enabled = false;
+
+        settings.edge_hide_enabled = true;
+        normalize_edge_hover_invariant(&mut settings);
+
+        assert!(!settings.edge_hover_popup_enabled, "开启贴边隐藏不强制开启悬浮弹出");
+    }
 }
 

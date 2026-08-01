@@ -1,5 +1,5 @@
 use tauri::{WebviewWindow, Manager, Emitter};
-use super::state::{SnapEdge, set_snap_edge, set_hidden, clear_snap, is_snapped};
+use super::state::{SnapEdge, set_snap_edge, set_hidden, set_hidden_and_window_state, clear_snap, is_snapped};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -22,7 +22,7 @@ fn schedule_post_animation_refresh(
     app: tauri::AppHandle,
     delay_ms: u64,
 ) -> Result<(), String> {
-    let version = ANIMATION_VERSION.fetch_add(1, Ordering::SeqCst) + 1;
+    let version = share_animation_version();
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(delay_ms));
         if ANIMATION_VERSION.load(Ordering::SeqCst) != version {
@@ -576,9 +576,8 @@ pub fn hide_snapped_window(window: &WebviewWindow) -> Result<(), String> {
         Some(resolved.monitor_id.clone()),
         Some(ratio),
     );
-    set_hidden(true);
+    set_hidden_and_window_state(true, super::state::WindowState::Hidden);
     save_snap_layout(resolved.edge, ratio, Some(resolved.monitor_id));
-    super::state::set_window_state(super::state::WindowState::Hidden);
 
     // 形态决策(穿透/置顶/显隐)全部交给 refresh_hidden_snapped_window 唯一决策点
     // 动画分支:先滑到屏外坐标,延迟 200ms 再 refresh,避免半屏状态被穿透导致触发条闪一下
@@ -764,10 +763,8 @@ pub fn show_snapped_window(window: &WebviewWindow) -> Result<(), String> {
         Some(resolved.monitor_id.clone()),
         Some(ratio),
     );
-    set_hidden(false);
+    set_hidden_and_window_state(false, super::state::WindowState::Visible);
     save_snap_layout(resolved.edge, ratio, Some(resolved.monitor_id));
-    
-    super::state::set_window_state(super::state::WindowState::Visible);
     crate::services::webdav_sync::notify_main_window_shown(window.app_handle().clone());
     let _ = super::refresh_always_on_top(window);
 
@@ -775,6 +772,17 @@ pub fn show_snapped_window(window: &WebviewWindow) -> Result<(), String> {
     crate::input_monitor::enable_navigation_keys();
     
     Ok(())
+}
+
+// 动画开始:独占一次 bump,取走当前版本。同一批动画后续的 post-refresh 不得再 bump。
+fn begin_animation() -> u64 {
+    ANIMATION_VERSION.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+// post-animation 刷新共享在飞动画的版本,不 bump。
+// 只有 cancel_pending_animation(同步形态决策)才会 bump,让动画与 post-refresh 一起失效。
+fn share_animation_version() -> u64 {
+    ANIMATION_VERSION.load(Ordering::SeqCst)
 }
 
 fn animate_window_position(
@@ -785,7 +793,7 @@ fn animate_window_position(
     end_y: i32,
     duration_ms: u64,
 ) -> Result<(), String> {
-    let version = ANIMATION_VERSION.fetch_add(1, Ordering::SeqCst) + 1;
+    let version = begin_animation();
     let window_clone = window.clone();
     let app = window.app_handle().clone();
     
@@ -892,9 +900,8 @@ pub fn restore_edge_snap_on_startup(window: &WebviewWindow) -> Result<(), String
         Some(resolved.monitor_id.clone()),
         Some(snapped_ratio),
     );
-    set_hidden(true);
+    set_hidden_and_window_state(true, super::state::WindowState::Hidden);
     save_snap_layout(resolved.edge, snapped_ratio, Some(resolved.monitor_id));
-    super::state::set_window_state(super::state::WindowState::Hidden);
 
     // 形态决策(穿透/置顶/显隐)交给 refresh,与其他隐藏路径保持一致
     refresh_hidden_snapped_window(window)?;
@@ -906,4 +913,39 @@ pub fn restore_edge_snap_on_startup(window: &WebviewWindow) -> Result<(), String
     super::edge_monitor::start_edge_monitoring();
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 回归测试:隐藏动画与 post-animation 刷新必须共享同一版本号。
+    // 原实现两者各自 fetch_add,动画线程第一帧因版本不匹配即自杀,滑出动画一帧不播。
+    #[test]
+    fn post_animation_refresh_shares_version_with_in_flight_animation() {
+        let animation_version = begin_animation();
+        let post_refresh_version = share_animation_version();
+        assert_eq!(
+            animation_version,
+            post_refresh_version,
+            "post-refresh 必须共享在飞动画的版本,不得再次 bump"
+        );
+        assert_eq!(
+            animation_version,
+            ANIMATION_VERSION.load(Ordering::SeqCst),
+            "动画版本必须等于全局版本,动画第一帧才不会被取消"
+        );
+    }
+
+    // cancel(同步形态决策)必须 bump 版本,让在飞动画与 post-refresh 都失效
+    #[test]
+    fn cancel_pending_animation_invalidates_in_flight_animation() {
+        let animation_version = begin_animation();
+        cancel_pending_animation();
+        assert_ne!(
+            animation_version,
+            ANIMATION_VERSION.load(Ordering::SeqCst),
+            "cancel 后动画必须失效"
+        );
+    }
 }
