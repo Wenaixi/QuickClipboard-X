@@ -87,6 +87,9 @@ impl SettingsStorage {
             }
             settings.webdav_password.clear();
         }
+        // 守不变量:手改/旧 JSON 可能留下 hide=false/hover=true 违规组合,
+        // 加载时统一归一化,防止下次开启 hide 时意外弹出触发条
+        settings.normalize_edge_hover_invariant();
         let normalized = settings.normalize_app_filter_blocklist();
         let migrated = Self::migrate_settings(&mut settings)
             || normalized

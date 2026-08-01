@@ -391,6 +391,16 @@ impl Default for AppSettings {
 }
 
 impl AppSettings {
+    // 守不变量:贴边悬浮弹出蕴含贴边隐藏。
+    // 任何写入设置的非 UI 路径(load / JSON 导入 / save_settings / set_edge_hide_enabled)
+    // 都必须调用此方法,否则会持久化 hover=true/hide=false 的违规组合,
+    // 下次开启 hide 时意外弹出触发条。
+    pub fn normalize_edge_hover_invariant(&mut self) {
+        if !self.edge_hide_enabled {
+            self.edge_hover_popup_enabled = false;
+        }
+    }
+
     pub fn normalize_app_filter_blocklist(&mut self) -> bool {
         let mut changed = false;
 

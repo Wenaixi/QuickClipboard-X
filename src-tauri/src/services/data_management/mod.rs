@@ -319,6 +319,9 @@ pub fn import_data_zip(zip_path: PathBuf, mode: &str) -> Result<String, String> 
             } else {
                 get_settings()
             };
+            // 守不变量:导入的 settings.json 可能带 hide=false/hover=true 违规组合,
+            // 落地前统一归一化,防止下次开启 hide 时意外弹出触发条
+            new_settings.normalize_edge_hover_invariant();
             if crate::services::is_portable_build() || std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.join("portable.txt").exists())).unwrap_or(false) {
                 new_settings.use_custom_storage = false;
                 new_settings.custom_storage_path = None;

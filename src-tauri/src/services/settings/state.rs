@@ -10,7 +10,9 @@ pub fn get_settings() -> AppSettings {
     SETTINGS.read().clone()
 }
 
-pub fn update_settings(settings: AppSettings) -> Result<(), String> {
+pub fn update_settings(mut settings: AppSettings) -> Result<(), String> {
+    // 守不变量:所有写入路径统一入口,杜绝 hide=false/hover=true 违规组合落地
+    settings.normalize_edge_hover_invariant();
     *SETTINGS.write() = settings.clone();
     SettingsStorage::save(&settings)
 }

@@ -115,7 +115,17 @@ function ClipboardSection({
         </SettingItem>
 
         <SettingItem label={t('settings.clipboard.edgeHideEnabled')} description={t('settings.clipboard.edgeHideEnabledDesc')}>
-          <Toggle checked={settings.edgeHideEnabled} onChange={checked => onSettingChange('edgeHideEnabled', checked)} />
+          <Toggle
+            checked={settings.edgeHideEnabled}
+            onChange={checked => {
+              // 后端守不变量:hover 蕴含 hide,关 hide 必须连带关 hover,
+              // 前端同步批量更新,避免 store 与后端归一化后的状态分叉
+              onSettingChange('edgeHideEnabled', checked)
+              if (!checked) {
+                onSettingChange('edgeHoverPopupEnabled', false)
+              }
+            }}
+          />
         </SettingItem>
 
         <SettingItem label={t('settings.clipboard.edgeHoverPopup')} description={t('settings.clipboard.edgeHoverPopupDesc')}>

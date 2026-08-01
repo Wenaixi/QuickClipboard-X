@@ -207,12 +207,10 @@ pub fn get_settings_cmd() -> AppSettings {
 }
 
 // 守不变量:贴边悬浮弹出蕴含贴边隐藏。
-// 任何写入设置的非 UI 路径(set_edge_hide_enabled / JSON 导入 / save_settings)
-// 都必须调用此函数,否则会持久化 hover=true/hide=false 的违规组合。
+// 委托给 AppSettings::normalize_edge_hover_invariant,
+// 该方法是唯一决策点,load / JSON 导入路径也统一调用它。
 fn normalize_edge_hover_invariant(settings: &mut AppSettings) {
-    if !settings.edge_hide_enabled {
-        settings.edge_hover_popup_enabled = false;
-    }
+    settings.normalize_edge_hover_invariant();
 }
 
 #[tauri::command]

@@ -1,5 +1,5 @@
 use tauri::{WebviewWindow, Manager, Emitter};
-use super::state::{SnapEdge, set_snap_edge, set_hidden, set_hidden_and_window_state, clear_snap, is_snapped};
+use super::state::{SnapEdge, set_snap_edge, set_hidden_and_window_state, clear_snap, is_snapped};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -10,7 +10,8 @@ static ANIMATION_VERSION: AtomicU64 = AtomicU64::new(0);
 
 // bump 动画版本号:让正在等待的 post-animation 任务醒来后自行退出,
 // 避免用过期设置改写形态(发现 toggle 反转、半屏滑入点穿等)
-fn cancel_pending_animation() {
+// pub(crate):tdd_tests 需要直接验证版本语义
+pub(crate) fn cancel_pending_animation() {
     ANIMATION_VERSION.fetch_add(1, Ordering::SeqCst);
 }
 
@@ -581,7 +582,8 @@ pub fn hide_snapped_window(window: &WebviewWindow) -> Result<(), String> {
 
     // 形态决策(穿透/置顶/显隐)全部交给 refresh_hidden_snapped_window 唯一决策点
     // 动画分支:先滑到屏外坐标,延迟 200ms 再 refresh,避免半屏状态被穿透导致触发条闪一下
-    if settings.edge_hover_popup_enabled && settings.clipboard_animation_enabled {
+    // 动画条件仅由 clipboard_animation_enabled 决定,不因 hover 关闭而跳过滑出动画
+    if settings.clipboard_animation_enabled {
         animate_window_position(window, x, y, resolved.x, resolved.y, 200)?;
         schedule_post_animation_refresh(window.clone(), window.app_handle().clone(), 200)?;
     } else {
@@ -639,8 +641,11 @@ pub fn refresh_hidden_snapped_window(window: &WebviewWindow) -> Result<(), Strin
         .map_err(|e| e.to_string())?;
 
     if settings.edge_hover_popup_enabled {
-        // 悬浮开启:触发条停留屏外但需保留可弹出,show 后立刻穿透,避免拦截边缘点击
-        let _ = window.show();
+        // 悬浮开启:触发条停留屏外但需保留可弹出,show 后立刻穿透,避免拦截边缘点击。
+        // 仅当窗口不可见时才 show,避免重复 show 激活/抢焦点打断用户操作
+        if !window.is_visible().unwrap_or(false) {
+            let _ = window.show();
+        }
         let _ = window.set_always_on_top(true);
         let _ = window.set_ignore_cursor_events(true);
     } else {
@@ -656,7 +661,9 @@ pub fn refresh_hidden_snapped_window(window: &WebviewWindow) -> Result<(), Strin
         Some(resolved.monitor_id.clone()),
         Some(ratio),
     );
-    set_hidden(true);
+    // 原子写 is_hidden + WindowState,避免与并发 toggle 交错时出现
+    // is_hidden=true 但 state=Visible 的撕裂态(会误判 should_show)
+    set_hidden_and_window_state(true, super::state::WindowState::Hidden);
     save_snap_layout(resolved.edge, ratio, Some(resolved.monitor_id));
 
     Ok(())
@@ -709,11 +716,17 @@ pub fn show_snapped_window(window: &WebviewWindow) -> Result<(), String> {
     crate::windows::preview_window::resume_preview_after_main_window_show();
 
     let state = super::state::get_window_state();
-    
+
     if !state.is_snapped || !state.is_hidden {
         return Ok(());
     }
-    
+
+    // 取消任何在飞的 hide 动画/post-refresh 任务:
+    // hide 动画先记账 is_hidden=true 再异步滑出,若用户立刻 toggle,
+    // 在飞 hide 帧/延迟 refresh 会继续写屏外坐标并覆盖本次 show 的形态,
+    // 导致窗口停在屏外且点穿。bump 版本让 hide 线程下一帧自杀。
+    cancel_pending_animation();
+
     let size = window.outer_size().map_err(|e| e.to_string())?;
     let (x, y, _, _) = crate::utils::positioning::get_window_bounds(window)?;
     let settings = crate::get_settings();
@@ -775,13 +788,15 @@ pub fn show_snapped_window(window: &WebviewWindow) -> Result<(), String> {
 }
 
 // 动画开始:独占一次 bump,取走当前版本。同一批动画后续的 post-refresh 不得再 bump。
-fn begin_animation() -> u64 {
+// pub(crate):tdd_tests 需要直接验证版本语义
+pub(crate) fn begin_animation() -> u64 {
     ANIMATION_VERSION.fetch_add(1, Ordering::SeqCst) + 1
 }
 
 // post-animation 刷新共享在飞动画的版本,不 bump。
 // 只有 cancel_pending_animation(同步形态决策)才会 bump,让动画与 post-refresh 一起失效。
-fn share_animation_version() -> u64 {
+// pub(crate):tdd_tests 需要直接验证版本语义
+pub(crate) fn share_animation_version() -> u64 {
     ANIMATION_VERSION.load(Ordering::SeqCst)
 }
 

@@ -86,13 +86,6 @@ pub fn set_snap_edge(
     state.snap_ratio = ratio;
 }
 
-pub fn set_hidden(is_hidden: bool) {
-    WINDOW_STATE.write().is_hidden = is_hidden;
-}
-
-// 原子地同时写入隐藏标记与窗口状态,避免 hide_snapped_window 记账时
-// 被并发读侧(热键/原始输入线程的 toggle)观察到撕裂中间态
-// (is_hidden=true 但 state=Visible 会让 toggle 误判 should_show,导致 hide 静默失败)
 pub fn set_hidden_and_window_state(is_hidden: bool, window_state: WindowState) {
     let mut state = WINDOW_STATE.write();
     state.is_hidden = is_hidden;
@@ -113,8 +106,7 @@ mod tests {
     fn hidden_accounting_is_atomic_under_concurrent_reads() {
         // 先置入与 hide 前的状态:is_snapped + is_hidden=false + state=Visible
         set_snap_edge(SnapEdge::Right, Some((0, 0)), None, Some(0.5));
-        set_hidden(false);
-        set_window_state(WindowState::Visible);
+        set_hidden_and_window_state(false, WindowState::Visible);
 
         let stop = Arc::new(AtomicBool::new(false));
         let stop_read = stop.clone();
