@@ -499,9 +499,14 @@ mod tests {
     // 禁止直接 update_settings(settings) 跳过归一化。
     // 源码字面存在性检查:即使函数无法在 lib test 中构造 AppHandle 调用,
     // 也能确保回归保护不被未来改写绕过。
+    // 运行时读源(include_str! 自指会编译期递归,不可用)。
     #[test]
     fn set_edge_hide_enabled_calls_normalize_in_body() {
-        let source = include_str!("src-tauri/src/commands/settings.rs");
+        let source = std::fs::read_to_string(format!(
+            "{}/src/commands/settings.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 src/commands/settings.rs 源文件");
         let start = source
             .find("pub fn set_edge_hide_enabled")
             .expect("找不到 set_edge_hide_enabled 定义");

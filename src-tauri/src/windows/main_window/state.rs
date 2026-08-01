@@ -97,13 +97,26 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Mutex, MutexGuard};
     use std::thread;
+
+    // 串行化所有写 WINDOW_STATE 的测试。
+    // 否则并发跑时 hidden_accounting 的 10000 次紧贴写会覆盖其他测试的写入,
+    // 读线程观测到撕裂中间态或读到错的 is_hidden。
+    // 并发读线程不持锁(只观测单次原子写后的快照),但本静态保证同一时刻
+    // 只有一个测试的写线程在跑,读者看到的"写"必属当前测试。
+    static SERIAL: Mutex<()> = Mutex::new(());
+
+    fn lock_serial() -> MutexGuard<'static, ()> {
+        SERIAL.lock().unwrap_or_else(|e| e.into_inner())
+    }
 
     // 回归:hide_snapped_window 的隐藏记账必须原子。
     // 并发读线程在写入期间不得观察到 is_hidden=true 但 state=Visible 的撕裂态,
     // 否则 toggle(热键/原始输入线程)会误判 should_show,让 hide 静默失败。
     #[test]
     fn hidden_accounting_is_atomic_under_concurrent_reads() {
+        let _g = lock_serial();
         // 先置入与 hide 前的状态:is_snapped + is_hidden=false + state=Visible
         set_snap_edge(SnapEdge::Right, Some((0, 0)), None, Some(0.5));
         set_hidden_and_window_state(false, WindowState::Visible);
@@ -142,6 +155,7 @@ mod tests {
     // refresh 形态决策后,is_hidden 与 WindowState 必须原子一致
     #[test]
     fn refresh_accounting_keeps_is_hidden_and_state_atomic() {
+        let _g = lock_serial();
         set_snap_edge(SnapEdge::Right, Some((0, 0)), None, Some(0.5));
         set_hidden_and_window_state(true, WindowState::Hidden);
         let state = get_window_state();
@@ -160,6 +174,7 @@ mod tests {
     // 任何路径若绕过原子入口单独写 is_hidden(不写 state),会立刻变红
     #[test]
     fn non_atomic_set_hidden_can_tear_with_visible_state() {
+        let _g = lock_serial();
         set_snap_edge(SnapEdge::Right, Some((0, 0)), None, Some(0.5));
         set_hidden_and_window_state(true, WindowState::Hidden);
         let state = get_window_state();
@@ -172,8 +187,13 @@ mod tests {
     // refresh 末尾必须 re-check 状态,尊重并发 show 的写入,不反手覆盖
     #[test]
     fn refresh_state_write_must_recheck_concurrent_change() {
+        let _g = lock_serial();
         set_snap_edge(SnapEdge::Right, Some((0, 0)), None, Some(0.5));
+        // 显式设置入口状态:refresh 入口必须看到 is_hidden=true,
+        // 串行化后 state 持久,不能依赖上一个 test 残留
+        set_hidden_and_window_state(true, WindowState::Hidden);
         let entry_is_hidden = get_window_state().is_hidden;
+        assert!(entry_is_hidden, "测试前提:refresh 入口必须 is_hidden=true");
         // 并发 show 抢占写 false/Visible
         set_hidden_and_window_state(false, WindowState::Visible);
         // refresh 末尾 re-check:中途已变 false,必须不再写回 true

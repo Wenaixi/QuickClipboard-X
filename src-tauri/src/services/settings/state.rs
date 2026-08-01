@@ -37,10 +37,21 @@ pub fn get_data_directory() -> Result<std::path::PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // 串行化所有写 SETTINGS 的测试。
+    // 否则并发跑时 update_settings / update_with 互相覆盖,
+    // 读到对方刚写入的 hide=true/hover=true,误判归一化失败。
+    static SERIAL: Mutex<()> = Mutex::new(());
+
+    fn lock_serial() -> std::sync::MutexGuard<'static, ()> {
+        SERIAL.lock().unwrap_or_else(|e| e.into_inner())
+    }
 
     // update_settings(所有写入统一入口)必须执行归一化
     #[test]
     fn update_settings_normalizes_edge_hover_invariant() {
+        let _g = lock_serial();
         let mut settings = AppSettings::default();
         settings.edge_hide_enabled = false;
         settings.edge_hover_popup_enabled = true;
@@ -57,6 +68,7 @@ mod tests {
     // update_with 也必须与 update_settings 共享归一化
     #[test]
     fn update_with_normalizes_edge_hover_invariant() {
+        let _g = lock_serial();
         let mut seed = AppSettings::default();
         seed.edge_hide_enabled = true;
         seed.edge_hover_popup_enabled = true;

@@ -1034,7 +1034,12 @@ mod tests {
 
         // 源码护栏:show_snapped_window 体内必须显式 cancel,
         // 且必须在原子写回 is_hidden=false 之前完成
-        let source = include_str!("src-tauri/src/windows/main_window/snap.rs");
+        // 运行时读源(include_str! 自指会编译期递归,不可用)
+        let source = std::fs::read_to_string(format!(
+            "{}/src/windows/main_window/snap.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 src/windows/main_window/snap.rs 源文件");
         let show_start = source
             .find("pub fn show_snapped_window")
             .expect("找不到 show_snapped_window 定义");
@@ -1108,9 +1113,14 @@ mod tests {
 
     // #4 show 路径顺序:set_position 必须先于 set_ignore_cursor_events(false)
     // 与 refresh 唯一决策点对齐,避免中间窗口在屏外坐标短暂可点击
+    // 运行时读源(include_str! 自指会编译期递归,不可用)
     #[test]
     fn show_path_set_position_precedes_ignore_cursor_false() {
-        let source = include_str!("src-tauri/src/windows/main_window/snap.rs");
+        let source = std::fs::read_to_string(format!(
+            "{}/src/windows/main_window/snap.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 src/windows/main_window/snap.rs 源文件");
         let show_start = source
             .find("pub fn show_snapped_window")
             .expect("找不到 show_snapped_window 定义");
@@ -1138,9 +1148,14 @@ mod tests {
     // show() 之后(因 show 抢焦点会清掉 WS_EX_TRANSPARENT),与 refresh 顺序对齐。
     // 复现条件:hover-on → 关闭态 → 快捷键/托盘唤出,hide 路径把 ignore 置 false 后
     // show 动画不重新打开穿透,半滑入时屏外坐标仍可被 raw_input 命中。
+    // 运行时读源(include_str! 自指会编译期递归,不可用)
     #[test]
     fn show_animation_branch_sets_ignore_true_before_show() {
-        let source = include_str!("src-tauri/src/windows/main_window/snap.rs");
+        let source = std::fs::read_to_string(format!(
+            "{}/src/windows/main_window/snap.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 src/windows/main_window/snap.rs 源文件");
         let show_start = source
             .find("pub fn show_snapped_window")
             .expect("找不到 show_snapped_window 定义");
@@ -1163,7 +1178,7 @@ mod tests {
         let anim_branch_body = &anim_branch[..anim_branch_end];
 
         let pos_ignore_true = anim_branch_body
-            .find("set_ignore_cursor_events(true)")
+            .find("let _ = window.set_ignore_cursor_events(true);")
             .unwrap_or_else(|| {
                 panic!(
                     "show 动画分支必须显式 set_ignore_cursor_events(true),\
