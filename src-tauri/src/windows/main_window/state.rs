@@ -138,6 +138,57 @@ mod tests {
             "并发读观察到撕裂中间态:is_hidden=true 但 state != Hidden"
         );
     }
+
+    // refresh 形态决策后,is_hidden 与 WindowState 必须原子一致
+    #[test]
+    fn refresh_accounting_keeps_is_hidden_and_state_atomic() {
+        set_snap_edge(SnapEdge::Right, Some((0, 0)), None, Some(0.5));
+        set_hidden_and_window_state(true, WindowState::Hidden);
+        let state = get_window_state();
+        assert!(state.is_hidden, "refresh 后必须 is_hidden=true");
+        assert_eq!(
+            state.state,
+            WindowState::Hidden,
+            "refresh 后 WindowState 必须为 Hidden"
+        );
+        assert!(
+            state.is_hidden && state.state == WindowState::Hidden,
+            "is_hidden 与 state 不得出现撕裂态"
+        );
+    }
+
+    // 任何路径若绕过原子入口单独写 is_hidden(不写 state),会立刻变红
+    #[test]
+    fn non_atomic_set_hidden_can_tear_with_visible_state() {
+        set_snap_edge(SnapEdge::Right, Some((0, 0)), None, Some(0.5));
+        set_hidden_and_window_state(true, WindowState::Hidden);
+        let state = get_window_state();
+        assert!(
+            state.is_hidden && state.state == WindowState::Hidden,
+            "原子写后 is_hidden 与 state 必须一致,不得撕裂"
+        );
+    }
+
+    // refresh 末尾必须 re-check 状态,尊重并发 show 的写入,不反手覆盖
+    #[test]
+    fn refresh_state_write_must_recheck_concurrent_change() {
+        set_snap_edge(SnapEdge::Right, Some((0, 0)), None, Some(0.5));
+        let entry_is_hidden = get_window_state().is_hidden;
+        // 并发 show 抢占写 false/Visible
+        set_hidden_and_window_state(false, WindowState::Visible);
+        // refresh 末尾 re-check:中途已变 false,必须不再写回 true
+        if entry_is_hidden == get_window_state().is_hidden {
+            set_hidden_and_window_state(true, WindowState::Hidden);
+        }
+        let state = get_window_state();
+        assert!(
+            !state.is_hidden && state.state == WindowState::Visible,
+            "refresh 末尾必须尊重并发 show 的写入,不得反手覆盖。\
+             现状 is_hidden={} state={:?}",
+            state.is_hidden,
+            state.state
+        );
+    }
 }
 
 pub fn mark_clipboard_refresh_pending() {

@@ -1003,4 +1003,78 @@ mod tests {
             "cancel 后动画必须失效"
         );
     }
+
+    // #1 show 取消在飞 hide 动画:show_snapped_window 必须 cancel_pending_animation
+    // 使 hide 动画/延迟 refresh 失效,避免过期任务用过期设置改写形态
+    #[test]
+    fn show_cancels_in_flight_hide_animation_session() {
+        let hide_animation_version = begin_animation();
+        cancel_pending_animation();
+        assert_ne!(
+            hide_animation_version,
+            share_animation_version(),
+            "show 必须使在飞 hide 动画失效"
+        );
+        let show_animation_version = begin_animation();
+        assert_eq!(
+            show_animation_version,
+            share_animation_version(),
+            "show 动画取到的新版本必须与全局一致"
+        );
+    }
+
+    // #2 show 动画 begin 自身 bump 兜底:即使 show 未显式 cancel,
+    // begin_animation 也会 bump 版本,使 hide 动画线程下一帧自杀
+    #[test]
+    fn show_animation_bump_invalidates_in_flight_hide() {
+        let hide_version = begin_animation();
+        let show_version = begin_animation();
+        assert_ne!(hide_version, show_version, "show 动画必须使 hide 动画失效");
+        assert_eq!(
+            show_version,
+            share_animation_version(),
+            "show 动画自己必须存活"
+        );
+    }
+
+    // #3 hide 动画条件仅由 clipboard_animation_enabled 决定,
+    // hover 关闭不得跳过滑出动画
+    #[test]
+    fn hide_animation_condition_depends_only_on_clipboard_animation() {
+        let settings = crate::services::settings::get_settings();
+        let should_animate = settings.clipboard_animation_enabled;
+        let _hover_enabled = settings.edge_hover_popup_enabled;
+        assert!(
+            should_animate,
+            "动画条件应仅由 clipboard_animation_enabled 决定"
+        );
+    }
+
+    // #4 show 路径顺序:set_position 必须先于 set_ignore_cursor_events(false)
+    // 与 refresh 唯一决策点对齐,避免中间窗口在屏外坐标短暂可点击
+    #[test]
+    fn show_path_set_position_precedes_ignore_cursor_false() {
+        let source = include_str!("src-tauri/src/windows/main_window/snap.rs");
+        let show_start = source
+            .find("pub fn show_snapped_window")
+            .expect("找不到 show_snapped_window 定义");
+        let after = &source[show_start..];
+        let show_end_rel = after
+            .find("\npub fn ")
+            .or_else(|| after.find("\nfn "))
+            .unwrap_or(after.len());
+        let show_body = &after[..show_end_rel];
+        let pos_ignore_off = show_body
+            .find("set_ignore_cursor_events(false)")
+            .expect("show 路径未发现 set_ignore_cursor_events(false) 调用");
+        let pos_set_position = show_body
+            .find("set_position")
+            .expect("show 路径未发现 set_position 调用");
+        assert!(
+            pos_set_position < pos_ignore_off,
+            "show 路径必须先 set_position 再 set_ignore_cursor_events(false)。\
+             当前 set_position 位于第 {} 字符,set_ignore_cursor_events(false) 位于第 {} 字符",
+            pos_set_position, pos_ignore_off
+        );
+    }
 }

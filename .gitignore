@@ -40,5 +40,4 @@ CLAUDE.md
 # OMC 多智能体编排工具运行时状态
 .omc/
 
-# TDD 回归测试文件(不入库)
-src-tauri/src/tdd_tests.rs
+# TDD 回归测试已拆分到各源文件的 #[cfg(test)] 模块,不再需要独立 ignore 文件

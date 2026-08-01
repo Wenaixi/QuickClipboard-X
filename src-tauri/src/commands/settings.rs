@@ -455,7 +455,7 @@ mod tests {
     // 否则持久化 hide=false/hover=true 违规组合,下次开启 hide 时意外弹出触发条。
     // 注意:此测试只覆盖 normalize 本身的语义(单元级),
     // 端到端护栏(确认 set_edge_hide_enabled 函数体内真的调了 normalize)
-    // 在 tdd_tests.rs 的 set_edge_hide_enabled_calls_normalize_in_body。
+    // 在本模块内 set_edge_hide_enabled_calls_normalize_in_body。
     #[test]
     fn disabling_edge_hide_also_disables_hover() {
         let mut settings = AppSettings::default();
@@ -493,6 +493,29 @@ mod tests {
         normalize_edge_hover_invariant(&mut settings);
 
         assert!(!settings.edge_hover_popup_enabled, "开启贴边隐藏不强制开启悬浮弹出");
+    }
+
+    // 端到端护栏:set_edge_hide_enabled 函数体必须显式调用 normalize_edge_hover_invariant,
+    // 禁止直接 update_settings(settings) 跳过归一化。
+    // 源码字面存在性检查:即使函数无法在 lib test 中构造 AppHandle 调用,
+    // 也能确保回归保护不被未来改写绕过。
+    #[test]
+    fn set_edge_hide_enabled_calls_normalize_in_body() {
+        let source = include_str!("src-tauri/src/commands/settings.rs");
+        let start = source
+            .find("pub fn set_edge_hide_enabled")
+            .expect("找不到 set_edge_hide_enabled 定义");
+        let after = &source[start..];
+        let end_rel = after
+            .find("\n#[tauri::command]")
+            .or_else(|| after.find("\npub fn "))
+            .unwrap_or(after.len());
+        let body = &after[..end_rel];
+        assert!(
+            body.contains("normalize_edge_hover_invariant"),
+            "set_edge_hide_enabled 必须显式调用 normalize_edge_hover_invariant,\
+             禁止直接 update_settings(settings) 跳过归一化"
+        );
     }
 }
 

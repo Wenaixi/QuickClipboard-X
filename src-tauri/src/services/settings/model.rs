@@ -457,4 +457,30 @@ mod tests {
         assert!(settings.app_filter_list.is_empty());
         assert_eq!(settings.app_filter_mode, "blacklist");
     }
+
+    // 归一化:hide=false ⇒ hover=false
+    #[test]
+    fn edge_hover_invariant_holds_when_hide_disabled() {
+        let mut settings = AppSettings::default();
+        settings.edge_hide_enabled = false;
+        settings.edge_hover_popup_enabled = true;
+        settings.normalize_edge_hover_invariant();
+        assert!(
+            !settings.edge_hover_popup_enabled,
+            "edge_hide_enabled=false 必须蕴含 hover=false"
+        );
+    }
+
+    // 归一化方向:hide=true 不蕴含 hover=true,保留用户偏好
+    #[test]
+    fn edge_hover_invariant_keeps_hover_off_when_hide_enabled() {
+        let mut settings = AppSettings::default();
+        settings.edge_hide_enabled = true;
+        settings.edge_hover_popup_enabled = false;
+        settings.normalize_edge_hover_invariant();
+        assert!(
+            !settings.edge_hover_popup_enabled,
+            "开启 hide 不强制开启 hover"
+        );
+    }
 }
