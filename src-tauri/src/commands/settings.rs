@@ -89,7 +89,7 @@ pub fn reload_settings() -> Result<AppSettings, String> {
 pub fn save_settings(mut settings: AppSettings, app: tauri::AppHandle) -> Result<(), String> {
     // 守不变量:贴边悬浮弹出蕴含贴边隐藏,JSON 导入或非 UI 流程若留下 hover=true/hide=false
     // 会在下次开启 hide 时意外弹出触发条 —— 此处一次性规范化
-    normalize_edge_hover_invariant(&mut settings);
+    settings.normalize_edge_hover_invariant();
 
     let old_settings = get_settings();
     let webdav_password = std::mem::take(&mut settings.webdav_password);
@@ -211,18 +211,11 @@ pub fn get_settings_cmd() -> AppSettings {
     get_settings()
 }
 
-// 守不变量:贴边悬浮弹出蕴含贴边隐藏。
-// 委托给 AppSettings::normalize_edge_hover_invariant,
-// 该方法是唯一决策点,load / JSON 导入路径也统一调用它。
-fn normalize_edge_hover_invariant(settings: &mut AppSettings) {
-    settings.normalize_edge_hover_invariant();
-}
-
 #[tauri::command]
 pub fn set_edge_hide_enabled(enabled: bool, app: tauri::AppHandle) -> Result<(), String> {
     let mut settings = get_settings();
     settings.edge_hide_enabled = enabled;
-    normalize_edge_hover_invariant(&mut settings);
+    settings.normalize_edge_hover_invariant();
 
     if !enabled {
         settings.edge_snap_position = None;
@@ -474,7 +467,7 @@ mod tests {
 
         // 模拟 set_edge_hide_enabled(false) 的写入路径
         settings.edge_hide_enabled = false;
-        normalize_edge_hover_invariant(&mut settings);
+        settings.normalize_edge_hover_invariant();
 
         assert!(!settings.edge_hover_popup_enabled, "关闭贴边隐藏必须同时关闭悬浮弹出");
     }
@@ -487,7 +480,7 @@ mod tests {
         settings.edge_hover_popup_enabled = true;
 
         settings.edge_hover_popup_enabled = false;
-        normalize_edge_hover_invariant(&mut settings);
+        settings.normalize_edge_hover_invariant();
 
         assert!(settings.edge_hide_enabled, "关闭悬浮弹出不得影响贴边隐藏");
     }
@@ -500,7 +493,7 @@ mod tests {
         settings.edge_hover_popup_enabled = false;
 
         settings.edge_hide_enabled = true;
-        normalize_edge_hover_invariant(&mut settings);
+        settings.normalize_edge_hover_invariant();
 
         assert!(!settings.edge_hover_popup_enabled, "开启贴边隐藏不强制开启悬浮弹出");
     }
