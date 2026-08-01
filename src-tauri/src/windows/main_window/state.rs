@@ -171,16 +171,30 @@ mod tests {
         );
     }
 
-    // 任何路径若绕过原子入口单独写 is_hidden(不写 state),会立刻变红
+    // 防回归:任何路径若绕过原子入口单独写 is_hidden(不写 state),会立刻变红。
+    // 本测试模拟"绕过"——在测试模块内直接 WINDOW_STATE.write().is_hidden = true
+    // 不写 state,断言读者能观测到撕裂中间态,迫使未来加 set_hidden 的人
+    // 必须改成原子入口或额外保证不撕裂。
     #[test]
-    fn non_atomic_set_hidden_can_tear_with_visible_state() {
+    fn bypass_atomic_entry_must_tear_with_visible_state() {
         let _g = lock_serial();
         set_snap_edge(SnapEdge::Right, Some((0, 0)), None, Some(0.5));
-        set_hidden_and_window_state(true, WindowState::Hidden);
-        let state = get_window_state();
+        // 入口:不撕裂的可见态
+        set_hidden_and_window_state(false, WindowState::Visible);
+        let pre = get_window_state();
+        assert!(!pre.is_hidden, "测试前提:入口必须 is_hidden=false");
+
+        // 绕过原子入口:只写 is_hidden,不写 state
+        WINDOW_STATE.write().is_hidden = true;
+
+        // 验证:中间态可观测(is_hidden=true 但 state=Visible),即"绕过会撕裂"
+        let torn = get_window_state();
         assert!(
-            state.is_hidden && state.state == WindowState::Hidden,
-            "原子写后 is_hidden 与 state 必须一致,不得撕裂"
+            torn.is_hidden && torn.state == WindowState::Visible,
+            "绕过原子入口应产生撕裂中间态:is_hidden=true 但 state=Visible \
+             (现状 is_hidden={} state={:?})",
+            torn.is_hidden,
+            torn.state
         );
     }
 
