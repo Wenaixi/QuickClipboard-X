@@ -8,6 +8,13 @@ const FRONTEND_CONTENT_INSET_LOGICAL: f64 = 5.0;
 
 static ANIMATION_VERSION: AtomicU64 = AtomicU64::new(0);
 
+// 决定 hide 路径是否走滑出动画。抽成纯函数便于 #[cfg(test)] 直接断言,
+// 防止未来有人在条件里塞入 `edge_hover_popup_enabled` 之类导致 hover 关闭时
+// 静默跳过滑出动画(4352887c 报告:动画条件仅由 clipboard_animation_enabled 决定)。
+pub(crate) fn should_play_hide_animation(settings: &crate::services::AppSettings) -> bool {
+    settings.clipboard_animation_enabled
+}
+
 // bump 动画版本号:让正在等待的 post-animation 任务醒来后自行退出,
 // 避免用过期设置改写形态(发现 toggle 反转、半屏滑入点穿等)
 // pub(crate):同文件 #[cfg(test)] 模块需要直接验证版本语义
@@ -603,8 +610,8 @@ pub fn hide_snapped_window(window: &WebviewWindow) -> Result<(), String> {
 
     // 形态决策(穿透/置顶/显隐)全部交给 refresh_hidden_snapped_window 唯一决策点
     // 动画分支:先滑到屏外坐标,延迟 200ms 再 refresh,避免半屏状态被穿透导致触发条闪一下
-    // 动画条件仅由 clipboard_animation_enabled 决定,不因 hover 关闭而跳过滑出动画
-    if settings.clipboard_animation_enabled {
+    // 动画条件由 should_play_hide_animation 决定,hover 关闭不跳过滑出动画
+    if should_play_hide_animation(&settings) {
         animate_window_position(window, x, y, resolved.x, resolved.y, 200)?;
         schedule_post_animation_refresh(window.clone(), window.app_handle().clone(), 200)?;
     } else {
@@ -789,10 +796,12 @@ pub fn show_snapped_window(window: &WebviewWindow) -> Result<(), String> {
     if settings.clipboard_animation_enabled {
         // 动画分支:animate 自带 set_position 逐步到位,期间必须保持穿透,
         // 否则动画中段在屏外/中间坐标可点,被 raw_input 命中再次 hide。
-        // 动画结束后由 schedule_post_animation_set_interactive 写回 ignore=false。
+        // 显式 set_ignore_cursor_events(true) 在 show 之后立即写,防止 show 抢焦点
+        // 后窗口在屏外坐标被点击截获;动画结束后由 schedule_post_animation_set_interactive 写回 false。
         if !window.is_visible().unwrap_or(false) {
             let _ = window.show();
         }
+        let _ = window.set_ignore_cursor_events(true);
         let _ = window.emit("edge-snap-show", ());
         let _ = crate::commands::window::emit_main_window_refresh_needed_event(&window.app_handle());
         animate_window_position(window, x, y, resolved.x, resolved.y, 200)?;
@@ -1008,6 +1017,7 @@ mod tests {
     // 使 hide 动画/延迟 refresh 失效,避免过期任务用过期设置改写形态
     #[test]
     fn show_cancels_in_flight_hide_animation_session() {
+        // 行为:版本号协调
         let hide_animation_version = begin_animation();
         cancel_pending_animation();
         assert_ne!(
@@ -1020,6 +1030,32 @@ mod tests {
             show_animation_version,
             share_animation_version(),
             "show 动画取到的新版本必须与全局一致"
+        );
+
+        // 源码护栏:show_snapped_window 体内必须显式 cancel,
+        // 且必须在原子写回 is_hidden=false 之前完成
+        let source = include_str!("src-tauri/src/windows/main_window/snap.rs");
+        let show_start = source
+            .find("pub fn show_snapped_window")
+            .expect("找不到 show_snapped_window 定义");
+        let after = &source[show_start..];
+        let show_end_rel = after
+            .find("\npub fn ")
+            .or_else(|| after.find("\nfn "))
+            .unwrap_or(after.len());
+        let show_body = &after[..show_end_rel];
+        let cancel_pos = show_body
+            .find("cancel_pending_animation()")
+            .expect("show_snapped_window 必须显式调用 cancel_pending_animation 取消在飞 hide 动画");
+        let set_hidden_pos = show_body
+            .find("set_hidden_and_window_state(false")
+            .expect("show_snapped_window 缺少原子写回 false");
+        assert!(
+            cancel_pos < set_hidden_pos,
+            "cancel 必须在 set_hidden_and_window_state(false, ...) 之前,\
+             否则 post-refresh 仍能用旧设置覆盖 show 形态(当前位置:cancel={}, set_hidden={})",
+            cancel_pos,
+            set_hidden_pos
         );
     }
 
@@ -1038,15 +1074,35 @@ mod tests {
     }
 
     // #3 hide 动画条件仅由 clipboard_animation_enabled 决定,
-    // hover 关闭不得跳过滑出动画
+    // hover 关闭不得跳过滑出动画(4352887c 修复)。
+    // 用纯函数直接断言,防止条件被人重新塞入 `edge_hover_popup_enabled` 之类。
     #[test]
     fn hide_animation_condition_depends_only_on_clipboard_animation() {
-        let settings = crate::services::settings::get_settings();
-        let should_animate = settings.clipboard_animation_enabled;
-        let _hover_enabled = settings.edge_hover_popup_enabled;
+        use crate::services::settings::AppSettings;
+        let mut s = AppSettings::default();
+        s.clipboard_animation_enabled = true;
+        s.edge_hover_popup_enabled = true;
         assert!(
-            should_animate,
-            "动画条件应仅由 clipboard_animation_enabled 决定"
+            should_play_hide_animation(&s),
+            "clipboard 开 + hover 开 ⇒ 应滑出动画"
+        );
+        s.edge_hover_popup_enabled = false;
+        assert!(
+            should_play_hide_animation(&s),
+            "hover 关闭不得影响 hide 动画(4352887c 行为)"
+        );
+        s.clipboard_animation_enabled = false;
+        assert!(
+            !should_play_hide_animation(&s),
+            "clipboard 动画关闭 ⇒ 不滑出"
+        );
+        // 反向断言:其它无关字段(start_hidden 等)不影响决定
+        s.clipboard_animation_enabled = true;
+        s.edge_hover_popup_enabled = true;
+        s.start_hidden = true;
+        assert!(
+            should_play_hide_animation(&s),
+            "start_hidden 等无关字段不得影响 hide 动画"
         );
     }
 
@@ -1075,6 +1131,57 @@ mod tests {
             "show 路径必须先 set_position 再 set_ignore_cursor_events(false)。\
              当前 set_position 位于第 {} 字符,set_ignore_cursor_events(false) 位于第 {} 字符",
             pos_set_position, pos_ignore_off
+        );
+    }
+
+    // #5 show 动画分支必须显式 set_ignore_cursor_events(true),且必须位于
+    // show() 之后(因 show 抢焦点会清掉 WS_EX_TRANSPARENT),与 refresh 顺序对齐。
+    // 复现条件:hover-on → 关闭态 → 快捷键/托盘唤出,hide 路径把 ignore 置 false 后
+    // show 动画不重新打开穿透,半滑入时屏外坐标仍可被 raw_input 命中。
+    #[test]
+    fn show_animation_branch_sets_ignore_true_before_show() {
+        let source = include_str!("src-tauri/src/windows/main_window/snap.rs");
+        let show_start = source
+            .find("pub fn show_snapped_window")
+            .expect("找不到 show_snapped_window 定义");
+        let after = &source[show_start..];
+        let show_end_rel = after
+            .find("\npub fn ")
+            .or_else(|| after.find("\nfn "))
+            .unwrap_or(after.len());
+        let show_body = &after[..show_end_rel];
+
+        // 截取动画分支体
+        let anim_branch_start = show_body
+            .find("clipboard_animation_enabled")
+            .expect("show 路径缺少动画分支判断");
+        let anim_branch = &show_body[anim_branch_start..];
+        // 动画分支以 } else { 或函数末尾结束
+        let anim_branch_end = anim_branch
+            .find("} else {")
+            .unwrap_or_else(|| anim_branch.find("\n    }").unwrap_or(anim_branch.len()));
+        let anim_branch_body = &anim_branch[..anim_branch_end];
+
+        let pos_ignore_true = anim_branch_body
+            .find("set_ignore_cursor_events(true)")
+            .unwrap_or_else(|| {
+                panic!(
+                    "show 动画分支必须显式 set_ignore_cursor_events(true),\
+                     否则 hover-on→关闭态→唤出 时半滑入坐标被点击截获。\
+                     当前动画分支体:\n{}",
+                    anim_branch_body
+                )
+            });
+        let pos_show = anim_branch_body
+            .find("window.show()")
+            .expect("show 动画分支缺少 window.show() 调用");
+        assert!(
+            pos_show < pos_ignore_true,
+            "show 动画分支必须先 show() 再 set_ignore_cursor_events(true),\
+             与 refresh 唯一决策点顺序对齐(避免 show 抢焦点清掉 WS_EX_TRANSPARENT)。\
+             当前 show={}, ignore=true={}",
+            pos_show,
+            pos_ignore_true
         );
     }
 }
