@@ -87,6 +87,12 @@ pub fn reload_settings() -> Result<AppSettings, String> {
 
 #[tauri::command]
 pub fn save_settings(mut settings: AppSettings, app: tauri::AppHandle) -> Result<(), String> {
+    // 守不变量:贴边悬浮弹出蕴含贴边隐藏,JSON 导入或非 UI 流程若留下 hover=true/hide=false
+    // 会在下次开启 hide 时意外弹出触发条 —— 此处一次性规范化
+    if !settings.edge_hide_enabled {
+        settings.edge_hover_popup_enabled = false;
+    }
+
     let old_settings = get_settings();
     let webdav_password = std::mem::take(&mut settings.webdav_password);
     if !webdav_password.is_empty() {
