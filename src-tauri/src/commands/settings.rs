@@ -21,18 +21,6 @@ fn handle_disable_edge_hide(app: &tauri::AppHandle) {
     }
 }
 
-// 切换"鼠标移到边缘弹出"开关后,若主窗口正处于贴边隐藏状态,立即刷新其形态:
-// 开启 -> 露出透明触发条(保持置顶);关闭 -> 真正隐藏,不留透明条
-fn refresh_edge_hover_mode(app: &tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let state = crate::windows::main_window::get_window_state();
-        if state.is_snapped && state.is_hidden {
-            // 穿透/置顶/显隐(含 show)由 refresh_hidden_snapped_window 统一决策
-            let _ = crate::windows::main_window::refresh_hidden_snapped_window(&window);
-        }
-    }
-}
-
 fn normalize_update_check_interval(value: &str) -> String {
     match value {
         "every3days" => "every3days".to_string(),
@@ -146,7 +134,13 @@ pub fn save_settings(mut settings: AppSettings, app: tauri::AppHandle) -> Result
 
     if edge_hover_changed {
         // 新值已落地,再按新开关刷新贴边隐藏形态
-        refresh_edge_hover_mode(&app);
+        if let Some(window) = app.get_webview_window("main") {
+            let state = crate::windows::main_window::get_window_state();
+            if state.is_snapped && state.is_hidden {
+                // 穿透/置顶/显隐(含 show)由 refresh_hidden_snapped_window 统一决策
+                let _ = crate::windows::main_window::refresh_hidden_snapped_window(&window);
+            }
+        }
     }
 
     if remember_window_size_disabled {
