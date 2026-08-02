@@ -82,7 +82,7 @@ struct MonitorEdgeContext {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ResolvedSnapPosition {
+struct ResolvedSnapPosition {
     pub x: i32,
     pub y: i32,
     pub scale_factor: f64,
@@ -372,7 +372,7 @@ fn resolve_startup_restore_window_size(
     Ok((size.width as i32, size.height as i32))
 }
 
-pub(crate) fn compute_snap_layout(
+fn compute_snap_layout(
     app: &tauri::AppHandle,
     edge: SnapEdge,
     x: i32,
