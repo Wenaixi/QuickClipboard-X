@@ -384,26 +384,22 @@ fn try_save_image_from_url(src: &str) -> Option<String> {
 }
 
 
-// 获取图片数据（网络或本地）
+// 获取图片数据（仅允许网络或 data URL,严禁本地任意文件读取）
 fn fetch_image_data(src: &str) -> Result<Vec<u8>, String> {
     let src = if src.starts_with("//") {
         format!("https:{}", src)
     } else {
         src.to_string()
     };
-    
+
     if src.starts_with("http://") || src.starts_with("https://") {
         fetch_remote_image(&src)
     } else if src.starts_with("data:image/") {
         parse_data_url(&src)
-    } else if src.starts_with("file://") {
-        let path = src.trim_start_matches("file://");
-        let path = path.trim_start_matches('/');
-        std::fs::read(path).map_err(|e| format!("读取本地图片失败 [{}]: {}", path, e))
-    } else if std::path::Path::new(&src).exists() {
-        std::fs::read(&src).map_err(|e| format!("读取图片失败 [{}]: {}", src, e))
     } else {
-        Err(format!("不支持的图片源或文件不存在: {}", src))
+        // 安全边界:严禁 file:// 与任意绝对/相对本地路径——
+        // 否则剪贴板 HTML 中的 img src 可被利用读取任意本地文件
+        Err("不支持的图片源(仅允许 http/https/data 协议)".to_string())
     }
 }
 
@@ -507,7 +503,7 @@ fn extract_image_id_from_path(path_str: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::merge_image_ids_prefer_clipboard_image;
+    use super::{fetch_image_data, merge_image_ids_prefer_clipboard_image};
 
     #[test]
     fn clipboard_image_id_should_be_first_for_rich_text_images() {
@@ -527,6 +523,37 @@ mod tests {
         );
 
         assert_eq!(merged, vec!["region_snapshot", "inline_a"]);
+    }
+
+    // A1:file:// 协议必须拒绝——否则任意本地文件可读
+    #[test]
+    fn fetch_image_data_rejects_file_scheme() {
+        let err = fetch_image_data("file:///C:/Windows/System32/config/SAM")
+            .expect_err("file:// 协议必须被拒绝,否则任意本地文件可读");
+        assert!(
+            err.contains("不支持的图片源") || err.contains("仅允许"),
+            "错误信息应明示仅允许 http/https/data 协议,实际: {}",
+            err
+        );
+    }
+
+    // A1:绝对路径必须拒绝——与 file:// 同源的任意文件读取向量
+    #[test]
+    fn fetch_image_data_rejects_absolute_path() {
+        // Windows 绝对路径 + Unix 绝对路径都拒
+        for src in [
+            r"C:\Windows\System32\drivers\etc\hosts",
+            "/etc/passwd",
+            r"D:\secrets\token.txt",
+        ] {
+            let err = fetch_image_data(src)
+                .expect_err(&format!("绝对路径必须被拒绝: {}", src));
+            assert!(
+                err.contains("不支持的图片源") || err.contains("仅允许"),
+                "错误信息应明示仅允许 http/https/data 协议,实际: {} (src={})",
+                err, src
+            );
+        }
     }
 }
 

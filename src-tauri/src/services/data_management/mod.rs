@@ -322,7 +322,7 @@ pub fn import_data_zip(zip_path: PathBuf, mode: &str) -> Result<String, String> 
             // 守不变量:导入的 settings.json 可能带 hide=false/hover=true 违规组合,
             // 落地前统一归一化,防止下次开启 hide 时意外弹出触发条
             new_settings.normalize_edge_hover_invariant();
-            if crate::services::is_portable_build() || std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.join("portable.txt").exists())).unwrap_or(false) {
+            if crate::services::is_portable_runtime() {
                 new_settings.use_custom_storage = false;
                 new_settings.custom_storage_path = None;
             }
@@ -438,7 +438,7 @@ pub fn get_current_storage_dir() -> Result<PathBuf, String> {
 
 // mode: "source_only" | "target_only" | "merge"
 pub fn change_storage_dir(new_dir: PathBuf, mode: &str) -> Result<PathBuf, String> {
-    if crate::services::is_portable_build() || std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.join("portable.txt").exists())).unwrap_or(false) {
+    if crate::services::is_portable_runtime() {
         return Err("便携版不支持更改存储路径".into());
     }
     if !new_dir.exists() { fs::create_dir_all(&new_dir).map_err(|e| e.to_string())?; }
@@ -933,7 +933,7 @@ fn reorder_clipboard_by_time(conn: &rusqlite::Connection) {
 }
 
 pub fn reset_storage_dir_to_default(mode: &str) -> Result<PathBuf, String> {
-    if crate::services::is_portable_build() || std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.join("portable.txt").exists())).unwrap_or(false) {
+    if crate::services::is_portable_runtime() {
         return Err("便携版不支持重置存储路径".into());
     }
     let default_dir = get_default_data_dir()?;

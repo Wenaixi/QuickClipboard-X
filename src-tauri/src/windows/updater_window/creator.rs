@@ -349,11 +349,8 @@ async fn check_updates(app: &AppHandle, should_open_window: bool) -> Result<bool
             }
 
             // 检测是否为便携版/免安装版（不自动更新）
-            let mut is_portable = crate::services::is_portable_build() 
-                || std::env::current_exe()
-                    .ok()
-                    .and_then(|e| e.parent().map(|p| p.join("portable.txt").exists() || p.join("portable.flag").exists()))
-                    .unwrap_or(false)
+            // 统一走 is_portable_runtime,避免与 storage/commands/data_management 语义漂移
+            let mut is_portable = crate::services::is_portable_runtime()
                 || !is_installed_version();
 
             if let Some(v) = parse_env_bool("QC_FORCE_PORTABLE") {

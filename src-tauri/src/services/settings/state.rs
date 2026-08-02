@@ -26,7 +26,12 @@ where
     // 守不变量:update_with 是与 update_settings 并列的写入入口,
     // 必须共享归一化,杜绝 hide=false/hover=true 违规组合落地
     settings.normalize_edge_hover_invariant();
-    SettingsStorage::save(&settings)
+    // 克隆一份给 IO,并在 save 之前释放写锁——
+    // 否则 SettingsStorage::save 的序列化+磁盘写会阻塞 50ms,
+    // 期间所有 get_settings() 读路径(edge_monitor 50ms 轮询)被锁死
+    let snapshot = settings.clone();
+    drop(settings);
+    SettingsStorage::save(&snapshot)
 }
 
 pub fn get_data_directory() -> Result<std::path::PathBuf, String> {
@@ -91,5 +96,57 @@ mod tests {
         );
 
         update_settings(AppSettings::default()).unwrap();
+    }
+
+    // A3 护栏:update_with 必须在 SettingsStorage::save 之前释放 RwLock 写锁,
+    // 否则 save 的 IO 阻塞期间所有 get_settings() 阻塞 50ms,
+    // edge_monitor 轮询等读路径被锁卡死。
+    // ponytail: 全局 RwLock 不拆分(per-field lock 是过度工程,save 本就序列化写),
+    // 但 save 期间必须显式释放写锁——这是单一调用点必守的最小契约。
+    #[test]
+    fn update_with_releases_lock_before_io_save() {
+        let _g = lock_serial();
+        let body = std::fs::read_to_string(format!(
+            "{}/src/services/settings/state.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 state.rs 源文件");
+
+        // 抽取 update_with 函数体范围
+        let fn_start = body.find("pub fn update_with").expect("找不到 update_with");
+        // 找下一个顶级定义边界("\npub fn " 或 "\nfn "),剥离闭包/impl 干扰
+        let fn_body_end_rel = body[fn_start..]
+            .find("\npub fn ")
+            .or_else(|| body[fn_start..].find("\nfn "))
+            .unwrap_or(body.len() - fn_start);
+        let fn_body = &body[fn_start..fn_start + fn_body_end_rel];
+
+        // 剥行注释后再匹配(§10.3:负向/顺序断言必须先剥注释,否则注释里的字面误命中)
+        let bare: String = fn_body
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // 1. 函数体内必须显式 drop 写锁 guard
+        assert!(
+            bare.contains("drop(settings)"),
+            "update_with 必须在 save 之前 drop(settings) 释放 RwLockWriteGuard,\
+             否则 save IO 阻塞期间所有 get_settings() 阻塞 50ms,edge_monitor 轮询被锁死"
+        );
+
+        // 2. drop(settings) 必须在 SettingsStorage::save 之前(顺序不变量)
+        let drop_pos = bare
+            .find("drop(settings)")
+            .expect("必须先有 drop(settings),本断言不该单独失败");
+        let save_pos = bare
+            .find("SettingsStorage::save")
+            .expect("必须先有 SettingsStorage::save,本断言不该单独失败");
+        assert!(
+            drop_pos < save_pos,
+            "drop(settings) 必须在 SettingsStorage::save 之前;\
+             drop_pos={} save_pos={}",
+            drop_pos, save_pos
+        );
     }
 }
