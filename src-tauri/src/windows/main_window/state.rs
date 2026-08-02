@@ -178,6 +178,31 @@ mod tests {
             .join("\n")
     }
 
+    // 读取 snap.rs 中 show_snapped_window 的函数体源码。锚点从
+    // "pub fn show_snapped_window" 到下一个 "fn begin_animation" 之前——
+    // show 之后是 begin_animation / share_animation_version / animate_window_position
+    // 三个私有小函数,与隐藏/可见记账无关,截在它们之前刚好收尾。
+    fn show_snapped_window_body() -> String {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/windows/main_window/snap.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 src/windows/main_window/snap.rs 源文件");
+        let start = source
+            .find("pub fn show_snapped_window")
+            .expect("找不到 show_snapped_window 定义");
+        let after = &source[start..];
+        let end_rel = after[1..]
+            .find("\nfn begin_animation")
+            .map(|rel| rel + 1)
+            .unwrap_or(after.len());
+        after[..end_rel]
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     // §5.4 护栏:refresh 的隐藏记账必须走原子入口 set_hidden_and_window_state,
     // 禁止裸写 set_hidden —— 两次独立 RwLock 写会让并发 toggle
     // 观测到 is_hidden=true 但 state=Visible 的撕裂态,误判 should_show。
@@ -195,9 +220,14 @@ mod tests {
             body.contains("set_hidden_and_window_state(true, super::state::WindowState::Hidden)"),
             "refresh_hidden_snapped_window 必须用原子入口写隐藏记账"
         );
+        // 负向断言既挡 set_hidden( 又挡 set_window_state(:§5.4 撕裂由两次独立
+        // RwLock 写引起,任何裸写 set_hidden 或裸写 set_window_state 都会破坏
+        // 原子入口的语义;show 路径若照搬 visibility 写法(裸 set_window_state + 裸
+        // set_hidden),本断言同样红——确保两条路径都不被反过来。
+        // 现场反证:临时 sed 在 refresh 体内注入 set_window_state(test, ...) 见红。
         assert!(
-            !body.contains("set_hidden("),
-            "refresh_hidden_snapped_window 禁止裸写 set_hidden,必须走原子入口"
+            !body.contains("set_hidden(") && !body.contains("set_window_state("),
+            "refresh_hidden_snapped_window 禁止裸写 set_hidden 或 set_window_state,必须走原子入口"
         );
     }
 
@@ -250,6 +280,25 @@ mod tests {
             "re-check 必须早于原子写回,现状 recheck={} write={}",
             recheck,
             write
+        );
+    }
+
+    // §5.4 护栏:show_snapped_window 的可见记账必须也走原子入口,杜绝两个对称
+    // 路径互相撕裂。refresh 路径有 recheck 兜底(被并发 show 抢先写回则尊重对方),
+    // show 路径是主动写方——必须自己原子写 is_hidden=false + state=Visible,
+    // 否则并发 refresh 之后可见到 is_hidden=false 但 state=Hidden 的对称撕裂。
+    #[test]
+    fn show_writes_visible_accounting_through_atomic_entry() {
+        let body = show_snapped_window_body();
+        assert!(
+            body.contains("set_hidden_and_window_state(false, super::state::WindowState::Visible)"),
+            "show_snapped_window 必须用原子入口写可见记账"
+        );
+        // 负向断言同 refresh 路径:不允许裸写 set_hidden / set_window_state。
+        // 现场反证:临时 sed 删 snap.rs:816 的原子写行 → 本测试 FAILED。
+        assert!(
+            !body.contains("set_hidden(") && !body.contains("set_window_state("),
+            "show_snapped_window 禁止裸写 set_hidden 或 set_window_state,必须走原子入口"
         );
     }
 }
