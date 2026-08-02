@@ -841,7 +841,9 @@ fn begin_animation() -> u64 {
 }
 
 // post-animation 刷新共享在飞动画的版本,不 bump。
-// 只有 cancel_pending_animation(同步形态决策)才会 bump,让动画与 post-refresh 一起失效。
+// begin_animation 独占初始 bump(同批动画首次 spawn 时 fetch_add 取走当前版本),
+// cancel_pending_animation(同步形态决策)可 bump 让在飞动画与 post-refresh 一起失效;
+// 本函数仅 load 共享,不 bump。
 fn share_animation_version() -> u64 {
     ANIMATION_VERSION.load(Ordering::SeqCst)
 }
