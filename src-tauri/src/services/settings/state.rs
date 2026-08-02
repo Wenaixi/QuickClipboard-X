@@ -10,6 +10,12 @@ pub fn get_settings() -> AppSettings {
     SETTINGS.read().clone()
 }
 
+// 热路径只读单字段:edge_monitor 50ms 轮询若走 get_settings() 会深克隆 ~135 字段,
+// 这里只读锁 + bool 拷贝,20Hz × 2 路径降到常数级。
+pub fn is_edge_hover_popup_enabled() -> bool {
+    SETTINGS.read().edge_hover_popup_enabled
+}
+
 pub fn update_settings(mut settings: AppSettings) -> Result<(), String> {
     // 守不变量:所有写入路径统一入口,杜绝 hide=false/hover=true 违规组合落地
     settings.normalize_edge_hover_invariant();
@@ -62,6 +68,32 @@ mod tests {
             "update_settings 必须归一化,杜绝 hide=false/hover=true 落地"
         );
         // 恢复默认,避免污染其他测试
+        update_settings(AppSettings::default()).unwrap();
+    }
+
+    // 热路径 accessor:只读 edge_hover_popup_enabled,与 get_settings 同源但零深克隆。
+    // edge_monitor 50ms 轮询必须走此入口(源码护栏在 edge_monitor 测试模块)。
+    #[test]
+    fn is_edge_hover_popup_enabled_reads_live_field() {
+        let _g = lock_serial();
+        let mut settings = AppSettings::default();
+        settings.edge_hide_enabled = true;
+        settings.edge_hover_popup_enabled = true;
+        update_settings(settings).unwrap();
+        assert!(
+            is_edge_hover_popup_enabled(),
+            "写入 true 后 accessor 必须读到 true"
+        );
+
+        let mut settings = AppSettings::default();
+        settings.edge_hide_enabled = true;
+        settings.edge_hover_popup_enabled = false;
+        update_settings(settings).unwrap();
+        assert!(
+            !is_edge_hover_popup_enabled(),
+            "写入 false 后 accessor 必须读到 false"
+        );
+
         update_settings(AppSettings::default()).unwrap();
     }
 
