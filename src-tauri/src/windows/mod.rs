@@ -55,4 +55,21 @@ mod poison_recovery_guards {
             "不得再有 WINDOW_DATA.lock().unwrap() 裸调用"
         );
     }
+
+    #[test]
+    fn pin_image_window_uses_lock_pin_data_helper() {
+        let body = production_body(&read_src("windows/pin_image_window/pin_image_window.rs"));
+        assert!(
+            body.contains("fn lock_pin_data()"),
+            "必须有 lock_pin_data helper"
+        );
+        assert!(
+            body.contains("unwrap_or_else(|p| p.into_inner())"),
+            "lock_pin_data 必须 poison 恢复"
+        );
+        assert!(
+            !body.contains(".lock().unwrap()"),
+            "pin_image_window 不得再有 .lock().unwrap() 裸调用(PIN_IMAGE_DATA_MAP)"
+        );
+    }
 }

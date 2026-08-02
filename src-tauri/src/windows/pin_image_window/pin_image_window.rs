@@ -9,6 +9,15 @@ use tauri::{AppHandle, Listener, Manager, WebviewWindow, WebviewWindowBuilder, S
 static PIN_IMAGE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 static PIN_IMAGE_DATA_MAP: OnceCell<Mutex<HashMap<String, PinImageData>>> = OnceCell::new();
 
+// 锁 helper:OnceCell + Mutex poison 双重处理
+// ponytail:9 个调用点都走这里,统一 poison 恢复语义
+fn lock_pin_data() -> std::sync::MutexGuard<'static, HashMap<String, PinImageData>> {
+    PIN_IMAGE_DATA_MAP
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+}
+
 const DEFAULT_PREVIEW_SIZE: u32 = 600;
 
 #[derive(Clone, Debug)]
@@ -30,28 +39,24 @@ pub fn init_pin_image_window() {
 
 // 更新贴图图片文件路径
 pub fn update_pin_image_file(label: &str, new_file_path: String) {
-    if let Some(data_map) = PIN_IMAGE_DATA_MAP.get() {
-        let mut map = data_map.lock().unwrap();
-        if let Some(data) = map.get_mut(label) {
-            data.file_path = new_file_path;
-        }
+    let mut map = lock_pin_data();
+    if let Some(data) = map.get_mut(label) {
+        data.file_path = new_file_path;
     }
 }
 
 // 更新贴图图片数据
 pub fn update_pin_image_data(
-    label: &str, 
+    label: &str,
     new_file_path: String,
     original_image_path: Option<String>,
     edit_data: Option<String>,
 ) {
-    if let Some(data_map) = PIN_IMAGE_DATA_MAP.get() {
-        let mut map = data_map.lock().unwrap();
-        if let Some(data) = map.get_mut(label) {
-            data.file_path = new_file_path;
-            data.original_image_path = original_image_path;
-            data.edit_data = edit_data;
-        }
+    let mut map = lock_pin_data();
+    if let Some(data) = map.get_mut(label) {
+        data.file_path = new_file_path;
+        data.original_image_path = original_image_path;
+        data.edit_data = edit_data;
     }
 }
 
@@ -134,29 +139,25 @@ pub async fn pin_image_from_file(
     if is_preview {
         if let Some(existing) = app.get_webview_window(&window_label) {
             let _ = existing.close();
-            if let Some(data_map) = PIN_IMAGE_DATA_MAP.get() {
-                data_map.lock().unwrap().remove(&window_label);
-            }
+            lock_pin_data().remove(&window_label);
         }
     }
     
     // 存储图片数据
     let actual_original_path = original_image_path.or_else(|| Some(file_path.clone()));
-    if let Some(data_map) = PIN_IMAGE_DATA_MAP.get() {
-        data_map.lock().unwrap().insert(
-            window_label.clone(),
-            PinImageData {
-                file_path,
-                width: img_width,
-                height: img_height,
-                preview_mode: is_preview,
-                image_physical_x,
-                image_physical_y,
-                original_image_path: actual_original_path,
-                edit_data,
-            },
-        );
-    }
+    lock_pin_data().insert(
+        window_label.clone(),
+        PinImageData {
+            file_path,
+            width: img_width,
+            height: img_height,
+            preview_mode: is_preview,
+            image_physical_x,
+            image_physical_y,
+            original_image_path: actual_original_path,
+            edit_data,
+        },
+    );
     
     let window = create_pin_image_window(&app, &window_label, img_width, img_height, pos_x, pos_y).await?;
     
@@ -257,20 +258,18 @@ async fn create_pin_image_window(
 // 前端请求获取图片数据
 #[tauri::command]
 pub fn get_pin_image_data(window: WebviewWindow) -> Result<serde_json::Value, String> {
-    if let Some(data_map) = PIN_IMAGE_DATA_MAP.get() {
-        let map = data_map.lock().unwrap();
-        if let Some(data) = map.get(window.label()) {
-            return Ok(json!({
-                "file_path": data.file_path,
-                "width": data.width,
-                "height": data.height,
-                "preview_mode": data.preview_mode,
-                "image_physical_x": data.image_physical_x,
-                "image_physical_y": data.image_physical_y,
-                "original_image_path": data.original_image_path,
-                "edit_data": data.edit_data
-            }));
-        }
+    let map = lock_pin_data();
+    if let Some(data) = map.get(window.label()) {
+        return Ok(json!({
+            "file_path": data.file_path,
+            "width": data.width,
+            "height": data.height,
+            "preview_mode": data.preview_mode,
+            "image_physical_x": data.image_physical_x,
+            "image_physical_y": data.image_physical_y,
+            "original_image_path": data.original_image_path,
+            "edit_data": data.edit_data
+        }));
     }
     Err("未找到图片数据".to_string())
 }
@@ -282,15 +281,13 @@ pub async fn save_pin_image_as(app: AppHandle, window: WebviewWindow) -> Result<
     use std::path::Path;
     use tauri_plugin_dialog::DialogExt;
     
-    let file_path = if let Some(data_map) = PIN_IMAGE_DATA_MAP.get() {
-        let map = data_map.lock().unwrap();
+    let file_path = {
+        let map = lock_pin_data();
         if let Some(data) = map.get(window.label()) {
             data.file_path.clone()
         } else {
             return Err("未找到图片数据".to_string());
         }
-    } else {
-        return Err("未找到图片数据".to_string());
     };
     
     let path = Path::new(&file_path);
@@ -324,9 +321,7 @@ pub async fn save_pin_image_as(app: AppHandle, window: WebviewWindow) -> Result<
 pub fn close_image_preview(app: AppHandle) -> Result<(), String> {
     let label = "image-preview";
     if let Some(window) = app.get_webview_window(label) {
-        if let Some(data_map) = PIN_IMAGE_DATA_MAP.get() {
-            data_map.lock().unwrap().remove(label);
-        }
+        lock_pin_data().remove(label);
         let _ = window.hide();
         let _ = window.set_size(Size::Logical(LogicalSize::new(1.0, 1.0)));
         let _ = window.close();
@@ -338,24 +333,23 @@ pub fn close_image_preview(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn close_pin_image_window_by_self(window: WebviewWindow) -> Result<(), String> {
     let label = window.label().to_string();
-    
-    if let Some(data_map) = PIN_IMAGE_DATA_MAP.get() {
-        let mut map = data_map.lock().unwrap();
-        if let Some(data) = map.remove(&label) {
-            if let Some(ref original_path) = data.original_image_path {
-                if data.file_path != *original_path {
-                    let file_in_use = map.values().any(|d| d.file_path == data.file_path);
-                    if !file_in_use {
-                        let _ = std::fs::remove_file(&data.file_path);
-                    }
+
+    let mut map = lock_pin_data();
+    if let Some(data) = map.remove(&label) {
+        if let Some(ref original_path) = data.original_image_path {
+            if data.file_path != *original_path {
+                let file_in_use = map.values().any(|d| d.file_path == data.file_path);
+                if !file_in_use {
+                    let _ = std::fs::remove_file(&data.file_path);
                 }
             }
         }
     }
-    
+    drop(map);
+
     let _ = window.set_size(Size::Logical(LogicalSize::new(1.0, 1.0)));
     window.close().map_err(|e| format!("关闭窗口失败: {}", e))?;
-    
+
     Ok(())
 }
 
@@ -369,15 +363,13 @@ pub async fn start_pin_edit_mode(
     img_width_physical: u32,
     img_height_physical: u32,
 ) -> Result<(), String> {
-    let (file_path, original_image_path, edit_data) = if let Some(data_map) = PIN_IMAGE_DATA_MAP.get() {
-        let map = data_map.lock().unwrap();
+    let (file_path, original_image_path, edit_data) = {
+        let map = lock_pin_data();
         if let Some(data) = map.get(window.label()) {
             (data.file_path.clone(), data.original_image_path.clone(), data.edit_data.clone())
         } else {
             return Err("未找到图片数据".to_string());
         }
-    } else {
-        return Err("未找到图片数据".to_string());
     };
 
     let position = window.outer_position()
@@ -486,7 +478,7 @@ pub fn animate_window_resize(
             }
 
             let progress = elapsed.as_secs_f64() / duration.as_secs_f64();
-            
+
             let eased = 1.0 - 2f64.powf(-10.0 * progress);
 
             let cur_w = (start_w + dw * eased).round() as u32;
@@ -502,4 +494,36 @@ pub fn animate_window_resize(
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // §11.2:全局静态测试串行化(同 §7.12 state.rs SERIAL 模式)
+    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    fn lock_serial() -> std::sync::MutexGuard<'static, ()> {
+        SERIAL.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    #[test]
+    fn lock_pin_data_recovers_from_poison() {
+        let _g = lock_serial();
+
+        // 先初始化 OnceCell
+        init_pin_image_window();
+
+        // 制造 poison:在 panic 线程里持锁
+        let handle = std::thread::spawn(|| {
+            let data_map = PIN_IMAGE_DATA_MAP
+                .get_or_init(|| Mutex::new(HashMap::new()));
+            let _guard = data_map.lock().unwrap();
+            panic!("force PIN_IMAGE_DATA_MAP mutex poison");
+        });
+        let _ = handle.join();
+
+        // helper 仍能拿到数据(不 panic)
+        let map = lock_pin_data();
+        assert!(map.is_empty(), "poison 后 PIN_IMAGE_DATA_MAP 仍可访问");
+    }
 }
