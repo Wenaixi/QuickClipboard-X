@@ -236,11 +236,11 @@ impl App {
 
             (rows, total)
         } else {
-            let pattern = format!("%{}%", self.search_query);
+            let pattern = crate::services::database::like_pattern(&self.search_query);
             let total: i64 = self
                 .db
                 .query_row(
-                    "SELECT COUNT(*) FROM clipboard WHERE content LIKE ?1",
+                    "SELECT COUNT(*) FROM clipboard WHERE content LIKE ?1 ESCAPE '\\'",
                     rusqlite::params![&pattern],
                     |r| r.get(0),
                 )
@@ -252,7 +252,7 @@ impl App {
                     "SELECT id, content, html_content, content_type, is_pinned, paste_count,
                             source_app, created_at, updated_at, image_id
                      FROM clipboard
-                     WHERE content LIKE ?3
+                     WHERE content LIKE ?3 ESCAPE '\\'
                      ORDER BY is_pinned DESC, item_order DESC, updated_at DESC
                      LIMIT ?1 OFFSET ?2",
                 )
@@ -364,11 +364,11 @@ impl App {
 
             (rows, total)
         } else {
-            let pattern = format!("%{}%", self.fav_search);
+            let pattern = crate::services::database::like_pattern(&self.fav_search);
             let total: i64 = self
                 .db
                 .query_row(
-                    "SELECT COUNT(*) FROM favorites WHERE content LIKE ?1 OR title LIKE ?1",
+                    "SELECT COUNT(*) FROM favorites WHERE content LIKE ?1 ESCAPE '\\' OR title LIKE ?1 ESCAPE '\\'",
                     rusqlite::params![&pattern],
                     |r| r.get(0),
                 )
@@ -380,7 +380,7 @@ impl App {
                     "SELECT id, title, content, html_content, content_type, image_id,
                             group_name, created_at, updated_at
                      FROM favorites
-                     WHERE content LIKE ?3 OR title LIKE ?3
+                     WHERE content LIKE ?3 ESCAPE '\\' OR title LIKE ?3 ESCAPE '\\'
                      ORDER BY item_order DESC, updated_at DESC
                      LIMIT ?1 OFFSET ?2",
                 )

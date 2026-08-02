@@ -196,8 +196,8 @@ pub fn query_clipboard_items(params: QueryParams) -> Result<PaginatedResult<Clip
         
         if let Some(ref search) = search_keyword {
             if !search.trim().is_empty() {
-                where_clauses.push("content LIKE ?");
-                let search_pattern = format!("%{}%", search);
+                where_clauses.push("content LIKE ? ESCAPE '\\'");
+                let search_pattern = super::like_pattern(search);
                 query_params.push(Box::new(search_pattern));
             }
         }
