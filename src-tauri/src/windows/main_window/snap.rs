@@ -1,12 +1,19 @@
 use tauri::{WebviewWindow, Manager, Emitter};
 use super::state::{SnapEdge, set_snap_edge, set_hidden_and_window_state, clear_snap, is_snapped};
+use once_cell::sync::Lazy;
+use parking_lot::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const SNAP_THRESHOLD: i32 = 30;
 const FRONTEND_CONTENT_INSET_LOGICAL: f64 = 5.0;
+// edge_monitor 50ms 轮询每次 resolve 都走 build_monitor_contexts;
+// 显示器拓扑几乎不变,500ms TTL 把 20Hz 系统调用压到 ~2Hz。
+const MONITOR_CONTEXT_CACHE_TTL: Duration = Duration::from_millis(500);
 
 static ANIMATION_VERSION: AtomicU64 = AtomicU64::new(0);
+static MONITOR_CONTEXT_CACHE: Lazy<Mutex<Option<(Instant, Vec<MonitorEdgeContext>)>>> =
+    Lazy::new(|| Mutex::new(None));
 
 // 决定 hide 路径是否走滑出动画。抽成纯函数便于 #[cfg(test)] 直接断言,
 // 防止未来有人在条件里塞入 `edge_hover_popup_enabled` 之类导致 hover 关闭时
@@ -142,7 +149,29 @@ fn edge_from_setting_value(value: &str) -> Option<SnapEdge> {
     }
 }
 
+// 纯函数:缓存条目是否仍新鲜。抽出来便于单测,不依赖 AppHandle。
+fn monitor_context_cache_is_fresh(cached_at: Instant, now: Instant, ttl: Duration) -> bool {
+    now.duration_since(cached_at) < ttl
+}
+
 fn build_monitor_contexts(app: &tauri::AppHandle) -> Result<Vec<MonitorEdgeContext>, String> {
+    {
+        let cache = MONITOR_CONTEXT_CACHE.lock();
+        if let Some((cached_at, contexts)) = cache.as_ref() {
+            if monitor_context_cache_is_fresh(*cached_at, Instant::now(), MONITOR_CONTEXT_CACHE_TTL)
+            {
+                return Ok(contexts.clone());
+            }
+        }
+    }
+    let contexts = build_monitor_contexts_uncached(app)?;
+    *MONITOR_CONTEXT_CACHE.lock() = Some((Instant::now(), contexts.clone()));
+    Ok(contexts)
+}
+
+fn build_monitor_contexts_uncached(
+    app: &tauri::AppHandle,
+) -> Result<Vec<MonitorEdgeContext>, String> {
     let monitors = app
         .available_monitors()
         .map_err(|e| format!("获取显示器列表失败: {}", e))?;
@@ -981,6 +1010,74 @@ pub fn restore_edge_snap_on_startup(window: &WebviewWindow) -> Result<(), String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Finding D2: build_monitor_contexts 500ms TTL 新鲜度纯函数。
+    // edge_monitor 50ms 轮询 + snap_ratio 双 None 时每 tick 都走
+    // available_monitors + get_all_monitors_with_edges;TTL 把 20Hz 压到 ~2Hz。
+    #[test]
+    fn monitor_context_cache_freshness_respects_ttl() {
+        let cached_at = Instant::now();
+        let ttl = Duration::from_millis(500);
+        assert!(
+            monitor_context_cache_is_fresh(cached_at, cached_at + Duration::from_millis(100), ttl),
+            "TTL 内必须命中缓存"
+        );
+        assert!(
+            !monitor_context_cache_is_fresh(cached_at, cached_at + Duration::from_millis(500), ttl),
+            "恰好 TTL 边界必须 miss(严格 <)"
+        );
+        assert!(
+            !monitor_context_cache_is_fresh(cached_at, cached_at + Duration::from_millis(600), ttl),
+            "过期后必须 miss"
+        );
+    }
+
+    // 源码护栏:build_monitor_contexts 必须走 TTL 缓存包装,真正的系统调用
+    // 只在 build_monitor_contexts_uncached 内。
+    #[test]
+    fn build_monitor_contexts_uses_ttl_cache() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/windows/main_window/snap.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 snap.rs 源文件");
+        // 剥行注释
+        let body: String = source
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            body.contains("MONITOR_CONTEXT_CACHE"),
+            "必须有 MONITOR_CONTEXT_CACHE 静态缓存"
+        );
+        assert!(
+            body.contains("fn build_monitor_contexts_uncached"),
+            "系统调用必须隔离到 build_monitor_contexts_uncached"
+        );
+        assert!(
+            body.contains("MONITOR_CONTEXT_CACHE_TTL"),
+            "必须定义 TTL 常量"
+        );
+        // 包装函数内不得直接 available_monitors(只 uncached 可调)
+        let start = body
+            .find("fn build_monitor_contexts(")
+            .expect("找不到 build_monitor_contexts 定义");
+        let after = &body[start..];
+        // 到下一个 fn build_monitor_contexts_uncached 为止
+        let end_rel = after
+            .find("fn build_monitor_contexts_uncached")
+            .unwrap_or(after.len());
+        let wrapper = &after[..end_rel];
+        assert!(
+            !wrapper.contains("available_monitors()"),
+            "TTL 包装层禁止直接 available_monitors,必须走 uncached"
+        );
+        assert!(
+            wrapper.contains("build_monitor_contexts_uncached"),
+            "包装层 miss 时必须调 uncached"
+        );
+    }
 
     // 回归测试:隐藏动画与 post-animation 刷新必须共享同一版本号。
     // 原实现两者各自 fetch_add,动画线程第一帧因版本不匹配即自杀,滑出动画一帧不播。
