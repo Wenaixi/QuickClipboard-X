@@ -42,6 +42,12 @@ pub struct NativePinData {
 // 窗口数据存储
 static WINDOW_DATA: Lazy<Mutex<HashMap<u64, NativePinData>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
+// 锁 helper:poison 后仍能拿到数据(标准 stdlib 模式)
+// ponytail:全局唯一 mutex + 8 调用点都走这里,锁竞争不是热路径
+fn lock_window_data() -> std::sync::MutexGuard<'static, HashMap<u64, NativePinData>> {
+    WINDOW_DATA.lock().unwrap_or_else(|p| p.into_inner())
+}
+
 // ============ 默认值读取/保存 ============
 
 fn get_default_shadow_enabled() -> bool {
@@ -158,7 +164,7 @@ fn register_window(
     let default_pixel_render = get_default_pixel_render();
     let default_privacy_mode = get_default_privacy_mode();
     
-    let mut map = WINDOW_DATA.lock().unwrap();
+    let mut map = lock_window_data();
     map.insert(id, NativePinData {
         file_path,
         always_on_top: default_always_on_top,
@@ -173,7 +179,7 @@ fn register_window(
 }
 
 pub fn unregister_window(id: u64) {
-    let mut map = WINDOW_DATA.lock().unwrap();
+    let mut map = lock_window_data();
     if let Some(data) = map.remove(&id) {
         let is_same_as_original = data.original_image_path.as_ref() == Some(&data.file_path);
         if !is_same_as_original {
@@ -183,12 +189,12 @@ pub fn unregister_window(id: u64) {
 }
 
 pub fn get_window_data(id: u64) -> Option<NativePinData> {
-    let map = WINDOW_DATA.lock().unwrap();
+    let map = lock_window_data();
     map.get(&id).cloned()
 }
 
 pub fn set_always_on_top(id: u64, always_on_top: bool) {
-    let mut map = WINDOW_DATA.lock().unwrap();
+    let mut map = lock_window_data();
     if let Some(data) = map.get_mut(&id) {
         data.always_on_top = always_on_top;
     }
@@ -196,7 +202,7 @@ pub fn set_always_on_top(id: u64, always_on_top: bool) {
 }
 
 pub fn set_shadow_enabled(id: u64, enabled: bool) {
-    let mut map = WINDOW_DATA.lock().unwrap();
+    let mut map = lock_window_data();
     if let Some(data) = map.get_mut(&id) {
         data.shadow_enabled = enabled;
     }
@@ -204,7 +210,7 @@ pub fn set_shadow_enabled(id: u64, enabled: bool) {
 }
 
 pub fn set_locked(id: u64, locked: bool) {
-    let mut map = WINDOW_DATA.lock().unwrap();
+    let mut map = lock_window_data();
     if let Some(data) = map.get_mut(&id) {
         data.locked = locked;
     }
@@ -212,7 +218,7 @@ pub fn set_locked(id: u64, locked: bool) {
 }
 
 pub fn set_opacity(id: u64, opacity: f32) {
-    let mut map = WINDOW_DATA.lock().unwrap();
+    let mut map = lock_window_data();
     if let Some(data) = map.get_mut(&id) {
         data.opacity = opacity;
     }
@@ -220,7 +226,7 @@ pub fn set_opacity(id: u64, opacity: f32) {
 }
 
 pub fn set_pixel_render(id: u64, enabled: bool) {
-    let mut map = WINDOW_DATA.lock().unwrap();
+    let mut map = lock_window_data();
     if let Some(data) = map.get_mut(&id) {
         data.pixel_render = enabled;
     }
@@ -228,7 +234,7 @@ pub fn set_pixel_render(id: u64, enabled: bool) {
 }
 
 pub fn set_privacy_mode(id: u64, mode: u8) {
-    let mut map = WINDOW_DATA.lock().unwrap();
+    let mut map = lock_window_data();
     if let Some(data) = map.get_mut(&id) {
         data.privacy_mode = mode;
     }
@@ -577,7 +583,7 @@ pub fn confirm_native_pin_edit(
     gpu_image_viewer::window::set_visible(window_id, true)?;
     
     {
-        let mut map = WINDOW_DATA.lock().unwrap();
+        let mut map = lock_window_data();
         if let Some(data) = map.get_mut(&window_id) {
             data.file_path = new_file_path;
             data.original_image_path = original_image_path;
@@ -780,10 +786,37 @@ pub fn close_native_image_preview() -> Result<(), String> {
         let mut preview = PREVIEW_WINDOW_ID.lock().unwrap();
         preview.take()
     };
-    
+
     if let Some(id) = window_id {
         let _ = gpu_image_viewer::window::close(id);
     }
-    
+
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // §11.2:全局静态测试串行化(同 §7.12 state.rs SERIAL 模式)
+    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    fn lock_serial() -> std::sync::MutexGuard<'static, ()> {
+        SERIAL.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    #[test]
+    fn lock_window_data_recovers_from_poison() {
+        let _g = lock_serial();
+
+        // 制造 poison:在 panic 线程里持锁
+        let handle = std::thread::spawn(|| {
+            let _guard = WINDOW_DATA.lock().unwrap();
+            panic!("force WINDOW_DATA mutex poison");
+        });
+        let _ = handle.join();
+
+        // helper 仍能拿到数据(不 panic)
+        let map = lock_window_data();
+        assert!(map.is_empty(), "poison 后 WINDOW_DATA 仍可访问");
+    }
 }
