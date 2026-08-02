@@ -96,6 +96,7 @@ pub fn set_hidden_and_window_state(is_hidden: bool, window_state: WindowState) {
 mod tests {
     use super::*;
     use std::sync::Arc;
+    use std::sync::OnceLock;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Mutex, MutexGuard};
     use std::thread;
@@ -106,6 +107,19 @@ mod tests {
     // 并发读线程不持锁(只观测单次原子写后的快照),但本静态保证同一时刻
     // 只有一个测试的写线程在跑,读者看到的"写"必属当前测试。
     static SERIAL: Mutex<()> = Mutex::new(());
+
+    // snap.rs 源码缓存:多个护栏测试共享,避免每测一次 IO
+    static SNAP_SOURCE: OnceLock<String> = OnceLock::new();
+
+    fn snap_source() -> &'static str {
+        SNAP_SOURCE.get_or_init(|| {
+            std::fs::read_to_string(format!(
+                "{}/src/windows/main_window/snap.rs",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .expect("找不到 src/windows/main_window/snap.rs 源文件")
+        })
+    }
 
     fn lock_serial() -> MutexGuard<'static, ()> {
         SERIAL.lock().unwrap_or_else(|e| e.into_inner())
@@ -157,11 +171,7 @@ mod tests {
     // 故按 §10.3 用源码字面存在性护栏锁死其不变量。
     // 运行时读源(include_str! 自指会编译期递归,不可用)。
     fn refresh_hidden_snapped_window_body() -> String {
-        let source = std::fs::read_to_string(format!(
-            "{}/src/windows/main_window/snap.rs",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .expect("找不到 src/windows/main_window/snap.rs 源文件");
+        let source = snap_source();
         let start = source
             .find("pub fn refresh_hidden_snapped_window")
             .expect("找不到 refresh_hidden_snapped_window 定义");

@@ -447,6 +447,20 @@ pub fn set_one_time_paste_enabled(enabled: bool) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::OnceLock;
+
+    // settings.rs 自身源码缓存:多个源码字面护栏共享,避免每测一次 IO
+    static SETTINGS_SOURCE: OnceLock<String> = OnceLock::new();
+
+    fn settings_source() -> &'static str {
+        SETTINGS_SOURCE.get_or_init(|| {
+            std::fs::read_to_string(format!(
+                "{}/src/commands/settings.rs",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .expect("找不到 src/commands/settings.rs 源文件")
+        })
+    }
 
     // 回归:set_edge_hide_enabled(false) 必须连带关闭 hover,
     // 否则持久化 hide=false/hover=true 违规组合,下次开启 hide 时意外弹出触发条。
@@ -499,11 +513,7 @@ mod tests {
     // 运行时读源(include_str! 自指会编译期递归,不可用)。
     #[test]
     fn set_edge_hide_enabled_calls_normalize_in_body() {
-        let source = std::fs::read_to_string(format!(
-            "{}/src/commands/settings.rs",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .expect("找不到 src/commands/settings.rs 源文件");
+        let source = settings_source();
         let start = source
             .find("pub fn set_edge_hide_enabled")
             .expect("找不到 set_edge_hide_enabled 定义");
@@ -530,11 +540,7 @@ mod tests {
     // 避免函数名被注释误命中。
     #[test]
     fn save_settings_handle_disable_edge_hide_runs_after_update_settings() {
-        let source = std::fs::read_to_string(format!(
-            "{}/src/commands/settings.rs",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .expect("找不到 src/commands/settings.rs 源文件");
+        let source = settings_source();
         let start = source
             .find("pub fn save_settings")
             .expect("找不到 save_settings 定义");
@@ -562,11 +568,7 @@ mod tests {
     // 用具体代码片段锚点避免注释误命中。
     #[test]
     fn set_edge_hide_enabled_handle_disable_edge_hide_runs_after_update_settings() {
-        let source = std::fs::read_to_string(format!(
-            "{}/src/commands/settings.rs",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .expect("找不到 src/commands/settings.rs 源文件");
+        let source = settings_source();
         let start = source
             .find("pub fn set_edge_hide_enabled")
             .expect("找不到 set_edge_hide_enabled 定义");

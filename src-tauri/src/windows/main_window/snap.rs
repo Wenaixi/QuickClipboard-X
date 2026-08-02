@@ -987,6 +987,20 @@ pub fn restore_edge_snap_on_startup(window: &WebviewWindow) -> Result<(), String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::OnceLock;
+
+    // snap.rs 自身源码缓存:多个源码字面护栏共享,避免每测一次 IO
+    static SNAP_SOURCE: OnceLock<String> = OnceLock::new();
+
+    fn snap_source() -> &'static str {
+        SNAP_SOURCE.get_or_init(|| {
+            std::fs::read_to_string(format!(
+                "{}/src/windows/main_window/snap.rs",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .expect("找不到 src/windows/main_window/snap.rs 源文件")
+        })
+    }
 
     // 回归测试:隐藏动画与 post-animation 刷新必须共享同一版本号。
     // 原实现两者各自 fetch_add,动画线程第一帧因版本不匹配即自杀,滑出动画一帧不播。
@@ -1040,11 +1054,7 @@ mod tests {
         // 源码护栏:show_snapped_window 体内必须显式 cancel,
         // 且必须在原子写回 is_hidden=false 之前完成
         // 运行时读源(include_str! 自指会编译期递归,不可用)
-        let source = std::fs::read_to_string(format!(
-            "{}/src/windows/main_window/snap.rs",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .expect("找不到 src/windows/main_window/snap.rs 源文件");
+        let source = snap_source();
         let show_start = source
             .find("pub fn show_snapped_window")
             .expect("找不到 show_snapped_window 定义");
@@ -1121,11 +1131,7 @@ mod tests {
     // 运行时读源(include_str! 自指会编译期递归,不可用)
     #[test]
     fn show_path_set_position_precedes_ignore_cursor_false() {
-        let source = std::fs::read_to_string(format!(
-            "{}/src/windows/main_window/snap.rs",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .expect("找不到 src/windows/main_window/snap.rs 源文件");
+        let source = snap_source();
         let show_start = source
             .find("pub fn show_snapped_window")
             .expect("找不到 show_snapped_window 定义");
@@ -1156,11 +1162,7 @@ mod tests {
     // 运行时读源(include_str! 自指会编译期递归,不可用)
     #[test]
     fn show_animation_branch_sets_ignore_true_before_show() {
-        let source = std::fs::read_to_string(format!(
-            "{}/src/windows/main_window/snap.rs",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .expect("找不到 src/windows/main_window/snap.rs 源文件");
+        let source = snap_source();
         let show_start = source
             .find("pub fn show_snapped_window")
             .expect("找不到 show_snapped_window 定义");
