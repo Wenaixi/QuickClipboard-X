@@ -82,7 +82,7 @@ struct MonitorEdgeContext {
 }
 
 #[derive(Clone, Debug)]
-struct ResolvedSnapPosition {
+pub(crate) struct ResolvedSnapPosition {
     pub x: i32,
     pub y: i32,
     pub scale_factor: f64,
