@@ -90,9 +90,18 @@ fn remove_disabled_hotkey(key: char, restart_explorer: bool) -> Result<(), Strin
 fn restart_explorer_process() -> Result<(), String> {
     use std::process::Command;
 
-    let _ = Command::new("taskkill")
+    // 先 taskkill /F /IM explorer.exe,失败立刻返回避免 sleep+start 产生双进程
+    let out = Command::new("taskkill")
         .args(["/F", "/IM", "explorer.exe"])
-        .output();
+        .output()
+        .map_err(|e| format!("taskkill 启动失败: {}", e))?;
+    if !out.status.success() {
+        return Err(format!(
+            "taskkill 退出失败: status={:?}, stderr={}",
+            out.status.code(),
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
 
     std::thread::sleep(std::time::Duration::from_millis(1000));
 

@@ -8,6 +8,16 @@ use std::path::Path;
 use regex::Regex;
 use sha2::{Sha256, Digest};
 use serde::{Serialize, Deserialize};
+use std::sync::LazyLock;
+
+// 静态正则:避免每次调用重新编译。
+// url/tag/entity/whitespace 四种模式字面确定,compile 永远成功,
+static URL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)\b(https?://|ftp://|www\.)[^\s<>"]+\b"#).unwrap()
+});
+static TAG_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^>]*>").unwrap());
+static ENTITY_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"&[a-zA-Z]+;").unwrap());
+static WHITESPACE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").unwrap());
 use crate::utils::cf_html::normalize_clipboard_html;
 
 
@@ -271,21 +281,14 @@ fn is_url(text: &str) -> bool {
 
 // 检测文本中是否包含链接
 fn contains_links(text: &str) -> bool {
-    let url_regex = Regex::new(r#"(?i)\b(https?://|ftp://|www\.)[^\s<>"]+\b"#).unwrap();
-    url_regex.is_match(text)
+    URL_RE.is_match(text)
 }
 
 // 从HTML中提取纯文本
 fn strip_html(html: &str) -> String {
-    let tag_regex = Regex::new(r"<[^>]*>").unwrap();
-    let entity_regex = Regex::new(r"&[a-zA-Z]+;").unwrap();
-    
-    let mut text = tag_regex.replace_all(html, " ").to_string();
-    text = entity_regex.replace_all(&text, " ").to_string();
-    
-    // 清理多余的空白
-    let whitespace_regex = Regex::new(r"\s+").unwrap();
-    whitespace_regex.replace_all(&text, " ").trim().to_string()
+    let text = TAG_RE.replace_all(html, " ");
+    let text = ENTITY_RE.replace_all(&text, " ");
+    WHITESPACE_RE.replace_all(&text, " ").trim().to_string()
 }
 
 // 处理HTML中的图片

@@ -390,7 +390,7 @@ fn resolve_startup_restore_window_size(
     Ok((size.width as i32, size.height as i32))
 }
 
-pub(crate) fn compute_snap_layout(
+fn compute_snap_layout(
     app: &tauri::AppHandle,
     edge: SnapEdge,
     x: i32,
@@ -593,15 +593,21 @@ pub fn hide_snapped_window(window: &WebviewWindow) -> Result<(), String> {
 
     let size = window.outer_size().map_err(|e| e.to_string())?;
     let (x, y, _, _) = crate::utils::positioning::get_window_bounds(window)?;
-    let ratio = compute_snap_ratio(
+    let snap_result = compute_snap_ratio(
         window.app_handle(),
         state.snap_edge,
         x,
         y,
         size.width as i32,
         size.height as i32,
-    )
-    .or_else(|error| state.snap_ratio.or(settings.edge_snap_ratio).ok_or(error))?;
+    );
+    let ratio = match snap_result {
+        Ok(r) => r,
+        Err(error) => match state.snap_ratio.or(settings.edge_snap_ratio) {
+            Some(r) => r,
+            None => return Err(error),
+        },
+    };
     let resolved = resolve_hidden_position(
         window.app_handle(),
         state.snap_edge,
@@ -999,6 +1005,20 @@ pub fn restore_edge_snap_on_startup(window: &WebviewWindow) -> Result<(), String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::OnceLock;
+
+    // snap.rs 自身源码缓存:多个源码字面护栏共享,避免每测一次 IO
+    static SNAP_SOURCE: OnceLock<String> = OnceLock::new();
+
+    fn snap_source() -> &'static str {
+        SNAP_SOURCE.get_or_init(|| {
+            std::fs::read_to_string(format!(
+                "{}/src/windows/main_window/snap.rs",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .expect("找不到 src/windows/main_window/snap.rs 源文件")
+        })
+    }
 
     // Finding D2: build_monitor_contexts 500ms TTL 新鲜度纯函数。
     // edge_monitor 50ms 轮询 + snap_ratio 双 None 时每 tick 都走
@@ -1120,11 +1140,7 @@ mod tests {
         // 源码护栏:show_snapped_window 体内必须显式 cancel,
         // 且必须在原子写回 is_hidden=false 之前完成
         // 运行时读源(include_str! 自指会编译期递归,不可用)
-        let source = std::fs::read_to_string(format!(
-            "{}/src/windows/main_window/snap.rs",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .expect("找不到 src/windows/main_window/snap.rs 源文件");
+        let source = snap_source();
         let show_start = source
             .find("pub fn show_snapped_window")
             .expect("找不到 show_snapped_window 定义");
@@ -1201,11 +1217,7 @@ mod tests {
     // 运行时读源(include_str! 自指会编译期递归,不可用)
     #[test]
     fn show_path_set_position_precedes_ignore_cursor_false() {
-        let source = std::fs::read_to_string(format!(
-            "{}/src/windows/main_window/snap.rs",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .expect("找不到 src/windows/main_window/snap.rs 源文件");
+        let source = snap_source();
         let show_start = source
             .find("pub fn show_snapped_window")
             .expect("找不到 show_snapped_window 定义");
@@ -1236,11 +1248,7 @@ mod tests {
     // 运行时读源(include_str! 自指会编译期递归,不可用)
     #[test]
     fn show_animation_branch_sets_ignore_true_before_show() {
-        let source = std::fs::read_to_string(format!(
-            "{}/src/windows/main_window/snap.rs",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .expect("找不到 src/windows/main_window/snap.rs 源文件");
+        let source = snap_source();
         let show_start = source
             .find("pub fn show_snapped_window")
             .expect("找不到 show_snapped_window 定义");
