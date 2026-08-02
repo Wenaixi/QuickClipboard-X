@@ -181,6 +181,13 @@ mod tests {
     // §5.4 护栏:refresh 的隐藏记账必须走原子入口 set_hidden_and_window_state,
     // 禁止裸写 set_hidden —— 两次独立 RwLock 写会让并发 toggle
     // 观测到 is_hidden=true 但 state=Visible 的撕裂态,误判 should_show。
+    //
+    // 负向断言 !body.contains("set_hidden(") 定位:
+    // 当下源码 snap.rs 函数体不含任何 set_hidden( 模式(全仓 fn set_hidden
+    // 零命中,该函数自 5a34ae1a 引入原子入口后已删),所以此断言当下始终通过;
+    // 它对"未来引入同名字面"防御——任何人加同名新函数会立刻让它失败。
+    // 属"未来防御"而非"当下行为护栏";d2150411 替换旧测试时未单独反证
+    // 见红,§7.13 主代理用 sed 临时注入已实测 FAILED,可证伪性成立。
     #[test]
     fn refresh_writes_hidden_accounting_through_atomic_entry() {
         let body = refresh_hidden_snapped_window_body();
