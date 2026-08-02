@@ -8,6 +8,7 @@ pub mod text;
 pub mod html;
 pub mod app_links;
 pub mod cf_html;
+pub mod sizing;
 
 pub use screen::init_screen_utils;
 pub use system::get_text_scale_factor;

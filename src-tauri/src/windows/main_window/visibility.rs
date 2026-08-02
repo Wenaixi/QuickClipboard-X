@@ -4,17 +4,9 @@ use tauri::{AppHandle, LogicalSize, Manager, WebviewWindow};
 #[cfg(not(target_os = "windows"))]
 const ALWAYS_ON_TOP_REFRESH_DELAY_MS: u64 = 10;
 
-pub(crate) fn normalize_saved_window_size_for_restore(
-    _window: &WebviewWindow,
-    width: u32,
-    height: u32,
-) -> (f64, f64) {
-    (width.max(150) as f64, height.max(150) as f64)
-}
-
 pub(crate) fn apply_saved_window_size(window: &WebviewWindow, width: u32, height: u32) {
     let (logical_width, logical_height) =
-        normalize_saved_window_size_for_restore(window, width, height);
+        crate::utils::sizing::normalize_saved_window_size(width, height);
     let _ = window.set_size(LogicalSize::new(logical_width, logical_height));
 }
 
