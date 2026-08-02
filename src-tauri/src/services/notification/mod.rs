@@ -30,7 +30,6 @@ pub fn show_startup_notification(app: &AppHandle) -> Result<(), String> {
 }
 
 // 显示通用消息通知
-#[allow(dead_code)]
 pub fn show_notification(
     app: &AppHandle,
     title: &str,
