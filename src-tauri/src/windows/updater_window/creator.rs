@@ -73,16 +73,8 @@ fn is_prerelease(version: &str) -> bool {
     v.contains("alpha") || v.contains("beta") || v.contains("rc") || v.contains("dev")
 }
 
-fn normalize_update_check_interval(value: &str) -> &'static str {
-    match value {
-        "every3days" => "every3days",
-        "weekly" => "weekly",
-        _ => "daily",
-    }
-}
-
 fn update_check_interval_seconds(value: &str) -> u64 {
-    match normalize_update_check_interval(value) {
+    match crate::services::AppSettings::normalize_update_check_interval(value) {
         "every3days" => 3 * 24 * 60 * 60,
         "weekly" => 7 * 24 * 60 * 60,
         _ => 24 * 60 * 60,

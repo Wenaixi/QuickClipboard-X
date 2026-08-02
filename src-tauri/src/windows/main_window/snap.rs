@@ -338,14 +338,6 @@ fn resolve_saved_monitor_and_edge(
         .ok_or_else(|| "未找到可用的贴边显示器".to_string())
 }
 
-fn normalize_saved_logical_size_for_monitor(
-    _monitor_scale_factor: f64,
-    width: u32,
-    height: u32,
-) -> (f64, f64) {
-    (width.max(150) as f64, height.max(150) as f64)
-}
-
 fn resolve_startup_restore_window_size(
     window: &WebviewWindow,
     edge: SnapEdge,
@@ -356,11 +348,8 @@ fn resolve_startup_restore_window_size(
 
     if settings.remember_window_size {
         if let Some((saved_width, saved_height)) = settings.saved_window_size {
-            let (logical_width, logical_height) = normalize_saved_logical_size_for_monitor(
-                monitor.scale_factor,
-                saved_width,
-                saved_height,
-            );
+            let (logical_width, logical_height) =
+                crate::utils::sizing::normalize_saved_window_size(saved_width, saved_height);
             return Ok((
                 (logical_width * monitor.scale_factor).round().max(1.0) as i32,
                 (logical_height * monitor.scale_factor).round().max(1.0) as i32,

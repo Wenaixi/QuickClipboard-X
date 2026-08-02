@@ -426,11 +426,48 @@ impl AppSettings {
 
         changed
     }
+
+    // 收纳更新检查间隔归一化的唯一权威实现:未知字符串一律降级为 daily。
+    // 仅识别 every3days / weekly / daily 三个值;返回 'static 借用避免调用方再分配。
+    // 之前在 commands/settings.rs(:24-30 返回 String)与
+    // updater_window/creator.rs(:76-82 返回 &'static str)两处字面相同,合并。
+    pub fn normalize_update_check_interval(value: &str) -> &'static str {
+        match value {
+            "every3days" => "every3days",
+            "weekly" => "weekly",
+            _ => "daily",
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normalize_update_check_interval_recognizes_every3days() {
+        assert_eq!(
+            AppSettings::normalize_update_check_interval("every3days"),
+            "every3days"
+        );
+    }
+
+    #[test]
+    fn normalize_update_check_interval_recognizes_weekly() {
+        assert_eq!(
+            AppSettings::normalize_update_check_interval("weekly"),
+            "weekly"
+        );
+    }
+
+    #[test]
+    fn normalize_update_check_interval_falls_back_to_daily() {
+        assert_eq!(
+            AppSettings::normalize_update_check_interval("hourly"),
+            "daily"
+        );
+        assert_eq!(AppSettings::normalize_update_check_interval(""), "daily");
+    }
 
     #[test]
     fn migrates_legacy_blacklist_to_blocklist() {
