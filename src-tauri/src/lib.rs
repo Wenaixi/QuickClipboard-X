@@ -458,7 +458,6 @@ pub fn run() {
                 startup_diagnostics::set_startup_stage("执行 setup：加载全局快捷键");
                 hotkey::reload_from_settings()?;
                 startup_diagnostics::set_startup_stage("执行 setup：初始化扩展窗口状态");
-                windows::plugins::context_menu::init();
                 windows::plugins::input_dialog::init();
                 quickpaste::init_quickpaste_state();
                 let _ = quickpaste::init_quickpaste_window(&app.handle());

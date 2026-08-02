@@ -67,11 +67,6 @@ fn state() -> &'static MenuState {
     STATE.get_or_init(MenuState::new)
 }
 
-#[allow(dead_code)]
-pub fn init() {
-    let _ = state();
-}
-
 pub(crate) fn get_result() -> Option<String> {
     state().result.lock().ok()?.clone()
 }
