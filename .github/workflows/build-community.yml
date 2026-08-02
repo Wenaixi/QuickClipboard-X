@@ -1,0 +1,71 @@
+name: Build Community
+
+# fork/本地无私有插件 deploy key 时用这条流水线出 exe。
+# 走 scripts/community-build.js: --no-default-features, 临时剔除
+# screenshot-suite / gpu-image-viewer, 不需要 SCREENSHOT_SUITE_DEPLOY_KEY。
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # 社区版不拉私有 submodule
+          submodules: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build community app
+        # 内部 patch Cargo.toml/capabilities, 跑完自动还原
+        run: npm run tauri:build:community
+        env:
+          # 社区版不签名, 跳过 updater 私钥
+          CI: true
+
+      - name: Collect artifacts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $src = 'src-tauri/target/release/QuickClipboard.exe'
+          if (-not (Test-Path $src)) {
+            Get-ChildItem -Path 'src-tauri/target' -Recurse -Filter '*.exe' |
+              Select-Object -First 20 FullName | ForEach-Object { Write-Host $_ }
+            throw "找不到 $src"
+          }
+          $ref = '${{ github.ref_name }}' -replace '[\\/]', '-'
+          $out = "QuickClipboard_${ref}_community.exe"
+          Copy-Item $src $out
+          Write-Host "artifact=$out size=$((Get-Item $out).Length)"
+          "ARTIFACT_NAME=$out" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Upload community exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: QuickClipboard-community-${{ github.ref_name }}
+          path: QuickClipboard_*_community.exe
+          if-no-files-found: error
+          retention-days: 14
