@@ -17,6 +17,7 @@ const screenshotCapabilityPath = path.join(rootDir, 'src-tauri', 'capabilities',
 const defaultCapabilityPath = path.join(rootDir, 'src-tauri', 'capabilities', 'default.json');
 const cargoTomlPath = path.join(rootDir, 'src-tauri', 'Cargo.toml');
 const cargoLockPath = path.join(rootDir, 'src-tauri', 'Cargo.lock');
+const tauriConfPath = path.join(rootDir, 'src-tauri', 'tauri.conf.json');
 
 const PRIVATE_DEPENDENCY_PREFIXES = ['screenshot-suite = {', 'gpu-image-viewer = {'];
 const PRIVATE_FEATURE_NAMES = ['gpu-image-viewer', 'screenshot-suite'];
@@ -100,6 +101,31 @@ function backupCargoLock() {
     };
 }
 
+// 社区版不签名 updater 产物:createUpdaterArtifacts 需要 TAURI_SIGNING_PRIVATE_KEY,
+// fork CI / 无密钥环境会在 exe 已生成后因签名失败整步退出。
+function patchTauriConfForCommunity() {
+    if (!fs.existsSync(tauriConfPath)) return () => {};
+
+    const original = fs.readFileSync(tauriConfPath, 'utf8');
+    let json;
+    try {
+        json = JSON.parse(original);
+    } catch {
+        return () => {};
+    }
+
+    if (!json.bundle || json.bundle.createUpdaterArtifacts !== true) {
+        return () => {};
+    }
+
+    json.bundle.createUpdaterArtifacts = false;
+    fs.writeFileSync(tauriConfPath, `${JSON.stringify(json, null, 2)}\n`, 'utf8');
+
+    return () => {
+        fs.writeFileSync(tauriConfPath, original, 'utf8');
+    };
+}
+
 // 修补所有社区构建需要修改的文件，返回闭包用于恢复
 function patchForCommunity() {
     if (!isCommunity) return () => {};
@@ -108,12 +134,14 @@ function patchForCommunity() {
     const restoreScreenshot = patchCapabilityFile(screenshotCapabilityPath);
     const restoreDefault = patchCapabilityFile(defaultCapabilityPath);
     const restoreCargoLock = backupCargoLock();
+    const restoreTauriConf = patchTauriConfForCommunity();
 
     return () => {
         restoreCargoToml();
         restoreScreenshot();
         restoreDefault();
         restoreCargoLock();
+        restoreTauriConf();
     };
 }
 
