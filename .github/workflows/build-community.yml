@@ -47,10 +47,12 @@ jobs:
           CI: true
 
       - name: Collect artifacts
+        id: collect
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $ref = '${{ github.ref_name }}' -replace '[\\/]', '-'
+          "ref=$ref" >> $env:GITHUB_OUTPUT
           New-Item -ItemType Directory -Force -Path dist-ci | Out-Null
 
           $srcExe = 'src-tauri/target/release/QuickClipboard.exe'
@@ -74,8 +76,9 @@ jobs:
       - name: Upload community exe
         uses: actions/upload-artifact@v4
         with:
-          # 分支名可能含 / (如 fix/settings-restore), artifact 名不允许该字符
-          name: QuickClipboard-community-${{ replace(github.ref_name, '/', '-') }}
+          # 分支名可能含 / (如 fix/settings-restore), artifact 名不允许该字符,
+          # 复用 Collect artifacts 已替换好的 ref
+          name: QuickClipboard-community-${{ steps.collect.outputs.ref }}
           path: dist-ci/*
           if-no-files-found: error
           retention-days: 14
