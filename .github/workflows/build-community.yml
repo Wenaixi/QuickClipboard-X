@@ -74,7 +74,8 @@ jobs:
       - name: Upload community exe
         uses: actions/upload-artifact@v4
         with:
-          name: QuickClipboard-community-${{ github.ref_name }}
+          # 分支名可能含 / (如 fix/settings-restore), artifact 名不允许该字符
+          name: QuickClipboard-community-${{ replace(github.ref_name, '/', '-') }}
           path: dist-ci/*
           if-no-files-found: error
           retention-days: 14
