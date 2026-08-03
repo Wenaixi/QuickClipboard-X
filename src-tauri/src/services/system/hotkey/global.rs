@@ -81,9 +81,22 @@ fn apply_activation(desired: HotkeyActivation) {
             let _ = reload_from_settings();
         }
         HotkeyActivation::Inactive => {
-            unregister_all();
+            disable_all_shortcuts();
         }
     }
+}
+
+// 插件级整体注销 + 清空内部状态：利用 GlobalHotKeyManager::unregister_all
+// 先注销 Windows 层全部注册再清空内部表，消除"半注册/幽灵热键"残留；
+// 同时让导航热键内部状态整体失效，等下次前台切换/显隐时干净重建。
+fn disable_all_shortcuts() {
+    if let Ok(app) = get_app() {
+        use tauri_plugin_global_shortcut::GlobalShortcutExt as _;
+        let _ = app.global_shortcut().unregister_all();
+    }
+    REGISTERED_SHORTCUTS.lock().clear();
+    SHORTCUT_STATUS.lock().clear();
+    super::navigation::invalidate_navigation_hotkeys();
 }
 
 pub fn sync_hotkeys_for_foreground() {
@@ -208,16 +221,20 @@ pub fn unregister_shortcut(id: &str) {
         Ok(app) => app,
         Err(_) => return,
     };
-    
+
     let mut shortcuts = REGISTERED_SHORTCUTS.lock();
     if let Some(pos) = shortcuts.iter().position(|(registered_id, _)| registered_id == id) {
         let (_, shortcut_str) = shortcuts.remove(pos);
         if let Ok(shortcut) = parse_shortcut(&shortcut_str) {
-            let _ = app.global_shortcut().unregister(shortcut);
+            // 先探测再注销，避免对未注册的裸键 UnregisterHotKey 空跑后，
+            // 内部表与 Windows 层脱节，残留吞键的"幽灵热键"。
+            if app.global_shortcut().is_registered(shortcut) {
+                let _ = app.global_shortcut().unregister(shortcut);
+            }
             println!("已注销快捷键 [{}]: {}", id, shortcut_str);
         }
     }
-    
+
     clear_shortcut_status(id);
 }
 

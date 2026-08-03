@@ -19,6 +19,12 @@ static NAVIGATION_THROTTLE_STATE: Lazy<Mutex<HashMap<String, Instant>>> =
 static NAVIGATION_REPEAT_TOKENS: Lazy<Mutex<HashMap<String, u64>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
+// 导航热键注册/注销串行锁：前台切换回调、窗口显隐、全局热键重注册可能从不同线程
+// 同时触发导航热键的增删，RegisterHotKey 对同一裸键并发注册会返回
+// AlreadyRegistered，失败后内部表与 Windows 层不一致，残留的裸 Enter/Tab/Esc
+// 注册就是吞掉全局按键的"幽灵热键"。串行化后从根源消除并发撞车。
+static NAVIGATION_SYNC_LOCK: Mutex<()> = Mutex::new(());
+
 const NAVIGATION_REPEAT_INITIAL_DELAY: Duration = Duration::from_millis(300);
 const NAVIGATION_FAST_REPEAT_INTERVAL: Duration = Duration::from_millis(45);
 
@@ -42,10 +48,19 @@ pub fn enable_navigation_hotkeys() {
 
 pub fn disable_navigation_hotkeys() {
     NAVIGATION_HOTKEYS_DESIRED.store(false, Ordering::SeqCst);
+    let _guard = NAVIGATION_SYNC_LOCK.lock();
     unregister_navigation_hotkeys();
 }
 
 pub fn sync_navigation_hotkeys_for_foreground() {
+    // 串行化：注册/注销全程持锁，防止前台切换回调、窗口显隐、全局热键重注册
+    // 并发对同一裸键 RegisterHotKey 撞车，失败后 Windows 层残留"幽灵热键"
+    // 吞掉全局 Enter/Tab/Esc。
+    let _guard = NAVIGATION_SYNC_LOCK.lock();
+    sync_navigation_hotkeys_for_foreground_inner();
+}
+
+fn sync_navigation_hotkeys_for_foreground_inner() {
     if !NAVIGATION_HOTKEYS_DESIRED.load(Ordering::SeqCst) {
         unregister_navigation_hotkeys();
         return;
@@ -57,11 +72,16 @@ pub fn sync_navigation_hotkeys_for_foreground() {
     }
 
     if !NAVIGATION_HOTKEYS_REGISTERED.load(Ordering::SeqCst) {
-        reload_navigation_hotkeys_from_settings();
+        reload_navigation_hotkeys_from_settings_inner();
     }
 }
 
 pub fn reload_navigation_hotkeys_from_settings() {
+    let _guard = NAVIGATION_SYNC_LOCK.lock();
+    reload_navigation_hotkeys_from_settings_inner();
+}
+
+fn reload_navigation_hotkeys_from_settings_inner() {
     if !NAVIGATION_HOTKEYS_DESIRED.load(Ordering::SeqCst) {
         unregister_navigation_hotkeys();
         return;
@@ -77,12 +97,25 @@ pub fn reload_navigation_hotkeys_from_settings() {
     }
 }
 
+// 让内部注册状态整体失效，Windows 层注册由调用方负责摘除。
+// 供 global 层"禁用热键/前台屏蔽"时插件级 unregister_all 后调用，
+// 使下次前台切换能干净地重建导航热键。
+pub fn invalidate_navigation_hotkeys() {
+    let _guard = NAVIGATION_SYNC_LOCK.lock();
+    NAVIGATION_HOTKEYS_REGISTERED.store(false, Ordering::SeqCst);
+    NAVIGATION_SHORTCUTS.lock().clear();
+    NAVIGATION_REPEAT_SEQUENCE.fetch_add(1, Ordering::SeqCst);
+    NAVIGATION_REPEAT_TOKENS.lock().clear();
+    NAVIGATION_THROTTLE_STATE.lock().clear();
+}
+
 fn register_navigation_hotkeys_from_settings() -> Result<(), String> {
     unregister_navigation_hotkeys();
 
     let app = get_app()?;
     let configs = navigation_shortcut_configs();
     let mut registrations = Vec::new();
+    let mut has_failure = false;
 
     for config in configs {
         if config.shortcut.trim().is_empty() {
@@ -119,16 +152,24 @@ fn register_navigation_hotkeys_from_settings() -> Result<(), String> {
                     "注册导航快捷键 [{}] {} 失败: {}",
                     config.id, config.shortcut, error
                 );
+                has_failure = true;
+                // 注册失败（多为 RegisterHotKey 并发撞车 AlreadyRegistered）：
+                // 保持 NAVIGATION_HOTKEYS_REGISTERED=false，让下次前台切换/显隐时
+                // 能重新走一遍完整注销+注册，清除 Windows 层可能残留的"幽灵热键"。
             }
         }
     }
 
     let has_registration = !registrations.is_empty();
     *NAVIGATION_SHORTCUTS.lock() = registrations;
-    NAVIGATION_HOTKEYS_REGISTERED.store(has_registration, Ordering::SeqCst);
+
+    // 有失败则整体保持"未注册"状态，等待自愈重试；避免半注册状态被当作已就绪。
+    NAVIGATION_HOTKEYS_REGISTERED.store(has_registration && !has_failure, Ordering::SeqCst);
     Ok(())
 }
 
+// 安全摘除导航热键：使用插件 is_registered 探测后再注销，避免对未注册的
+// 裸键 UnregisterHotKey 空跑后内部表与 Windows 层脱节，残留"幽灵热键"。
 fn unregister_navigation_hotkeys() {
     let app = match get_app() {
         Ok(app) => app,
@@ -138,11 +179,13 @@ fn unregister_navigation_hotkeys() {
     let registrations = std::mem::take(&mut *NAVIGATION_SHORTCUTS.lock());
     for registration in registrations {
         if let Ok(shortcut) = parse_shortcut(&registration.shortcut) {
-            let _ = app.global_shortcut().unregister(shortcut);
-            println!(
-                "已注销导航快捷键 [{}]: {}",
-                registration.id, registration.shortcut
-            );
+            if app.global_shortcut().is_registered(shortcut) {
+                let _ = app.global_shortcut().unregister(shortcut);
+                println!(
+                    "已注销导航快捷键 [{}]: {}",
+                    registration.id, registration.shortcut
+                );
+            }
         }
     }
 
