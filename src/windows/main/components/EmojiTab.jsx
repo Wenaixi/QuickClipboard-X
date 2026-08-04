@@ -235,8 +235,10 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
   const [isModeReady, setIsModeReady] = useState(true);
   const [contentWidth, setContentWidth] = useState(0);
   const [useEmojiFallbackFont, setUseEmojiFallbackFont] = useState(false);
-  // 键盘区域导航状态: kbZone 当前 zone('search' 起点 / 'grid' / 'sidebar' / 'outside' 退出),kbRow/kbCol 仅在 grid zone 用
-  const [kbZone, setKbZone] = useState('search'); // 'search' | 'grid' | 'sidebar' | 'outside'
+  // 键盘区域导航状态: kbZone 当前 zone('modes' 默认 / 'search' / 'grid' / 'sidebar' / 'outside' 退出)
+  // 起点 modes 表示"刚进 emoji tab,焦点仍在模式行(TabNavigation)";↓ 触发真实 focus 搜索框 + zone='search'
+  // 之后 zone='search' 的 ←/→ 才变 module 选择功能;↑ 触发 outside(后续方向键恢复原行为)
+  const [kbZone, setKbZone] = useState('modes'); // 'modes' | 'search' | 'grid' | 'sidebar' | 'outside'
   const [kbRow, setKbRow] = useState(-1);
   const [kbCol, setKbCol] = useState(0);
   const kbRowRef = useRef(kbRow);
@@ -598,8 +600,8 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
 
   useEffect(() => {
     setSearchQuery('');
-    // 切换子模式时重置键盘导航状态,起点回搜索框
-    setKbZone('search');
+    // 切换子模式时重置键盘导航状态,起点回 modes(焦点仍在 TabNavigation 模式行,下次 ↓ 才进搜索框)
+    setKbZone('modes');
     setKbRow(-1);
     setKbCol(0);
 
@@ -878,6 +880,11 @@ const enterGrid = useCallback(() => {
     searchInputRef.current?.focus?.();
   }, []);
 
+  const blurSearchInput = useCallback(() => {
+    setKbZone('outside');
+    searchInputRef.current?.blur?.();
+  }, []);
+
   const moveSidebarBy = useCallback((delta) => {
     const cats = currentCategories;
     if (cats.length === 0) return false;
@@ -945,7 +952,16 @@ const enterGrid = useCallback(() => {
     if (!e.key.startsWith('Arrow')) return;
     const key = e.key;
 
-    // 搜索框聚焦时:聚焦搜索框的导航快捷键
+    // 'modes':刚进 emoji tab,焦点仍在 TabNavigation 模式行;只有 ↓ 才接管(真实 focus 搜索框)
+    if (kbZone === 'modes') {
+      if (key === 'ArrowDown') {
+        e.preventDefault();
+        focusSearchInput();
+      }
+      return;
+    }
+
+    // 搜索框已聚焦时:聚焦搜索框的导航快捷键
     if (document.activeElement === searchInputRef.current) {
       if (key === 'ArrowDown' || key === 'ArrowRight') {
         e.preventDefault();
@@ -955,9 +971,8 @@ const enterGrid = useCallback(() => {
         enterSidebar();
       } else if (key === 'ArrowUp') {
         e.preventDefault();
-        setKbZone('outside');
+        blurSearchInput();
       }
-      // 其他方向键(暂未用到)走浏览器默认
       return;
     }
 
@@ -999,10 +1014,11 @@ const enterGrid = useCallback(() => {
     if (kbZone === 'sidebar') {
       if (key === 'ArrowDown') {
         if (!moveSidebarBy(1)) {
-          // 底部夹住,no-op
+          // 底部夹住
         }
       } else if (key === 'ArrowUp') {
         if (!moveSidebarBy(-1)) {
+          // 顶部越界 → 回到搜索框(聚焦)
           focusSearchInput();
         }
       } else if (key === 'ArrowRight') {
@@ -1012,7 +1028,7 @@ const enterGrid = useCallback(() => {
       }
       return;
     }
-  }, [kbZone, showImages, skinPickerEmoji, showImageGroupModal, enterGrid, enterSidebar, focusSearchInput, moveSidebarBy, moveGridBy]);
+  }, [kbZone, showImages, skinPickerEmoji, showImageGroupModal, enterGrid, enterSidebar, focusSearchInput, blurSearchInput, moveSidebarBy, moveGridBy]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKbKeyDown);
