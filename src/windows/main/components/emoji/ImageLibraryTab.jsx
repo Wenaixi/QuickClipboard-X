@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback, useLayoutEffect } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, useLayoutEffect, forwardRef, useImperativeHandle } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { toast, TOAST_SIZES, TOAST_POSITIONS } from '@shared/store/toastStore';
@@ -262,6 +262,7 @@ function ImageTile({
   t,
   isDragging,
   isSelected,
+  isKbFocused,
   onClick,
   onMouseDown,
   onCopy,
@@ -290,9 +291,11 @@ function ImageTile({
         className={`relative group aspect-square rounded-lg bg-qc-panel-2 flex items-center justify-center cursor-pointer transition-all overflow-hidden ${
           isDragging
             ? 'opacity-45 scale-95 saturate-50 ring-2 ring-dashed ring-blue-400 bg-qc-active'
-            : isSelected
-              ? 'bg-qc-active ring-2 ring-blue-500 shadow-sm'
-              : 'hover:bg-qc-hover hover:ring-2 hover:ring-blue-400'
+            : isKbFocused
+              ? 'bg-qc-active ring-2 ring-dashed ring-orange-500 shadow-sm'
+              : isSelected
+                ? 'bg-qc-active ring-2 ring-blue-500 shadow-sm'
+                : 'hover:bg-qc-hover hover:ring-2 hover:ring-blue-400'
         }`}
         style={{ touchAction: 'none' }}
       >
@@ -372,7 +375,7 @@ function ImageTile({
   );
 }
 
-function ImageLibraryTab({
+const ImageLibraryTab = forwardRef(function ImageLibraryTab({
   currentGroup,
   imageGroups = [],
   searchQuery,
@@ -381,7 +384,7 @@ function ImageLibraryTab({
   onImageDragEnd,
   onImageDragCancel,
   reloadKey = 0
-}) {
+}, ref) {
   const { t } = useTranslation();
   const [imageTotal, setImageTotal] = useState(0);
   const [imageItems, setImageItems] = useState([]);
@@ -405,6 +408,9 @@ function ImageLibraryTab({
   const gridMeasureRef = useRef(null);
   const [contentWidth, setContentWidth] = useState(0);
   const imageCols = useMemo(() => getImageGridCols(contentWidth), [contentWidth]);
+  const [kbImageIndex, setKbImageIndex] = useState(-1);
+  const kbImageIndexRef = useRef(kbImageIndex);
+  kbImageIndexRef.current = kbImageIndex;
   const [scrollerElement, setScrollerElement] = useState(null);
   const scrollerRefCallback = useCallback(element => element && setScrollerElement(element), []);
   useCustomScrollbar(scrollerElement);
@@ -518,6 +524,7 @@ function ImageLibraryTab({
     setSelectedImageKeys(new Set());
     setSelectionAnchorKey('');
     setSelectionBox(null);
+    setKbImageIndex(-1);
   }, [currentGroup, reloadKey]);
 
   const loadImageCount = useCallback(async () => {
@@ -1007,6 +1014,55 @@ function ImageLibraryTab({
     document.removeEventListener('mouseup', handleSelectionMouseUp);
   }, [handleSelectionMouseMove, handleSelectionMouseUp]);
 
+  // 键盘导航:在 displayImageItems 中以行优先顺序移动,越界返回 false
+  const kbMove = useCallback((dx, dy) => {
+    const current = kbImageIndexRef.current;
+    const total = displayImageTotal;
+    if (current < 0 || total <= 0 || imageCols <= 0) return false;
+    const row = Math.floor(current / imageCols);
+    const col = current % imageCols;
+    const nextRow = row + dy;
+    const nextCol = col + dx;
+    if (nextCol < 0 || nextCol >= imageCols) return false;
+    const next = nextRow * imageCols + nextCol;
+    if (next < 0 || next >= total) return false;
+    setKbImageIndex(next);
+    imageScrollerRef.current?.scrollToIndex({ index: nextRow, align: 'center' });
+    return true;
+  }, [displayImageTotal, imageCols]);
+
+  const executeCurrent = useCallback(async () => {
+    const index = kbImageIndexRef.current;
+    if (index < 0) return;
+    const item = displayImageItemsRef.current[index];
+    if (!item || !isSelectableImageItem(item) || isUploading) return;
+    try {
+      await restoreLastFocus();
+      await invoke('paste_image_file', { filePath: item.path });
+    } catch (err) {
+      console.error('粘贴图片失败:', err);
+      toast.error(t('common.pasteFailed') || '粘贴失败', {
+        size: TOAST_SIZES.EXTRA_SMALL,
+        position: TOAST_POSITIONS.BOTTOM_RIGHT
+      });
+    }
+  }, [t, isUploading]);
+
+  useImperativeHandle(ref, () => ({
+    navigateUp: () => kbMove(0, -1),
+    navigateDown: () => kbMove(0, 1),
+    navigateLeft: () => kbMove(-1, 0),
+    navigateRight: () => kbMove(1, 0),
+    executeCurrent,
+    resetKbIndex: () => setKbImageIndex(-1),
+    activateKb: () => {
+      if (kbImageIndexRef.current < 0 && displayImageTotal > 0) {
+        setKbImageIndex(0);
+      }
+      return kbImageIndexRef.current >= 0;
+    }
+  }));
+
   const handleSelectionMouseDown = useCallback((e) => {
     if (e.button !== 0 || isUploading || selfPluginDragRef.current || !currentGroup || displayImageTotal === 0) return;
     if (shouldIgnoreImageSelectionStart(e.target)) return;
@@ -1043,7 +1099,7 @@ function ImageLibraryTab({
   const renderImageRow = useCallback((rowIndex) => {
     const startIdx = rowIndex * imageCols;
     const rowItems = [];
-    
+
     for (let i = 0; i < imageCols; i++) {
       const idx = startIdx + i;
       if (idx >= displayImageTotal) break;
@@ -1063,6 +1119,7 @@ function ImageLibraryTab({
       >
         {rowItems.map((item) => {
           const itemKey = getImageItemKey(item);
+          const gridIndex = startIdx + rowItems.indexOf(item);
           return (
             <ImageTile
               key={item.id || itemKey}
@@ -1070,6 +1127,7 @@ function ImageLibraryTab({
               t={t}
               isDragging={Boolean(itemKey && draggingImageKeys.has(itemKey))}
               isSelected={Boolean(itemKey && selectedImageKeys.has(itemKey))}
+              isKbFocused={kbImageIndex === gridIndex}
               onClick={handleImageClick}
               onMouseDown={handleImageDragMouseDown}
               onCopy={handleCopyImage}
@@ -1080,7 +1138,7 @@ function ImageLibraryTab({
         })}
       </div>
     );
-  }, [displayImageItems, displayImageTotal, hasSearchQuery, imageCols, scheduleLoadRange, handleImageClick, handleImageDragMouseDown, handleCopyImage, handleDeleteImage, handleRenameStart, draggingImageKeys, selectedImageKeys, t]);
+  }, [displayImageItems, displayImageTotal, hasSearchQuery, imageCols, scheduleLoadRange, handleImageClick, handleImageDragMouseDown, handleCopyImage, handleDeleteImage, handleRenameStart, draggingImageKeys, selectedImageKeys, kbImageIndex, t]);
 
   return (
     <div
@@ -1181,6 +1239,6 @@ function ImageLibraryTab({
       )}
     </div>
   );
-}
+});
 
 export default ImageLibraryTab;

@@ -248,6 +248,16 @@ fn navigation_shortcut_configs() -> Vec<NavigationShortcutConfig> {
             action: "toggle-pin",
             shortcut: settings.toggle_pin_shortcut,
         },
+        NavigationShortcutConfig {
+            id: "navigation_filter_left",
+            action: "filter-left",
+            shortcut: settings.filter_left_shortcut,
+        },
+        NavigationShortcutConfig {
+            id: "navigation_filter_right",
+            action: "filter-right",
+            shortcut: settings.filter_right_shortcut,
+        },
     ]
 }
 
@@ -361,7 +371,7 @@ fn should_throttle(action: &str) -> bool {
 fn get_throttle_delay(action: &str) -> Option<Duration> {
     match action {
         "navigate-up" | "navigate-down" => None,
-        "tab-left" | "tab-right" => Some(Duration::from_millis(150)),
+        "tab-left" | "tab-right" | "filter-left" | "filter-right" => Some(Duration::from_millis(150)),
         "previous-group" | "next-group" => Some(Duration::from_millis(100)),
         "execute-item" | "focus-search" | "hide-window" | "toggle-pin" => {
             Some(Duration::from_millis(200))
@@ -373,7 +383,7 @@ fn get_throttle_delay(action: &str) -> Option<Duration> {
 fn get_repeat_interval(action: &str) -> Option<Duration> {
     match action {
         "navigate-up" | "navigate-down" => Some(NAVIGATION_FAST_REPEAT_INTERVAL),
-        "tab-left" | "tab-right" => Some(Duration::from_millis(150)),
+        "tab-left" | "tab-right" | "filter-left" | "filter-right" => Some(Duration::from_millis(150)),
         "previous-group" | "next-group" => Some(Duration::from_millis(100)),
         _ => None,
     }

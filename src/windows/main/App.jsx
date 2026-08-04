@@ -69,6 +69,7 @@ function App() {
   const [isSidebarTabsLayout, setIsSidebarTabsLayout] = useState(getIsSidebarTabsLayout);
   const clipboardTabRef = useRef(null);
   const favoritesTabRef = useRef(null);
+  const emojiTabRef = useRef(null);
   const groupsPopupRef = useRef(null);
   const searchRef = useRef(null);
   const tabNavigationMode = isSidebarTabsLayout
@@ -393,6 +394,40 @@ function App() {
       clipboardTabRef.current.executeCurrentItem();
     } else if (activeTab === 'favorites' && favoritesTabRef.current?.executeCurrentItem) {
       favoritesTabRef.current.executeCurrentItem();
+    } else if (activeTab === 'emoji' && emojiTabRef.current?.executeCurrentItem) {
+      emojiTabRef.current.executeCurrentItem();
+    }
+  };
+  const handleFilterLeft = () => {
+    blurSearchInput();
+    if (activeTab === 'emoji') {
+      setEmojiMode(prev => {
+        const modes = ['emoji', 'symbols', 'images'];
+        const currentIndex = modes.indexOf(prev);
+        return modes[currentIndex === -1 ? modes.length - 1 : (currentIndex === 0 ? modes.length - 1 : currentIndex - 1)];
+      });
+    } else {
+      setContentFilter(prev => {
+        const filters = ['all', 'text', 'image', 'file', 'link'];
+        const currentIndex = filters.indexOf(prev);
+        return filters[currentIndex === -1 ? filters.length - 1 : (currentIndex === 0 ? filters.length - 1 : currentIndex - 1)];
+      });
+    }
+  };
+  const handleFilterRight = () => {
+    blurSearchInput();
+    if (activeTab === 'emoji') {
+      setEmojiMode(prev => {
+        const modes = ['emoji', 'symbols', 'images'];
+        const currentIndex = modes.indexOf(prev);
+        return modes[currentIndex === -1 ? 0 : (currentIndex === modes.length - 1 ? 0 : currentIndex + 1)];
+      });
+    } else {
+      setContentFilter(prev => {
+        const filters = ['all', 'text', 'image', 'file', 'link'];
+        const currentIndex = filters.indexOf(prev);
+        return filters[currentIndex === -1 ? 0 : (currentIndex === filters.length - 1 ? 0 : currentIndex + 1)];
+      });
     }
   };
   const handleTabLeft = () => {
@@ -477,6 +512,8 @@ function App() {
     onTogglePin: handleTogglePin,
     onPreviousGroup: handlePreviousGroup,
     onNextGroup: handleNextGroup,
+    onFilterLeft: handleFilterLeft,
+    onFilterRight: handleFilterRight,
     enabled: true
   });
   const outerContainerClasses = `
@@ -497,7 +534,7 @@ function App() {
   const ContentComponent = <div ref={contentDragRef} className="main-content-area flex-1 min-h-0 overflow-hidden relative pb-[8px] bg-qc-surface transition-colors duration-500">
       {activeTab === 'clipboard' && <ClipboardTab ref={clipboardTabRef} contentFilter={contentFilter} searchQuery={searchQuery} />}
       {activeTab === 'favorites' && <FavoritesTab ref={favoritesTabRef} contentFilter={contentFilter} searchQuery={searchQuery} />}
-      {activeTab === 'emoji' && <Suspense fallback={null}><EmojiTab emojiMode={emojiMode} onEmojiModeChange={setEmojiMode} /></Suspense>}
+      {activeTab === 'emoji' && <Suspense fallback={null}><EmojiTab ref={emojiTabRef} emojiMode={emojiMode} onEmojiModeChange={setEmojiMode} /></Suspense>}
     </div>;
   const ActionBarComponent = <MultiSelectActionBar activeTab={activeTab} />;
   const renderWorkspace = () => {

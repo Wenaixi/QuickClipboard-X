@@ -246,6 +246,12 @@ function ShortcutsSection({ settings, onSettingChange, activeTab }) {
             <SettingItem label={t('settings.shortcuts.togglePin')} description={t('settings.shortcuts.togglePinDesc')}>
               <ShortcutInput value={settings.togglePinShortcut} onChange={value => onSettingChange('togglePinShortcut', value)} onReset={() => onSettingChange('togglePinShortcut', 'Ctrl+P')} hasError={hasErrorStatus('togglePinShortcut')} errorMessage={getErrorMessage('togglePinShortcut')} />
             </SettingItem>
+            <SettingItem label={t('settings.shortcuts.filterLeft')} description={t('settings.shortcuts.filterLeftDesc')}>
+              <ShortcutInput value={settings.filterLeftShortcut} onChange={value => onSettingChange('filterLeftShortcut', value)} onReset={() => onSettingChange('filterLeftShortcut', 'Ctrl+ArrowLeft')} hasError={hasErrorStatus('filterLeftShortcut')} errorMessage={getErrorMessage('filterLeftShortcut')} />
+            </SettingItem>
+            <SettingItem label={t('settings.shortcuts.filterRight')} description={t('settings.shortcuts.filterRightDesc')}>
+              <ShortcutInput value={settings.filterRightShortcut} onChange={value => onSettingChange('filterRightShortcut', value)} onReset={() => onSettingChange('filterRightShortcut', 'Ctrl+ArrowRight')} hasError={hasErrorStatus('filterRightShortcut')} errorMessage={getErrorMessage('filterRightShortcut')} />
+            </SettingItem>
           </SettingsSection>
         );
 
