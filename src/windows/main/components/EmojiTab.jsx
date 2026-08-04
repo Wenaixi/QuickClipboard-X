@@ -847,9 +847,10 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
     }, 250);
   }, [clearImagePluginDragState]);
 
-  // ==== 键盘区域导航(裸方向键) ====
-// zone 状态机: search(默认) → grid / sidebar(可互转) → outside(↑ 退出)
-const enterGrid = useCallback(() => {
+  // ==== 键盘区域导航 ====
+  // 主路径:后端 hotkey → App.dispatchEmojiNav → handleNavAction
+  // zone: outside(默认) → search(↓激活) ↔ grid/sidebar; search↑ → outside
+  const enterGrid = useCallback(() => {
     if (showImages) {
       const ok = imageLibraryRef.current?.activateKb?.();
       if (ok) {
@@ -989,36 +990,13 @@ const enterGrid = useCallback(() => {
     }
   }, [focusSearchInput, enterGrid, enterSidebar, blurSearchInput, moveGridBy, moveSidebarBy]);
 
-  // 主路径:App 转发后端 navigation-action(RegisterHotKey 常吞 webview keydown)
+  // 主路径:App 转发后端 navigation-action。不挂 window keydown,
+  // 避免与 RegisterHotKey 在搜索框聚焦时双触发(进 grid 两次/跳格)。
   const handleNavAction = useCallback((action) => {
     if (skinPickerEmoji || showImageGroupModal) return;
     const intent = resolveZoneNav(kbZoneRef.current, action);
     applyNavIntent(intent);
   }, [skinPickerEmoji, showImageGroupModal, applyNavIntent]);
-
-  // 兜底:搜索框聚焦时 webview 仍可能收到 keydown(未注册热键/部分平台)
-  const handleKbKeyDown = useCallback((e) => {
-    if (kbZoneRef.current === 'outside') return;
-    if (skinPickerEmoji || showImageGroupModal) return;
-    if (!e.key.startsWith('Arrow')) return;
-    // 仅在搜索框真聚焦时兜底,避免与后端热键双触发
-    if (document.activeElement !== searchInputRef.current) return;
-    const keyToAction = {
-      ArrowDown: 'navigate-down',
-      ArrowUp: 'navigate-up',
-      ArrowLeft: 'tab-left',
-      ArrowRight: 'tab-right',
-    };
-    const action = keyToAction[e.key];
-    if (!action) return;
-    e.preventDefault();
-    handleNavAction(action);
-  }, [skinPickerEmoji, showImageGroupModal, handleNavAction]);
-
-  useEffect(() => {
-    window.addEventListener('keydown', handleKbKeyDown);
-    return () => window.removeEventListener('keydown', handleKbKeyDown);
-  }, [handleKbKeyDown]);
 
   // 同步 emojiKbActive 到 navigationStore(兜底:任何 setKbZone 路径都覆盖)
   useEffect(() => {
@@ -1033,7 +1011,12 @@ const enterGrid = useCallback(() => {
       if (section.type === 'row') rowIndexes.push(index);
     });
     if (rowIndexes.length === 0) {
-      if (kbZone === 'grid') setKbZone('outside');
+      if (kbZone === 'grid') {
+        setKbZone('outside');
+        setKbRow(-1);
+        setKbCol(0);
+        imageLibraryRef.current?.resetKbIndex?.();
+      }
       return;
     }
     if (kbRowRef.current >= 0 && !rowIndexes.includes(kbRowRef.current)) {

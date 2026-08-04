@@ -81,6 +81,7 @@ export function resolveZoneNav(kbZone, action) {
 
 /** 侧栏高亮是否应显示在该 cat */
 export function isSidebarCategoryActive(catId, activeCategoryId, fallbackFirstId) {
+  // 空串与 null/undefined 同等视为无 active
   if (activeCategoryId) return catId === activeCategoryId;
   return catId === fallbackFirstId;
 }

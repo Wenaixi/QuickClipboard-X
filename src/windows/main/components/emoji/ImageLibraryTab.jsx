@@ -1055,7 +1055,11 @@ const ImageLibraryTab = forwardRef(function ImageLibraryTab({
     navigateLeft: () => kbMove(-1, 0),
     navigateRight: () => kbMove(1, 0),
     executeCurrent,
-    resetKbIndex: () => setKbImageIndex(-1),
+    resetKbIndex: () => {
+      // 同步清 ref,避免 reset 后同 tick activateKb 读到旧 index
+      kbImageIndexRef.current = -1;
+      setKbImageIndex(-1);
+    },
     activateKb: () => {
       // 同步写 ref 再返回,避免 setState 异步导致首次永远 false
       const result = resolveActivateKb(kbImageIndexRef.current, displayImageTotal);

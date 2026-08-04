@@ -104,4 +104,95 @@ describe('isSidebarCategoryActive', () => {
     assert.equal(isSidebarCategoryActive('a', null, 'a'), true);
     assert.equal(isSidebarCategoryActive('b', null, 'a'), false);
   });
+  it('空字符串 active 视为无,走 fallback', () => {
+    assert.equal(isSidebarCategoryActive('a', '', 'a'), true);
+    assert.equal(isSidebarCategoryActive('b', '', 'a'), false);
+  });
+});
+
+describe('端到端状态机路径(模拟用户)', () => {
+  it('outside→↓search→↓grid→←sidebar→←search→↑outside', () => {
+    let zone = 'outside';
+    const step = (action) => {
+      const intent = resolveZoneNav(zone, action);
+      if (intent.type === 'activate-search' || intent.type === 'enter-search') zone = 'search';
+      else if (intent.type === 'enter-grid') zone = 'grid';
+      else if (intent.type === 'enter-sidebar') zone = 'sidebar';
+      else if (intent.type === 'deactivate') zone = 'outside';
+      else if (intent.type === 'grid-move' && intent.onFail === 'enter-sidebar') {
+        // 模拟首列越界
+        zone = 'sidebar';
+      }
+      return intent;
+    };
+    assert.equal(resolveOutsideAppAction('navigate-down'), 'activate');
+    step('navigate-down');
+    assert.equal(zone, 'search');
+    step('navigate-down');
+    assert.equal(zone, 'grid');
+    step('tab-left'); // onFail enter-sidebar 路径由组件在 move 失败时触发;这里直接模拟
+    assert.equal(zone, 'sidebar');
+    step('tab-left');
+    assert.equal(zone, 'search');
+    step('navigate-up');
+    assert.equal(zone, 'outside');
+    assert.equal(shouldForwardNavToEmoji(false, 'tab-left'), false);
+    assert.equal(resolveOutsideAppAction('tab-left'), 'passthrough');
+  });
+});
+
+describe('App 转发契约源码护栏', () => {
+  it('App.jsx 含 dispatchEmojiNav 与四向 action', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const appSrc = await fs.readFile(path.join(here, '../../App.jsx'), 'utf8');
+    // 剥行注释再匹配
+    const body = appSrc
+      .split('\n')
+      .filter((l) => !l.trimStart().startsWith('//'))
+      .join('\n');
+    assert.ok(body.includes('dispatchEmojiNav'), '缺 dispatchEmojiNav');
+    assert.ok(body.includes("dispatchEmojiNav('navigate-down')"), '↓ 未转发');
+    assert.ok(body.includes("dispatchEmojiNav('navigate-up')"), '↑ 未转发');
+    assert.ok(body.includes("dispatchEmojiNav('tab-left')"), '← 未转发');
+    assert.ok(body.includes("dispatchEmojiNav('tab-right')"), '→ 未转发');
+    assert.ok(body.includes('handleNavAction'), '未调 EmojiTab.handleNavAction');
+    assert.ok(body.includes('shouldForwardNavToEmoji'), '缺 shouldForwardNavToEmoji');
+    assert.ok(body.includes('resolveOutsideAppAction'), '缺 resolveOutsideAppAction');
+  });
+
+  it('EmojiTab 暴露 handleNavAction 且不挂 arrow keydown 主路径', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const src = await fs.readFile(path.join(here, '../EmojiTab.jsx'), 'utf8');
+    const body = src
+      .split('\n')
+      .filter((l) => !l.trimStart().startsWith('//'))
+      .join('\n');
+    assert.ok(body.includes('handleNavAction'), '缺 handleNavAction');
+    assert.ok(body.includes('resolveZoneNav'), '缺 resolveZoneNav');
+    // 禁止再挂裸 Arrow 主路径(会与热键双触发)
+    assert.equal(body.includes("addEventListener('keydown'"), false, '不应再 window keydown 吃方向键');
+    assert.ok(body.includes('resolveSidebarCategoryId'), '进侧栏应保留当前分类');
+    assert.ok(body.includes('isSidebarCategoryActive'), '侧栏应受控高亮');
+  });
+
+  it('ImageLibraryTab activateKb 走 resolveActivateKb', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const src = await fs.readFile(path.join(here, 'ImageLibraryTab.jsx'), 'utf8');
+    const body = src
+      .split('\n')
+      .filter((l) => !l.trimStart().startsWith('//'))
+      .join('\n');
+    assert.ok(body.includes('resolveActivateKb'), 'activateKb 必须用 resolveActivateKb');
+    assert.ok(body.includes('kbImageIndexRef.current = result.index'), '必须同步写 ref');
+    assert.ok(body.includes('kbImageIndexRef.current = -1'), 'resetKbIndex 必须同步清 ref');
+  });
 });
