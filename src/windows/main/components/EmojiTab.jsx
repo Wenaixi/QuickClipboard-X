@@ -24,6 +24,7 @@ import {
   resolveSidebarCategoryId,
   resolveZoneNav,
   isSidebarCategoryActive,
+  resolveSidebarCycleStep,
 } from './emoji/emojiKbNavigation';
 
 const DEFAULT_GRID_COLS = 8;
@@ -220,7 +221,11 @@ function getImageGroupNameFromDragEvent(event) {
   return target?.dataset?.imageGroupName || '';
 }
 
-const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, ref) {
+const EmojiTab = forwardRef(function EmojiTab({
+  emojiMode,
+  onEmojiModeChange,
+  onEscapeFromSidebar,
+}, ref) {
   const showSymbols = emojiMode === 'symbols';
   const showImages = emojiMode === 'images';
   const { t } = useTranslation();
@@ -878,7 +883,9 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
     if (!catId) return;
     setKbZone('sidebar');
     navigationStore.setEmojiKbActive(true);
-    // 保留当前分类,不强制 cats[0]
+    // 显式同步 activeCategory,避免依赖 updateSidebarHighlight 早返 → 侧栏高亮割裂
+    activeCategoryRef.current = catId;
+    setActiveCategory(catId);
     handleCategoryClick(catId);
   }, [currentCategories, handleCategoryClick, showImages, currentImageGroup]);
 
@@ -909,6 +916,34 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
     handleCategoryClick(cats[target].id);
     return true;
   }, [currentCategories, handleCategoryClick, showImages, currentImageGroup]);
+
+  // 侧栏 ←:反向循环子模式,到 emoji 时跳出收藏
+  const sidebarCycleModeRef = useRef(false);
+  const cycleModeOrEscape = useCallback(() => {
+    const step = resolveSidebarCycleStep(emojiMode);
+    if (step.action === 'escape') {
+      onEscapeFromSidebar?.(step.tab);
+      return;
+    }
+    sidebarCycleModeRef.current = true;
+    onEmojiModeChange(step.mode);
+  }, [emojiMode, onEmojiModeChange, onEscapeFromSidebar]);
+
+  // emojiMode 切到非 images 时同步 currentImageGroup 类的 active 引用,
+  // 让侧栏高亮和真实激活位置一致(避免两边割裂)
+  useEffect(() => {
+    if (sidebarCycleModeRef.current) {
+      sidebarCycleModeRef.current = false;
+      // 模式 effect 已把 kbZone 设为 outside,这里恢复 sidebar
+      const firstCat = showSymbols ? SYMBOL_CATS[0]?.id : EMOJI_CATS[0]?.id;
+      if (firstCat) {
+        activeCategoryRef.current = firstCat;
+        setActiveCategory(firstCat);
+      }
+      setKbZone('sidebar');
+      navigationStore.setEmojiKbActive(true);
+    }
+  }, [emojiMode, showSymbols]);
 
   const moveGridBy = useCallback((dRow, dCol) => {
     if (showImages) {
@@ -974,6 +1009,9 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
       case 'deactivate':
         blurSearchInput();
         break;
+      case 'cycle-mode-or-escape':
+        cycleModeOrEscape();
+        break;
       case 'grid-move': {
         const ok = moveGridBy(intent.dRow, intent.dCol);
         if (!ok && intent.onFail === 'enter-search') focusSearchInput();
@@ -988,7 +1026,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
       default:
         break;
     }
-  }, [focusSearchInput, enterGrid, enterSidebar, blurSearchInput, moveGridBy, moveSidebarBy]);
+  }, [focusSearchInput, enterGrid, enterSidebar, blurSearchInput, moveGridBy, moveSidebarBy, cycleModeOrEscape]);
 
   // 主路径:App 转发后端 navigation-action。不挂 window keydown,
   // 避免与 RegisterHotKey 在搜索框聚焦时双触发(进 grid 两次/跳格)。

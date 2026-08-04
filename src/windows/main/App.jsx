@@ -16,7 +16,6 @@ import { useNavigationKeyboard } from '@shared/hooks/useNavigationKeyboard';
 import { useWindowAnimation } from '@shared/hooks/useWindowAnimation';
 import {
   resolveOutsideAppAction,
-  shouldForwardNavToEmoji,
 } from './components/emoji/emojiKbNavigation';
 import { applyBackgroundImage, clearBackgroundImage } from '@shared/utils/backgroundManager';
 import { getUpdateBannerState } from '@shared/api/settings';
@@ -76,6 +75,17 @@ function App() {
   const emojiTabRef = useRef(null);
   const groupsPopupRef = useRef(null);
   const searchRef = useRef(null);
+  // EmojiTab 是 lazy 加载,在 mount 完成前 emojiTabRef.current 是 null。
+  // 此时按 ↓/←/→ 会被吞掉。用 pendingEmojiNavRef 暂存,等 EmojiTab mount 后 flush。
+  const pendingEmojiNavRef = useRef([]);
+  const setEmojiTabRef = useCallback((instance) => {
+    emojiTabRef.current = instance;
+    if (instance && pendingEmojiNavRef.current.length > 0) {
+      const queue = pendingEmojiNavRef.current;
+      pendingEmojiNavRef.current = [];
+      queue.forEach((action) => instance.handleNavAction?.(action));
+    }
+  }, []);
   const tabNavigationMode = isSidebarTabsLayout
     ? TAB_NAVIGATION_MODE.SIDEBAR
     : TAB_NAVIGATION_MODE.HORIZONTAL;
@@ -378,19 +388,17 @@ function App() {
   };
   // 表情页:后端全局热键是方向键唯一可靠来源(RegisterHotKey 常吞 webview keydown)。
   // 已激活 → 转发给 EmojiTab;outside 仅 ↓ 激活;左右 passthrough 切主标签。
+  // EmojiTab 还在 lazy 加载时,事件入队等 mount 后重放,避免被吞。
   const dispatchEmojiNav = (action) => {
     if (activeTab !== 'emoji') return false;
-    if (shouldForwardNavToEmoji(navigationStore.emojiKbActive, action)) {
-      emojiTabRef.current?.handleNavAction?.(action);
+    const handler = emojiTabRef.current?.handleNavAction;
+    if (handler) {
+      handler(action);
       return true;
     }
-    const outside = resolveOutsideAppAction(action);
-    if (outside === 'activate') {
-      emojiTabRef.current?.handleNavAction?.(action);
-      return true;
-    }
-    if (outside === 'ignore') return true;
-    return false;
+    if (resolveOutsideAppAction(action) === 'ignore') return true;
+    pendingEmojiNavRef.current.push(action);
+    return true;
   };
   const handleNavigateUp = () => {
     if (dispatchEmojiNav('navigate-up')) return;
@@ -558,7 +566,7 @@ function App() {
   const ContentComponent = <div ref={contentDragRef} className="main-content-area flex-1 min-h-0 overflow-hidden relative pb-[8px] bg-qc-surface transition-colors duration-500">
       {activeTab === 'clipboard' && <ClipboardTab ref={clipboardTabRef} contentFilter={contentFilter} searchQuery={searchQuery} />}
       {activeTab === 'favorites' && <FavoritesTab ref={favoritesTabRef} contentFilter={contentFilter} searchQuery={searchQuery} />}
-      {activeTab === 'emoji' && <Suspense fallback={null}><EmojiTab ref={emojiTabRef} emojiMode={emojiMode} onEmojiModeChange={setEmojiMode} /></Suspense>}
+      {activeTab === 'emoji' && <Suspense fallback={null}><EmojiTab ref={setEmojiTabRef} emojiMode={emojiMode} onEmojiModeChange={setEmojiMode} onEscapeFromSidebar={setActiveTab} /></Suspense>}
     </div>;
   const ActionBarComponent = <MultiSelectActionBar activeTab={activeTab} />;
   const renderWorkspace = () => {

@@ -72,11 +72,33 @@ export function resolveZoneNav(kbZone, action) {
     if (action === 'navigate-down') return { type: 'sidebar-move', delta: 1 };
     if (action === 'navigate-up') return { type: 'sidebar-move', delta: -1, onFail: 'enter-search' };
     if (action === 'tab-right') return { type: 'enter-grid' };
-    if (action === 'tab-left') return { type: 'enter-search' };
+    // 从侧栏再往左:反向循环子模式(与 Ctrl+← 同向),到 emoji 时跳出到收藏
+    if (action === 'tab-left') return { type: 'cycle-mode-or-escape' };
     return { type: 'none' };
   }
 
   return { type: 'none' };
+}
+
+/**
+ * sidebar ← 反向循环子模式 + 终点跳出。
+ * 自然序 [emoji, symbols, images],反向:emoji→images→symbols→emoji。
+ * 在 'emoji'(反向终点)时跳出到 favorites(不循环回 images)。
+ * 返回 { action: 'set-mode' | 'escape', mode?, tab? }。
+ */
+export function resolveSidebarCycleStep(currentMode, escapeTab = 'favorites') {
+  const NATURAL = ['emoji', 'symbols', 'images'];
+  const idx = NATURAL.indexOf(currentMode);
+  if (idx === -1) {
+    // 未知模式:直接跳出
+    return { action: 'escape', tab: escapeTab };
+  }
+  if (idx === 0) {
+    // 'emoji' 是反向终点 → 跳出
+    return { action: 'escape', tab: escapeTab };
+  }
+  // symbols(idx=1) → emoji, images(idx=2) → symbols
+  return { action: 'set-mode', mode: NATURAL[idx - 1] };
 }
 
 /** 侧栏高亮是否应显示在该 cat */
