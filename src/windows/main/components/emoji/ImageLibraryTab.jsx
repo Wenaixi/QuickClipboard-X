@@ -292,7 +292,7 @@ function ImageTile({
           isDragging
             ? 'opacity-45 scale-95 saturate-50 ring-2 ring-dashed ring-blue-400 bg-qc-active'
             : isKbFocused
-              ? 'bg-qc-active ring-2 ring-dashed ring-orange-500 shadow-sm'
+              ? 'ring-2 ring-blue-500 ring-inset'
               : isSelected
                 ? 'bg-qc-active ring-2 ring-blue-500 shadow-sm'
                 : 'hover:bg-qc-hover hover:ring-2 hover:ring-blue-400'

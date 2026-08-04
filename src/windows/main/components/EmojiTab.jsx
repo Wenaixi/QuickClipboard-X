@@ -235,17 +235,14 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
   const [isModeReady, setIsModeReady] = useState(true);
   const [contentWidth, setContentWidth] = useState(0);
   const [useEmojiFallbackFont, setUseEmojiFallbackFont] = useState(false);
-  // 键盘区域导航状态: kbRegion 当前聚焦区域, kbRow/kbCol 网格内选中位置, kbSidebarIdx 侧栏分类索引
-  const [kbRegion, setKbRegion] = useState('none'); // 'none' | 'sidebar' | 'search' | 'grid'
+  // 键盘区域导航状态: kbZone 当前 zone('search' 起点 / 'grid' / 'sidebar' / 'outside' 退出),kbRow/kbCol 仅在 grid zone 用
+  const [kbZone, setKbZone] = useState('search'); // 'search' | 'grid' | 'sidebar' | 'outside'
   const [kbRow, setKbRow] = useState(-1);
   const [kbCol, setKbCol] = useState(0);
-  const [kbSidebarIdx, setKbSidebarIdx] = useState(-1);
   const kbRowRef = useRef(kbRow);
   const kbColRef = useRef(kbCol);
-  const kbSidebarIdxRef = useRef(kbSidebarIdx);
   kbRowRef.current = kbRow;
   kbColRef.current = kbCol;
-  kbSidebarIdxRef.current = kbSidebarIdx;
   const imageLibraryRef = useRef(null);
   const prevEmojiModeRef = useRef(emojiMode);
   const activeImageDragItemsRef = useRef([]);
@@ -601,11 +598,10 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
 
   useEffect(() => {
     setSearchQuery('');
-    // 切换子模式时重置键盘导航状态
-    setKbRegion('none');
+    // 切换子模式时重置键盘导航状态,起点回搜索框
+    setKbZone('search');
     setKbRow(-1);
     setKbCol(0);
-    setKbSidebarIdx(-1);
 
     if (showImages) {
       loadImageGroups(currentImageGroup);
@@ -729,7 +725,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
                   <button
                     onClick={() => handlePaste(item, section.catId)}
                     className={`aspect-square w-full flex items-center justify-center text-2xl leading-none text-qc-fg rounded cursor-pointer transition-[transform,box-shadow,background-color,border-color] ${uiAnimationEnabled ? 'active:scale-95 hover:bg-qc-panel hover:shadow-lg hover:border hover:border-qc-border' : 'hover:bg-qc-hover'} ${
-                      kbRegion === 'grid' && index === kbRow && idx === kbCol ? 'ring-2 ring-blue-500 bg-qc-active' : ''
+                      kbZone === 'grid' && index === kbRow && idx === kbCol ? 'ring-2 ring-blue-500 ring-inset' : ''
                     }`}
                     style={uiAnimationEnabled ? {
                       opacity: 0,
@@ -759,7 +755,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
       );
     }
     return null;
-  }, [handlePaste, isChinese, skinTone, applySkintone, getSkinVariants, handleSkinPickerOpen, emojiGlyphClassName, kbRegion, kbRow, kbCol]);
+  }, [handlePaste, isChinese, skinTone, applySkintone, getSkinVariants, handleSkinPickerOpen, emojiGlyphClassName, kbZone, kbRow, kbCol]);
 
   const currentCategories = useMemo(() => {
     if (showImages) return imageGroups.map(group => ({
@@ -783,11 +779,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
     } else {
       scrollToCategory(catId);
     }
-    // 键盘导航:侧栏移动时同步分类索引
-    const cats = showImages ? imageGroups : (showSymbols ? SYMBOL_CATS : EMOJI_CATS);
-    const idx = cats.findIndex(cat => cat.id === catId);
-    if (idx >= 0) setKbSidebarIdx(idx);
-  }, [showImages, handleImageGroupClick, scrollToCategory, showSymbols, imageGroups]);
+  }, [showImages, handleImageGroupClick, scrollToCategory]);
 
   const handleAddImageGroup = useCallback(() => {
     setEditingImageGroup(null);
@@ -854,9 +846,61 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
     }, 250);
   }, [clearImagePluginDragState]);
 
-  // ==== 键盘区域导航 ====
-  // 网格内按 virtualData 中 type==='row' 项移动:行 ±1 找下一个 row,列夹到新行 cols 边界
+  // ==== 键盘区域导航(裸方向键) ====
+// zone 状态机: search(默认) → grid / sidebar(可互转) → outside(↑ 退出)
+const enterGrid = useCallback(() => {
+    if (showImages) {
+      const ok = imageLibraryRef.current?.activateKb?.();
+      if (ok) {
+        setKbZone('grid');
+        return;
+      }
+      return;
+    }
+    const data = virtualDataRef.current;
+    const firstRowIndex = data.findIndex(section => section.type === 'row');
+    if (firstRowIndex === -1) return;
+    setKbRow(firstRowIndex);
+    setKbCol(0);
+    setKbZone('grid');
+    scrollContainerRef.current?.scrollToIndex({ index: firstRowIndex, align: 'center' });
+  }, [showImages]);
+
+  const enterSidebar = useCallback(() => {
+    const cats = currentCategories;
+    if (cats.length === 0) return;
+    setKbZone('sidebar');
+    handleCategoryClick(cats[0].id);
+  }, [currentCategories, handleCategoryClick]);
+
+  const focusSearchInput = useCallback(() => {
+    setKbZone('search');
+    searchInputRef.current?.focus?.();
+  }, []);
+
+  const moveSidebarBy = useCallback((delta) => {
+    const cats = currentCategories;
+    if (cats.length === 0) return false;
+    // 通过当前激活的 catId 找到索引,避免维护独立的 kbSidebarIdx
+    const currentId = activeCategoryRef.current;
+    let idx = cats.findIndex(c => c.id === currentId);
+    if (idx < 0) idx = 0;
+    const target = idx + delta;
+    if (target < 0 || target >= cats.length) return false;
+    handleCategoryClick(cats[target].id);
+    return true;
+  }, [currentCategories, handleCategoryClick]);
+
   const moveGridBy = useCallback((dRow, dCol) => {
+    if (showImages) {
+      const api = imageLibraryRef.current;
+      if (!api) return false;
+      if (dRow === -1) return api.navigateUp();
+      if (dRow === 1) return api.navigateDown();
+      if (dCol === -1) return api.navigateLeft();
+      if (dCol === 1) return api.navigateRight();
+      return false;
+    }
     const data = virtualDataRef.current;
     const rowIndexes = [];
     data.forEach((section, index) => {
@@ -864,178 +908,118 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
     });
     if (rowIndexes.length === 0) return false;
 
-    let currentRowPos = rowIndexes.indexOf(kbRowRef.current);
-    let targetRowPos = -1;
+    let currentPos = rowIndexes.indexOf(kbRowRef.current);
+    let targetRowPos;
     let targetCol = kbColRef.current;
 
-    if (currentRowPos === -1) {
+    if (currentPos === -1) {
       targetRowPos = dRow >= 0 ? 0 : rowIndexes.length - 1;
-      targetCol = dCol >= 0 ? 0 : 0;
+      targetCol = 0;
     } else {
-      targetRowPos = currentRowPos + dRow;
-      targetCol = targetCol + dCol;
+      targetRowPos = currentPos + dRow;
+      if (dCol !== 0) targetCol = kbColRef.current + dCol;
     }
 
-    if (dRow === 0) {
-      // 左右移动:仅允许在行内移动
-      if (targetCol < 0 || targetCol >= data[rowIndexes[currentRowPos]].items.length) {
-        return false;
-      }
+    // 行内左右移动:列夹到当前行边界,越界返回 false(让 caller 切 zone)
+    if (dCol !== 0) {
+      if (currentPos === -1) return false;
+      const curRow = data[rowIndexes[currentPos]];
+      if (targetCol < 0 || targetCol >= curRow.items.length) return false;
     }
 
-    if (targetRowPos < 0 || targetRowPos >= rowIndexes.length) {
-      return false;
-    }
+    if (targetRowPos < 0 || targetRowPos >= rowIndexes.length) return false;
 
     const rowIndex = rowIndexes[targetRowPos];
     const row = data[rowIndex];
     const clampedCol = Math.max(0, Math.min(targetCol, row.items.length - 1));
     setKbRow(rowIndex);
     setKbCol(clampedCol);
-    setKbRegion('grid');
     scrollContainerRef.current?.scrollToIndex({ index: rowIndex, align: 'center' });
     return true;
-  }, []);
+  }, [showImages]);
 
-  const enterGridFromSidebar = useCallback(() => {
-    const data = virtualDataRef.current;
-    const firstRowIndex = data.findIndex(section => section.type === 'row');
-    if (firstRowIndex === -1) return;
-    setKbRow(firstRowIndex);
-    setKbCol(0);
-    setKbRegion('grid');
-    scrollContainerRef.current?.scrollToIndex({ index: firstRowIndex, align: 'center' });
-  }, []);
-
-  const enterGridFromSearch = useCallback(() => {
-    // 搜索词非空时结果网格同样以第一个 row 进入;空搜索回到当前分类第一行
-    enterGridFromSidebar();
-  }, [enterGridFromSidebar]);
-
-  const focusSearchFromGrid = useCallback(() => {
-    setKbRegion('search');
-    searchInputRef.current?.focus?.();
-  }, []);
-
-  const moveSidebarBy = useCallback((delta) => {
-    const cats = currentCategories;
-    if (cats.length === 0) return false;
-    const currentPos = kbSidebarIdxRef.current < 0 ? 0 : kbSidebarIdxRef.current;
-    const targetPos = currentPos + delta;
-    if (targetPos < 0 || targetPos >= cats.length) {
-      return false;
-    }
-    setKbSidebarIdx(targetPos);
-    setKbRegion('sidebar');
-    handleCategoryClick(cats[targetPos].id);
-    return true;
-  }, [currentCategories, handleCategoryClick]);
-  // 首次按键激活:进入网格
-  const activateKb = useCallback(() => {
-    if (showImages) {
-      const ok = imageLibraryRef.current?.activateKb?.();
-      if (ok) {
-        setKbRegion('grid');
-        return true;
-      }
-      return false;
-    }
-    enterGridFromSidebar();
-    return true;
-  }, [showImages, enterGridFromSidebar]);
-
-  // 区域按键分发(仅 Alt+方向键)
+  // 裸方向键分发(无 Alt)。App.jsx 在 emoji tab 时已丢弃 tab-left/right/navigate-up/down,所以这里不会被后端事件覆盖
   const handleKbKeyDown = useCallback((e) => {
-    if (!e.altKey || !e.key.startsWith('Arrow')) return;
-    const dir = e.key.replace('Arrow', '').toLowerCase();
+    if (kbZone === 'outside') return; // 用户主动退出,后续方向键不拦截
     if (skinPickerEmoji || showImageGroupModal) return;
-    const inSearch = document.activeElement === searchInputRef.current;
+    if (!e.key.startsWith('Arrow')) return;
+    const key = e.key;
 
-    if (inSearch) {
-      if (dir === 'down') {
+    // 搜索框聚焦时:聚焦搜索框的导航快捷键
+    if (document.activeElement === searchInputRef.current) {
+      if (key === 'ArrowDown' || key === 'ArrowRight') {
         e.preventDefault();
-        enterGridFromSearch();
+        enterGrid();
+      } else if (key === 'ArrowLeft') {
+        e.preventDefault();
+        enterSidebar();
+      } else if (key === 'ArrowUp') {
+        e.preventDefault();
+        setKbZone('outside');
       }
-      return;
-    }
-
-    if (kbRegion === 'none') {
-      e.preventDefault();
-      activateKb();
+      // 其他方向键(暂未用到)走浏览器默认
       return;
     }
 
     e.preventDefault();
-    if (showImages) {
-      const api = imageLibraryRef.current;
-      if (!api) return;
-      if (dir === 'up') {
-        if (!api.navigateUp()) {
-          setKbRegion('sidebar');
-        }
-      } else if (dir === 'down') {
-        if (!api.navigateDown()) {
-          setKbRegion('search');
-          searchInputRef.current?.focus?.();
-        }
-      } else if (dir === 'left') {
-        if (!api.navigateLeft()) {
-          setKbRegion('sidebar');
-        }
-      } else {
-        api.navigateRight();
+
+    if (kbZone === 'search') {
+      if (key === 'ArrowDown' || key === 'ArrowRight') {
+        enterGrid();
+      } else if (key === 'ArrowLeft') {
+        enterSidebar();
+      } else if (key === 'ArrowUp') {
+        setKbZone('outside');
       }
       return;
     }
 
-    if (kbRegion === 'sidebar') {
-      if (dir === 'up') {
-        if (!moveSidebarBy(-1)) {
-          // 顶部夹住
-        }
-      } else if (dir === 'down') {
-        if (!moveSidebarBy(1)) {
-          // 底部越界:聚焦搜索框
-          setKbRegion('search');
-          searchInputRef.current?.focus?.();
-        }
-      } else if (dir === 'right') {
-        enterGridFromSidebar();
-      }
-      return;
-    }
-
-    if (kbRegion === 'grid') {
-      if (dir === 'up') {
-        if (!moveGridBy(-1, 0)) {
-          setKbRegion('search');
-          searchInputRef.current?.focus?.();
-        }
-      } else if (dir === 'down') {
+    if (kbZone === 'grid') {
+      if (key === 'ArrowDown') {
         moveGridBy(1, 0);
-      } else if (dir === 'left') {
-        if (!moveGridBy(0, -1)) {
-          setKbRegion('sidebar');
+      } else if (key === 'ArrowUp') {
+        if (!moveGridBy(-1, 0)) {
+          focusSearchInput();
         }
-      } else {
+      } else if (key === 'ArrowRight') {
         moveGridBy(0, 1);
+      } else if (key === 'ArrowLeft') {
+        if (!moveGridBy(0, -1)) {
+          // 首列 ← 越界 → 侧栏(用户路径)
+          setKbZone('sidebar');
+          const cats = currentCategories;
+          if (cats.length > 0) {
+            handleCategoryClick(cats[0].id);
+          }
+        }
       }
       return;
     }
 
-    if (kbRegion === 'search') {
-      if (dir === 'down') {
-        enterGridFromSearch();
+    if (kbZone === 'sidebar') {
+      if (key === 'ArrowDown') {
+        if (!moveSidebarBy(1)) {
+          // 底部夹住,no-op
+        }
+      } else if (key === 'ArrowUp') {
+        if (!moveSidebarBy(-1)) {
+          focusSearchInput();
+        }
+      } else if (key === 'ArrowRight') {
+        enterGrid();
+      } else if (key === 'ArrowLeft') {
+        focusSearchInput();
       }
+      return;
     }
-  }, [kbRegion, showImages, skinPickerEmoji, showImageGroupModal, activateKb, moveSidebarBy, enterGridFromSidebar, enterGridFromSearch, moveGridBy]);
+  }, [kbZone, showImages, skinPickerEmoji, showImageGroupModal, enterGrid, enterSidebar, focusSearchInput, moveSidebarBy, moveGridBy]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKbKeyDown);
     return () => window.removeEventListener('keydown', handleKbKeyDown);
   }, [handleKbKeyDown]);
 
-  // 键盘选中高亮:当前分类滚动联动已有 updateSidebarHighlight;virtualData 变化时夹住 kbRow
+  // 虚拟列表数据变化时,夹住 kbRow 到最近的 row 项;网格为空时退出 grid zone
   useEffect(() => {
     const data = virtualDataRef.current;
     const rowIndexes = [];
@@ -1043,14 +1027,14 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
       if (section.type === 'row') rowIndexes.push(index);
     });
     if (rowIndexes.length === 0) {
-      if (kbRegion === 'grid') setKbRegion('none');
+      if (kbZone === 'grid') setKbZone('search');
       return;
     }
     if (kbRowRef.current >= 0 && !rowIndexes.includes(kbRowRef.current)) {
       setKbRow(rowIndexes[0]);
       setKbCol(0);
     }
-  }, [virtualData, kbRegion]);
+  }, [virtualData, kbZone]);
 
   // 输出选中项:图片模式转发图库,emoji/符号粘贴 kbRow/kbCol 格
   const executeCurrentItem = useCallback(() => {

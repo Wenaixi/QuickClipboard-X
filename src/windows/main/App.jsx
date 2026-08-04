@@ -373,6 +373,7 @@ function App() {
     searchRef.current?.blur?.();
   };
   const handleNavigateUp = () => {
+    if (activeTab === 'emoji') return; // EmojiTab 内部 keydown 接管
     blurSearchInput();
     if (activeTab === 'clipboard' && clipboardTabRef.current?.navigateUp) {
       clipboardTabRef.current.navigateUp();
@@ -381,6 +382,7 @@ function App() {
     }
   };
   const handleNavigateDown = () => {
+    if (activeTab === 'emoji') return; // EmojiTab 内部 keydown 接管
     blurSearchInput();
     if (activeTab === 'clipboard' && clipboardTabRef.current?.navigateDown) {
       clipboardTabRef.current.navigateDown();
@@ -431,6 +433,7 @@ function App() {
     }
   };
   const handleTabLeft = () => {
+    if (activeTab === 'emoji') return; // EmojiTab 内部 keydown 接管
     setActiveTab(currentTab => {
       const tabs = visibleTabs;
       const currentIndex = tabs.indexOf(currentTab);
@@ -439,6 +442,7 @@ function App() {
     });
   };
   const handleTabRight = () => {
+    if (activeTab === 'emoji') return; // EmojiTab 内部 keydown 接管
     setActiveTab(currentTab => {
       const tabs = visibleTabs;
       const currentIndex = tabs.indexOf(currentTab);
