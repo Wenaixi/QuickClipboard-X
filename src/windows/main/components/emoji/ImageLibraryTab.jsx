@@ -9,6 +9,7 @@ import { useCustomScrollbar } from '@shared/hooks/useCustomScrollbar';
 import * as imageLibrary from '@shared/api/imageLibrary';
 import SimpleInputDialog from '../SimpleInputDialog';
 import Tooltip from '@shared/components/common/Tooltip.jsx';
+import { resolveActivateKb } from './emojiKbNavigation';
 
 const IMAGE_DEFAULT_COLS = 4;
 const IMAGE_MIN_COLS = 4;
@@ -1056,10 +1057,12 @@ const ImageLibraryTab = forwardRef(function ImageLibraryTab({
     executeCurrent,
     resetKbIndex: () => setKbImageIndex(-1),
     activateKb: () => {
-      if (kbImageIndexRef.current < 0 && displayImageTotal > 0) {
-        setKbImageIndex(0);
-      }
-      return kbImageIndexRef.current >= 0;
+      // 同步写 ref 再返回,避免 setState 异步导致首次永远 false
+      const result = resolveActivateKb(kbImageIndexRef.current, displayImageTotal);
+      if (!result.ok) return false;
+      kbImageIndexRef.current = result.index;
+      setKbImageIndex(result.index);
+      return true;
     }
   }));
 
