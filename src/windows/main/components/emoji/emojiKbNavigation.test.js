@@ -7,6 +7,7 @@ import {
   shouldForwardNavToEmoji,
   resolveZoneNav,
   isSidebarCategoryActive,
+  resolveSidebarCycleStep,
 } from './emojiKbNavigation.js';
 
 describe('resolveActivateKb', () => {
@@ -91,7 +92,42 @@ describe('resolveZoneNav', () => {
       type: 'sidebar-move', delta: -1, onFail: 'enter-search',
     });
     assert.deepEqual(resolveZoneNav('sidebar', 'tab-right'), { type: 'enter-grid' });
-    assert.deepEqual(resolveZoneNav('sidebar', 'tab-left'), { type: 'enter-search' });
+    assert.deepEqual(resolveZoneNav('sidebar', 'tab-left'), { type: 'cycle-mode-or-escape' });
+  });
+});
+
+describe('resolveSidebarCycleStep', () => {
+  it('emoji(自然序首位,反向终点)→ escape favorites', () => {
+    assert.deepEqual(resolveSidebarCycleStep('emoji'), { action: 'escape', tab: 'favorites' });
+  });
+  it('symbols → emoji(反向)', () => {
+    assert.deepEqual(resolveSidebarCycleStep('symbols'), { action: 'set-mode', mode: 'emoji' });
+  });
+  it('images → symbols(反向)', () => {
+    assert.deepEqual(resolveSidebarCycleStep('images'), { action: 'set-mode', mode: 'symbols' });
+  });
+  it('未知模式直接 escape', () => {
+    assert.deepEqual(resolveSidebarCycleStep('foo'), { action: 'escape', tab: 'favorites' });
+  });
+  it('自定义 escapeTab', () => {
+    assert.deepEqual(resolveSidebarCycleStep('emoji', 'clipboard'), {
+      action: 'escape', tab: 'clipboard',
+    });
+  });
+  it('完整反向序列 images→symbols→emoji→escape', () => {
+    const trace = [];
+    let mode = 'images';
+    for (let i = 0; i < 4; i += 1) {
+      const step = resolveSidebarCycleStep(mode);
+      trace.push(step);
+      if (step.action === 'set-mode') mode = step.mode;
+      else break;
+    }
+    assert.deepEqual(trace, [
+      { action: 'set-mode', mode: 'symbols' },
+      { action: 'set-mode', mode: 'emoji' },
+      { action: 'escape', tab: 'favorites' },
+    ]);
   });
 });
 
@@ -111,17 +147,21 @@ describe('isSidebarCategoryActive', () => {
 });
 
 describe('端到端状态机路径(模拟用户)', () => {
-  it('outside→↓search→↓grid→←sidebar→←search→↑outside', () => {
+  it('outside→↓search→↓grid→←sidebar(首列越界)→cycle→↑outside', () => {
     let zone = 'outside';
     const step = (action) => {
       const intent = resolveZoneNav(zone, action);
       if (intent.type === 'activate-search' || intent.type === 'enter-search') zone = 'search';
       else if (intent.type === 'enter-grid') zone = 'grid';
       else if (intent.type === 'enter-sidebar') zone = 'sidebar';
-      else if (intent.type === 'deactivate') zone = 'outside';
+      else if (intent.type === 'cycle-mode-or-escape') {
+        // 委托给 resolveSidebarCycleStep;组件层不在 zone 状态机里改 zone
+      } else if (intent.type === 'deactivate') zone = 'outside';
       else if (intent.type === 'grid-move' && intent.onFail === 'enter-sidebar') {
-        // 模拟首列越界
         zone = 'sidebar';
+      } else if (intent.type === 'sidebar-move' && intent.onFail === 'enter-search') {
+        // 顶部越界回搜索
+        zone = 'search';
       }
       return intent;
     };
@@ -130,10 +170,15 @@ describe('端到端状态机路径(模拟用户)', () => {
     assert.equal(zone, 'search');
     step('navigate-down');
     assert.equal(zone, 'grid');
-    step('tab-left'); // onFail enter-sidebar 路径由组件在 move 失败时触发;这里直接模拟
+    step('tab-left'); // onFail enter-sidebar(首列越界)
     assert.equal(zone, 'sidebar');
-    step('tab-left');
+    // 新行为:sidebar tab-left 返回 cycle-mode-or-escape,zone 保持
+    assert.deepEqual(step('tab-left'), { type: 'cycle-mode-or-escape' });
+    assert.equal(zone, 'sidebar');
+    // 侧栏顶↑回搜索
+    step('navigate-up');
     assert.equal(zone, 'search');
+    // 搜索↑反激活
     step('navigate-up');
     assert.equal(zone, 'outside');
     assert.equal(shouldForwardNavToEmoji(false, 'tab-left'), false);
@@ -142,7 +187,7 @@ describe('端到端状态机路径(模拟用户)', () => {
 });
 
 describe('App 转发契约源码护栏', () => {
-  it('App.jsx 含 dispatchEmojiNav 与四向 action', async () => {
+  it('App.jsx 含 dispatchEmojiNav + 队列重放 + Escape 回调', async () => {
     const fs = await import('node:fs/promises');
     const path = await import('node:path');
     const { fileURLToPath } = await import('node:url');
@@ -159,11 +204,15 @@ describe('App 转发契约源码护栏', () => {
     assert.ok(body.includes("dispatchEmojiNav('tab-left')"), '← 未转发');
     assert.ok(body.includes("dispatchEmojiNav('tab-right')"), '→ 未转发');
     assert.ok(body.includes('handleNavAction'), '未调 EmojiTab.handleNavAction');
-    assert.ok(body.includes('shouldForwardNavToEmoji'), '缺 shouldForwardNavToEmoji');
     assert.ok(body.includes('resolveOutsideAppAction'), '缺 resolveOutsideAppAction');
+    // lazy-load 竞态修复:队列 + callback ref
+    assert.ok(body.includes('pendingEmojiNavRef'), '缺 pendingEmojiNavRef 队列');
+    assert.ok(body.includes('setEmojiTabRef'), '缺 setEmojiTabRef callback ref');
+    // 跳出回调
+    assert.ok(body.includes('onEscapeFromSidebar={setActiveTab}'), '缺 onEscapeFromSidebar 传出');
   });
 
-  it('EmojiTab 暴露 handleNavAction 且不挂 arrow keydown 主路径', async () => {
+  it('EmojiTab 暴露 handleNavAction + 不挂 keydown + 接收 onEscapeFromSidebar', async () => {
     const fs = await import('node:fs/promises');
     const path = await import('node:path');
     const { fileURLToPath } = await import('node:url');
@@ -175,10 +224,16 @@ describe('App 转发契约源码护栏', () => {
       .join('\n');
     assert.ok(body.includes('handleNavAction'), '缺 handleNavAction');
     assert.ok(body.includes('resolveZoneNav'), '缺 resolveZoneNav');
-    // 禁止再挂裸 Arrow 主路径(会与热键双触发)
     assert.equal(body.includes("addEventListener('keydown'"), false, '不应再 window keydown 吃方向键');
     assert.ok(body.includes('resolveSidebarCategoryId'), '进侧栏应保留当前分类');
     assert.ok(body.includes('isSidebarCategoryActive'), '侧栏应受控高亮');
+    assert.ok(body.includes('resolveSidebarCycleStep'), '侧栏 ← 应委托 resolveSidebarCycleStep');
+    assert.ok(body.includes('onEscapeFromSidebar'), '缺 onEscapeFromSidebar 回调');
+    // enterSidebar 必须主动同步 activeCategory
+    assert.ok(
+      body.match(/setActiveCategory\(catId\)/),
+      'enterSidebar 应主动 setActiveCategory(catId),避免依赖 updateSidebarHighlight 早返',
+    );
   });
 
   it('ImageLibraryTab activateKb 走 resolveActivateKb', async () => {
