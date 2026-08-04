@@ -20,6 +20,11 @@ import {
   symbolCategories,
   ensureEmojiData, getEmojiDataCache, getEmojiMetaCache, getEmojiSkinSupport
 } from './emoji/emojiData';
+import {
+  resolveSidebarCategoryId,
+  resolveZoneNav,
+  isSidebarCategoryActive,
+} from './emoji/emojiKbNavigation';
 
 const DEFAULT_GRID_COLS = 8;
 const GRID_MIN_COLS = 4;
@@ -236,16 +241,18 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
   const [isModeReady, setIsModeReady] = useState(true);
   const [contentWidth, setContentWidth] = useState(0);
   const [useEmojiFallbackFont, setUseEmojiFallbackFont] = useState(false);
-  // 键盘区域导航状态: kbZone 当前 zone;kbRow/kbCol 在 grid zone 用
-  // 默认 'outside' —— emoji tab 一打开无任何高亮,←/→ 恢复原功能(切主标签/切种类)
-  // 只有 ↓ 才激活进入 search/grid/sidebar,↑ 反激活
+  // 键盘区域导航:默认 outside(无高亮,←/→ 切主标签);↓ 经 App 转发激活
+  // 主路径是后端 global hotkey → App.dispatchEmojiNav → handleNavAction(不依赖 webview keydown)
   const [kbZone, setKbZone] = useState('outside'); // 'outside' | 'search' | 'grid' | 'sidebar'
   const [kbRow, setKbRow] = useState(-1);
   const [kbCol, setKbCol] = useState(0);
+  const [activeCategory, setActiveCategory] = useState('recent');
   const kbRowRef = useRef(kbRow);
   const kbColRef = useRef(kbCol);
+  const kbZoneRef = useRef(kbZone);
   kbRowRef.current = kbRow;
   kbColRef.current = kbCol;
+  kbZoneRef.current = kbZone;
   const imageLibraryRef = useRef(null);
   const prevEmojiModeRef = useRef(emojiMode);
   const activeImageDragItemsRef = useRef([]);
@@ -253,7 +260,6 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
   const scrollContainerRef = useRef(null);
   const contentMeasureRef = useRef(null);
   const activeCategoryRef = useRef('recent');
-  const sidebarButtonsRef = useRef({});
   const virtualDataRef = useRef([]); 
   const emojiMetaRef = useRef({});
   const isUserScrollingRef = useRef(false);
@@ -581,22 +587,11 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
 
   virtualDataRef.current = virtualData;
 
+  // 侧栏高亮受控:只改 state,禁止 classList 手改(re-render 会盖掉)
   const updateSidebarHighlight = useCallback((catId) => {
     if (activeCategoryRef.current === catId) return;
-    
-    const oldBtn = sidebarButtonsRef.current[activeCategoryRef.current];
-    if (oldBtn) {
-      oldBtn.classList.remove('ring-2', 'ring-blue-500', 'ring-inset', 'text-blue-600');
-      oldBtn.classList.add('text-qc-fg-muted', 'hover:bg-qc-hover');
-    }
-
-    const newBtn = sidebarButtonsRef.current[catId];
-    if (newBtn) {
-      newBtn.classList.remove('text-qc-fg-muted', 'hover:bg-qc-hover');
-      newBtn.classList.add('ring-2', 'ring-blue-500', 'ring-inset', 'text-blue-600');
-    }
-    
     activeCategoryRef.current = catId;
+    setActiveCategory(catId);
   }, []);
 
   useEffect(() => {
@@ -606,6 +601,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
     navigationStore.setEmojiKbActive(false);
     setKbRow(-1);
     setKbCol(0);
+    imageLibraryRef.current?.resetKbIndex?.();
 
     if (showImages) {
       loadImageGroups(currentImageGroup);
@@ -613,6 +609,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
       const firstCat = showSymbols ? SYMBOL_CATS[0]?.id : EMOJI_CATS[0]?.id;
       if (firstCat) {
         activeCategoryRef.current = firstCat;
+        setActiveCategory(firstCat);
         scrollContainerRef.current?.scrollToIndex({ index: 0 });
       }
     }
@@ -874,11 +871,15 @@ const enterGrid = useCallback(() => {
 
   const enterSidebar = useCallback(() => {
     const cats = currentCategories;
-    if (cats.length === 0) return;
+    // 图库侧栏以 currentImageGroup 为 active;emoji/符号用 activeCategoryRef
+    const activeId = showImages ? currentImageGroup : activeCategoryRef.current;
+    const catId = resolveSidebarCategoryId(cats, activeId);
+    if (!catId) return;
     setKbZone('sidebar');
     navigationStore.setEmojiKbActive(true);
-    handleCategoryClick(cats[0].id);
-  }, [currentCategories, handleCategoryClick]);
+    // 保留当前分类,不强制 cats[0]
+    handleCategoryClick(catId);
+  }, [currentCategories, handleCategoryClick, showImages, currentImageGroup]);
 
   const focusSearchInput = useCallback(() => {
     setKbZone('search');
@@ -891,21 +892,22 @@ const enterGrid = useCallback(() => {
     navigationStore.setEmojiKbActive(false);
     setKbRow(-1);
     setKbCol(0);
+    imageLibraryRef.current?.resetKbIndex?.();
     searchInputRef.current?.blur?.();
   }, []);
 
   const moveSidebarBy = useCallback((delta) => {
     const cats = currentCategories;
     if (cats.length === 0) return false;
-    // 通过当前激活的 catId 找到索引,避免维护独立的 kbSidebarIdx
-    const currentId = activeCategoryRef.current;
+    // 图库用 currentImageGroup;emoji/符号用 activeCategoryRef
+    const currentId = showImages ? currentImageGroup : activeCategoryRef.current;
     let idx = cats.findIndex(c => c.id === currentId);
     if (idx < 0) idx = 0;
     const target = idx + delta;
     if (target < 0 || target >= cats.length) return false;
     handleCategoryClick(cats[target].id);
     return true;
-  }, [currentCategories, handleCategoryClick]);
+  }, [currentCategories, handleCategoryClick, showImages, currentImageGroup]);
 
   const moveGridBy = useCallback((dRow, dCol) => {
     if (showImages) {
@@ -954,81 +956,64 @@ const enterGrid = useCallback(() => {
     return true;
   }, [showImages]);
 
-  // 裸方向键分发(无 Alt)。App.jsx 在 emoji tab + emojiKbActive=true 时丢弃方向键 handler,让 EmojiTab 接管
+  // 执行 zone 意图(resolveZoneNav 的 type)
+  const applyNavIntent = useCallback((intent) => {
+    if (!intent || intent.type === 'none') return;
+    switch (intent.type) {
+      case 'activate-search':
+      case 'enter-search':
+        focusSearchInput();
+        break;
+      case 'enter-grid':
+        enterGrid();
+        break;
+      case 'enter-sidebar':
+        enterSidebar();
+        break;
+      case 'deactivate':
+        blurSearchInput();
+        break;
+      case 'grid-move': {
+        const ok = moveGridBy(intent.dRow, intent.dCol);
+        if (!ok && intent.onFail === 'enter-search') focusSearchInput();
+        if (!ok && intent.onFail === 'enter-sidebar') enterSidebar();
+        break;
+      }
+      case 'sidebar-move': {
+        const ok = moveSidebarBy(intent.delta);
+        if (!ok && intent.onFail === 'enter-search') focusSearchInput();
+        break;
+      }
+      default:
+        break;
+    }
+  }, [focusSearchInput, enterGrid, enterSidebar, blurSearchInput, moveGridBy, moveSidebarBy]);
+
+  // 主路径:App 转发后端 navigation-action(RegisterHotKey 常吞 webview keydown)
+  const handleNavAction = useCallback((action) => {
+    if (skinPickerEmoji || showImageGroupModal) return;
+    const intent = resolveZoneNav(kbZoneRef.current, action);
+    applyNavIntent(intent);
+  }, [skinPickerEmoji, showImageGroupModal, applyNavIntent]);
+
+  // 兜底:搜索框聚焦时 webview 仍可能收到 keydown(未注册热键/部分平台)
   const handleKbKeyDown = useCallback((e) => {
-    if (kbZone === 'outside') return; // 默认态:不拦截,让 App.jsx 切主标签/切种类走原功能
+    if (kbZoneRef.current === 'outside') return;
     if (skinPickerEmoji || showImageGroupModal) return;
     if (!e.key.startsWith('Arrow')) return;
-    const key = e.key;
-
-    // 搜索框已聚焦时(搜索框 zone 且 input 真聚焦)
-    if (document.activeElement === searchInputRef.current) {
-      if (key === 'ArrowDown' || key === 'ArrowRight') {
-        e.preventDefault();
-        enterGrid();
-      } else if (key === 'ArrowLeft') {
-        e.preventDefault();
-        enterSidebar();
-      } else if (key === 'ArrowUp') {
-        e.preventDefault();
-        blurSearchInput();
-      }
-      return;
-    }
-
+    // 仅在搜索框真聚焦时兜底,避免与后端热键双触发
+    if (document.activeElement !== searchInputRef.current) return;
+    const keyToAction = {
+      ArrowDown: 'navigate-down',
+      ArrowUp: 'navigate-up',
+      ArrowLeft: 'tab-left',
+      ArrowRight: 'tab-right',
+    };
+    const action = keyToAction[e.key];
+    if (!action) return;
     e.preventDefault();
-
-    if (kbZone === 'search') {
-      if (key === 'ArrowDown' || key === 'ArrowRight') {
-        enterGrid();
-      } else if (key === 'ArrowLeft') {
-        enterSidebar();
-      } else if (key === 'ArrowUp') {
-        blurSearchInput();
-      }
-      return;
-    }
-
-    if (kbZone === 'grid') {
-      if (key === 'ArrowDown') {
-        moveGridBy(1, 0);
-      } else if (key === 'ArrowUp') {
-        if (!moveGridBy(-1, 0)) {
-          focusSearchInput();
-        }
-      } else if (key === 'ArrowRight') {
-        moveGridBy(0, 1);
-      } else if (key === 'ArrowLeft') {
-        if (!moveGridBy(0, -1)) {
-          // 首列 ← 越界 → 侧栏(用户路径)
-          setKbZone('sidebar');
-          const cats = currentCategories;
-          if (cats.length > 0) {
-            handleCategoryClick(cats[0].id);
-          }
-        }
-      }
-      return;
-    }
-
-    if (kbZone === 'sidebar') {
-      if (key === 'ArrowDown') {
-        if (!moveSidebarBy(1)) {
-          // 底部夹住
-        }
-      } else if (key === 'ArrowUp') {
-        if (!moveSidebarBy(-1)) {
-          // 顶部越界 → 回到搜索框(聚焦)
-          focusSearchInput();
-        }
-      } else if (key === 'ArrowRight') {
-        enterGrid();
-      } else if (key === 'ArrowLeft') {
-        focusSearchInput();
-      }
-      return;
-    }
-  }, [kbZone, showImages, skinPickerEmoji, showImageGroupModal, enterGrid, enterSidebar, focusSearchInput, blurSearchInput, moveSidebarBy, moveGridBy]);
+    handleNavAction(action);
+  }, [skinPickerEmoji, showImageGroupModal, handleNavAction]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKbKeyDown);
@@ -1041,7 +1026,6 @@ const enterGrid = useCallback(() => {
   }, [kbZone]);
 
   // 虚拟列表数据变化时:kbRow 越界时夹住;网格为空且 zone='grid' 时回 outside
-  // 注意:不再自动 set kbRow=firstRowIndex(主人要默认无高亮)
   useEffect(() => {
     const data = virtualDataRef.current;
     const rowIndexes = [];
@@ -1073,8 +1057,9 @@ const enterGrid = useCallback(() => {
   }, [showImages, handlePaste]);
 
   useImperativeHandle(ref, () => ({
-    executeCurrentItem
-  }));
+    executeCurrentItem,
+    handleNavAction,
+  }), [executeCurrentItem, handleNavAction]);
 
   const moveActiveImageToGroup = useCallback(async (targetGroup) => {
     const items = activeImageDragItemsRef.current || [];
@@ -1179,10 +1164,9 @@ const enterGrid = useCallback(() => {
         ) : currentCategories.map((cat, idx) => (
           <Tooltip key={cat.id} content={t(cat.labelKey)} placement="right" asChild>
             <button
-              ref={el => sidebarButtonsRef.current[cat.id] = el}
               onClick={() => handleCategoryClick(cat.id)}
               className={`w-8 h-8 mx-auto mb-0.5 flex items-center justify-center rounded-lg transition-colors ${
-                idx === 0
+                isSidebarCategoryActive(cat.id, activeCategory, currentCategories[0]?.id)
                   ? 'ring-2 ring-blue-500 ring-inset text-blue-600'
                   : 'text-qc-fg-muted hover:bg-qc-hover'
               }`}

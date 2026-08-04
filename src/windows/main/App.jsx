@@ -14,6 +14,10 @@ import { useTheme, applyThemeToBody } from '@shared/hooks/useTheme';
 import { useSettingsSync } from '@shared/hooks/useSettingsSync';
 import { useNavigationKeyboard } from '@shared/hooks/useNavigationKeyboard';
 import { useWindowAnimation } from '@shared/hooks/useWindowAnimation';
+import {
+  resolveOutsideAppAction,
+  shouldForwardNavToEmoji,
+} from './components/emoji/emojiKbNavigation';
 import { applyBackgroundImage, clearBackgroundImage } from '@shared/utils/backgroundManager';
 import { getUpdateBannerState } from '@shared/api/settings';
 import { promptDisableWinVHotkeyIfNeeded } from '@shared/api/system';
@@ -372,8 +376,24 @@ function App() {
   const blurSearchInput = () => {
     searchRef.current?.blur?.();
   };
+  // 表情页:后端全局热键是方向键唯一可靠来源(RegisterHotKey 常吞 webview keydown)。
+  // 已激活 → 转发给 EmojiTab;outside 仅 ↓ 激活;左右 passthrough 切主标签。
+  const dispatchEmojiNav = (action) => {
+    if (activeTab !== 'emoji') return false;
+    if (shouldForwardNavToEmoji(navigationStore.emojiKbActive, action)) {
+      emojiTabRef.current?.handleNavAction?.(action);
+      return true;
+    }
+    const outside = resolveOutsideAppAction(action);
+    if (outside === 'activate') {
+      emojiTabRef.current?.handleNavAction?.(action);
+      return true;
+    }
+    if (outside === 'ignore') return true;
+    return false;
+  };
   const handleNavigateUp = () => {
-    if (activeTab === 'emoji' && navigationStore.emojiKbActive) return; // EmojiTab 内部 keydown 接管(进入 zone 时)
+    if (dispatchEmojiNav('navigate-up')) return;
     blurSearchInput();
     if (activeTab === 'clipboard' && clipboardTabRef.current?.navigateUp) {
       clipboardTabRef.current.navigateUp();
@@ -382,7 +402,7 @@ function App() {
     }
   };
   const handleNavigateDown = () => {
-    if (activeTab === 'emoji' && navigationStore.emojiKbActive) return; // EmojiTab 内部 keydown 接管
+    if (dispatchEmojiNav('navigate-down')) return;
     blurSearchInput();
     if (activeTab === 'clipboard' && clipboardTabRef.current?.navigateDown) {
       clipboardTabRef.current.navigateDown();
@@ -433,7 +453,7 @@ function App() {
     }
   };
   const handleTabLeft = () => {
-    if (activeTab === 'emoji' && navigationStore.emojiKbActive) return; // EmojiTab 内部 keydown 接管
+    if (dispatchEmojiNav('tab-left')) return;
     setActiveTab(currentTab => {
       const tabs = visibleTabs;
       const currentIndex = tabs.indexOf(currentTab);
@@ -442,7 +462,7 @@ function App() {
     });
   };
   const handleTabRight = () => {
-    if (activeTab === 'emoji' && navigationStore.emojiKbActive) return; // EmojiTab 内部 keydown 接管
+    if (dispatchEmojiNav('tab-right')) return;
     setActiveTab(currentTab => {
       const tabs = visibleTabs;
       const currentIndex = tabs.indexOf(currentTab);
