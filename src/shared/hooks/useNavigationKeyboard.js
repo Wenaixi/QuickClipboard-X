@@ -13,6 +13,8 @@ export function useNavigationKeyboard({
   onTogglePin = null,
   onPreviousGroup = null,
   onNextGroup = null,
+  onFilterLeft = null,
+  onFilterRight = null,
   enabled = true
 }) {
   const handlersRef = useRef({
@@ -24,7 +26,9 @@ export function useNavigationKeyboard({
     onToggleSearch,
     onTogglePin,
     onPreviousGroup,
-    onNextGroup
+    onNextGroup,
+    onFilterLeft,
+    onFilterRight
   })
 
   useEffect(() => {
@@ -37,7 +41,9 @@ export function useNavigationKeyboard({
       onToggleSearch,
       onTogglePin,
       onPreviousGroup,
-      onNextGroup
+      onNextGroup,
+      onFilterLeft,
+      onFilterRight
     }
   }, [
     onNavigateUp,
@@ -48,7 +54,9 @@ export function useNavigationKeyboard({
     onToggleSearch,
     onTogglePin,
     onPreviousGroup,
-    onNextGroup
+    onNextGroup,
+    onFilterLeft,
+    onFilterRight
   ])
 
   useEffect(() => {
@@ -78,6 +86,12 @@ export function useNavigationKeyboard({
               break
             case 'tab-right':
               if (handlers.onTabRight) handlers.onTabRight()
+              break
+            case 'filter-left':
+              if (handlers.onFilterLeft) handlers.onFilterLeft()
+              break
+            case 'filter-right':
+              if (handlers.onFilterRight) handlers.onFilterRight()
               break
             case 'focus-search':
               if (handlers.onToggleSearch) handlers.onToggleSearch()

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback, useLayoutEffect } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, useLayoutEffect, forwardRef, useImperativeHandle } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { platform, version as osVersion } from '@tauri-apps/plugin-os';
@@ -214,7 +214,7 @@ function getImageGroupNameFromDragEvent(event) {
   return target?.dataset?.imageGroupName || '';
 }
 
-function EmojiTab({ emojiMode, onEmojiModeChange }) {
+const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, ref) {
   const showSymbols = emojiMode === 'symbols';
   const showImages = emojiMode === 'images';
   const { t } = useTranslation();
@@ -235,6 +235,18 @@ function EmojiTab({ emojiMode, onEmojiModeChange }) {
   const [isModeReady, setIsModeReady] = useState(true);
   const [contentWidth, setContentWidth] = useState(0);
   const [useEmojiFallbackFont, setUseEmojiFallbackFont] = useState(false);
+  // 键盘区域导航状态: kbRegion 当前聚焦区域, kbRow/kbCol 网格内选中位置, kbSidebarIdx 侧栏分类索引
+  const [kbRegion, setKbRegion] = useState('none'); // 'none' | 'sidebar' | 'search' | 'grid'
+  const [kbRow, setKbRow] = useState(-1);
+  const [kbCol, setKbCol] = useState(0);
+  const [kbSidebarIdx, setKbSidebarIdx] = useState(-1);
+  const kbRowRef = useRef(kbRow);
+  const kbColRef = useRef(kbCol);
+  const kbSidebarIdxRef = useRef(kbSidebarIdx);
+  kbRowRef.current = kbRow;
+  kbColRef.current = kbCol;
+  kbSidebarIdxRef.current = kbSidebarIdx;
+  const imageLibraryRef = useRef(null);
   const prevEmojiModeRef = useRef(emojiMode);
   const activeImageDragItemsRef = useRef([]);
   const imagePluginDragClearTimerRef = useRef(null);
@@ -589,7 +601,12 @@ function EmojiTab({ emojiMode, onEmojiModeChange }) {
 
   useEffect(() => {
     setSearchQuery('');
-    
+    // 切换子模式时重置键盘导航状态
+    setKbRegion('none');
+    setKbRow(-1);
+    setKbCol(0);
+    setKbSidebarIdx(-1);
+
     if (showImages) {
       loadImageGroups(currentImageGroup);
     } else {
@@ -711,7 +728,9 @@ function EmojiTab({ emojiMode, onEmojiModeChange }) {
                 >
                   <button
                     onClick={() => handlePaste(item, section.catId)}
-                    className={`aspect-square w-full flex items-center justify-center text-2xl leading-none text-qc-fg rounded cursor-pointer transition-[transform,box-shadow,background-color,border-color] ${uiAnimationEnabled ? 'active:scale-95 hover:bg-qc-panel hover:shadow-lg hover:border hover:border-qc-border' : 'hover:bg-qc-hover'}`}
+                    className={`aspect-square w-full flex items-center justify-center text-2xl leading-none text-qc-fg rounded cursor-pointer transition-[transform,box-shadow,background-color,border-color] ${uiAnimationEnabled ? 'active:scale-95 hover:bg-qc-panel hover:shadow-lg hover:border hover:border-qc-border' : 'hover:bg-qc-hover'} ${
+                      kbRegion === 'grid' && index === kbRow && idx === kbCol ? 'ring-2 ring-blue-500 bg-qc-active' : ''
+                    }`}
                     style={uiAnimationEnabled ? {
                       opacity: 0,
                       animation: `fadeIn 0.15s ease-out ${idx * 15}ms forwards`
@@ -740,7 +759,7 @@ function EmojiTab({ emojiMode, onEmojiModeChange }) {
       );
     }
     return null;
-  }, [handlePaste, isChinese, skinTone, applySkintone, getSkinVariants, handleSkinPickerOpen, emojiGlyphClassName]);
+  }, [handlePaste, isChinese, skinTone, applySkintone, getSkinVariants, handleSkinPickerOpen, emojiGlyphClassName, kbRegion, kbRow, kbCol]);
 
   const currentCategories = useMemo(() => {
     if (showImages) return imageGroups.map(group => ({
@@ -764,7 +783,11 @@ function EmojiTab({ emojiMode, onEmojiModeChange }) {
     } else {
       scrollToCategory(catId);
     }
-  }, [showImages, handleImageGroupClick, scrollToCategory]);
+    // 键盘导航:侧栏移动时同步分类索引
+    const cats = showImages ? imageGroups : (showSymbols ? SYMBOL_CATS : EMOJI_CATS);
+    const idx = cats.findIndex(cat => cat.id === catId);
+    if (idx >= 0) setKbSidebarIdx(idx);
+  }, [showImages, handleImageGroupClick, scrollToCategory, showSymbols, imageGroups]);
 
   const handleAddImageGroup = useCallback(() => {
     setEditingImageGroup(null);
@@ -830,6 +853,222 @@ function EmojiTab({ emojiMode, onEmojiModeChange }) {
       clearImagePluginDragState();
     }, 250);
   }, [clearImagePluginDragState]);
+
+  // ==== 键盘区域导航 ====
+  // 网格内按 virtualData 中 type==='row' 项移动:行 ±1 找下一个 row,列夹到新行 cols 边界
+  const moveGridBy = useCallback((dRow, dCol) => {
+    const data = virtualDataRef.current;
+    const rowIndexes = [];
+    data.forEach((section, index) => {
+      if (section.type === 'row') rowIndexes.push(index);
+    });
+    if (rowIndexes.length === 0) return false;
+
+    let currentRowPos = rowIndexes.indexOf(kbRowRef.current);
+    let targetRowPos = -1;
+    let targetCol = kbColRef.current;
+
+    if (currentRowPos === -1) {
+      targetRowPos = dRow >= 0 ? 0 : rowIndexes.length - 1;
+      targetCol = dCol >= 0 ? 0 : 0;
+    } else {
+      targetRowPos = currentRowPos + dRow;
+      targetCol = targetCol + dCol;
+    }
+
+    if (dRow === 0) {
+      // 左右移动:仅允许在行内移动
+      if (targetCol < 0 || targetCol >= data[rowIndexes[currentRowPos]].items.length) {
+        return false;
+      }
+    }
+
+    if (targetRowPos < 0 || targetRowPos >= rowIndexes.length) {
+      return false;
+    }
+
+    const rowIndex = rowIndexes[targetRowPos];
+    const row = data[rowIndex];
+    const clampedCol = Math.max(0, Math.min(targetCol, row.items.length - 1));
+    setKbRow(rowIndex);
+    setKbCol(clampedCol);
+    setKbRegion('grid');
+    scrollContainerRef.current?.scrollToIndex({ index: rowIndex, align: 'center' });
+    return true;
+  }, []);
+
+  const enterGridFromSidebar = useCallback(() => {
+    const data = virtualDataRef.current;
+    const firstRowIndex = data.findIndex(section => section.type === 'row');
+    if (firstRowIndex === -1) return;
+    setKbRow(firstRowIndex);
+    setKbCol(0);
+    setKbRegion('grid');
+    scrollContainerRef.current?.scrollToIndex({ index: firstRowIndex, align: 'center' });
+  }, []);
+
+  const enterGridFromSearch = useCallback(() => {
+    // 搜索词非空时结果网格同样以第一个 row 进入;空搜索回到当前分类第一行
+    enterGridFromSidebar();
+  }, [enterGridFromSidebar]);
+
+  const focusSearchFromGrid = useCallback(() => {
+    setKbRegion('search');
+    searchInputRef.current?.focus?.();
+  }, []);
+
+  const moveSidebarBy = useCallback((delta) => {
+    const cats = currentCategories;
+    if (cats.length === 0) return false;
+    const currentPos = kbSidebarIdxRef.current < 0 ? 0 : kbSidebarIdxRef.current;
+    const targetPos = currentPos + delta;
+    if (targetPos < 0 || targetPos >= cats.length) {
+      return false;
+    }
+    setKbSidebarIdx(targetPos);
+    setKbRegion('sidebar');
+    handleCategoryClick(cats[targetPos].id);
+    return true;
+  }, [currentCategories, handleCategoryClick]);
+  // 首次按键激活:进入网格
+  const activateKb = useCallback(() => {
+    if (showImages) {
+      const ok = imageLibraryRef.current?.activateKb?.();
+      if (ok) {
+        setKbRegion('grid');
+        return true;
+      }
+      return false;
+    }
+    enterGridFromSidebar();
+    return true;
+  }, [showImages, enterGridFromSidebar]);
+
+  // 区域按键分发(仅 Alt+方向键)
+  const handleKbKeyDown = useCallback((e) => {
+    if (!e.altKey || !e.key.startsWith('Arrow')) return;
+    const dir = e.key.replace('Arrow', '').toLowerCase();
+    if (skinPickerEmoji || showImageGroupModal) return;
+    const inSearch = document.activeElement === searchInputRef.current;
+
+    if (inSearch) {
+      if (dir === 'down') {
+        e.preventDefault();
+        enterGridFromSearch();
+      }
+      return;
+    }
+
+    if (kbRegion === 'none') {
+      e.preventDefault();
+      activateKb();
+      return;
+    }
+
+    e.preventDefault();
+    if (showImages) {
+      const api = imageLibraryRef.current;
+      if (!api) return;
+      if (dir === 'up') {
+        if (!api.navigateUp()) {
+          setKbRegion('sidebar');
+        }
+      } else if (dir === 'down') {
+        if (!api.navigateDown()) {
+          setKbRegion('search');
+          searchInputRef.current?.focus?.();
+        }
+      } else if (dir === 'left') {
+        if (!api.navigateLeft()) {
+          setKbRegion('sidebar');
+        }
+      } else {
+        api.navigateRight();
+      }
+      return;
+    }
+
+    if (kbRegion === 'sidebar') {
+      if (dir === 'up') {
+        if (!moveSidebarBy(-1)) {
+          // 顶部夹住
+        }
+      } else if (dir === 'down') {
+        if (!moveSidebarBy(1)) {
+          // 底部越界:聚焦搜索框
+          setKbRegion('search');
+          searchInputRef.current?.focus?.();
+        }
+      } else if (dir === 'right') {
+        enterGridFromSidebar();
+      }
+      return;
+    }
+
+    if (kbRegion === 'grid') {
+      if (dir === 'up') {
+        if (!moveGridBy(-1, 0)) {
+          setKbRegion('search');
+          searchInputRef.current?.focus?.();
+        }
+      } else if (dir === 'down') {
+        moveGridBy(1, 0);
+      } else if (dir === 'left') {
+        if (!moveGridBy(0, -1)) {
+          setKbRegion('sidebar');
+        }
+      } else {
+        moveGridBy(0, 1);
+      }
+      return;
+    }
+
+    if (kbRegion === 'search') {
+      if (dir === 'down') {
+        enterGridFromSearch();
+      }
+    }
+  }, [kbRegion, showImages, skinPickerEmoji, showImageGroupModal, activateKb, moveSidebarBy, enterGridFromSidebar, enterGridFromSearch, moveGridBy]);
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKbKeyDown);
+    return () => window.removeEventListener('keydown', handleKbKeyDown);
+  }, [handleKbKeyDown]);
+
+  // 键盘选中高亮:当前分类滚动联动已有 updateSidebarHighlight;virtualData 变化时夹住 kbRow
+  useEffect(() => {
+    const data = virtualDataRef.current;
+    const rowIndexes = [];
+    data.forEach((section, index) => {
+      if (section.type === 'row') rowIndexes.push(index);
+    });
+    if (rowIndexes.length === 0) {
+      if (kbRegion === 'grid') setKbRegion('none');
+      return;
+    }
+    if (kbRowRef.current >= 0 && !rowIndexes.includes(kbRowRef.current)) {
+      setKbRow(rowIndexes[0]);
+      setKbCol(0);
+    }
+  }, [virtualData, kbRegion]);
+
+  // 输出选中项:图片模式转发图库,emoji/符号粘贴 kbRow/kbCol 格
+  const executeCurrentItem = useCallback(() => {
+    if (showImages) {
+      imageLibraryRef.current?.executeCurrent?.();
+      return;
+    }
+    const data = virtualDataRef.current;
+    const row = data[kbRowRef.current];
+    if (!row || row.type !== 'row' || kbColRef.current >= row.items.length) return;
+    const item = row.items[kbColRef.current];
+    const catId = row.catId;
+    handlePaste(item, catId);
+  }, [showImages, handlePaste]);
+
+  useImperativeHandle(ref, () => ({
+    executeCurrentItem
+  }));
 
   const moveActiveImageToGroup = useCallback(async (targetGroup) => {
     const items = activeImageDragItemsRef.current || [];
@@ -973,6 +1212,7 @@ function EmojiTab({ emojiMode, onEmojiModeChange }) {
         {/* 内容滚动区 */}
         {showImages ? (
           <ImageLibraryTab
+            ref={imageLibraryRef}
             currentGroup={currentImageGroup}
             imageGroups={imageGroups}
             searchQuery={searchQuery}
@@ -1064,6 +1304,6 @@ function EmojiTab({ emojiMode, onEmojiModeChange }) {
       )}
     </div>
   );
-}
+});
 
 export default EmojiTab;
