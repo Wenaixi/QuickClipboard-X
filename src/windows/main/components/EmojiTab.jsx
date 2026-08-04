@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { platform, version as osVersion } from '@tauri-apps/plugin-os';
 import { toast, TOAST_POSITIONS, TOAST_SIZES } from '@shared/store/toastStore';
+import { navigationStore } from '@shared/store/navigationStore';
 import { Virtuoso } from 'react-virtuoso';
 import { useInputFocus } from '@shared/hooks/useInputFocus';
 import { useCustomScrollbar } from '@shared/hooks/useCustomScrollbar';
@@ -182,7 +183,7 @@ const ImageGroupSidebarButton = ({
           onClick={() => onSelect(group.name)}
           className={`w-full h-full flex items-center justify-center rounded-lg transition-colors ${
             isActive
-              ? 'bg-blue-100 text-blue-600'
+              ? 'ring-2 ring-blue-500 ring-inset text-blue-600'
               : isDropOver
                 ? 'bg-qc-active text-qc-fg'
                 : 'text-qc-fg-muted hover:bg-qc-hover'
@@ -235,10 +236,10 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
   const [isModeReady, setIsModeReady] = useState(true);
   const [contentWidth, setContentWidth] = useState(0);
   const [useEmojiFallbackFont, setUseEmojiFallbackFont] = useState(false);
-  // 键盘区域导航状态: kbZone 当前 zone('modes' 默认 / 'search' / 'grid' / 'sidebar' / 'outside' 退出)
-  // 起点 modes 表示"刚进 emoji tab,焦点仍在模式行(TabNavigation)";↓ 触发真实 focus 搜索框 + zone='search'
-  // 之后 zone='search' 的 ←/→ 才变 module 选择功能;↑ 触发 outside(后续方向键恢复原行为)
-  const [kbZone, setKbZone] = useState('modes'); // 'modes' | 'search' | 'grid' | 'sidebar' | 'outside'
+  // 键盘区域导航状态: kbZone 当前 zone;kbRow/kbCol 在 grid zone 用
+  // 默认 'outside' —— emoji tab 一打开无任何高亮,←/→ 恢复原功能(切主标签/切种类)
+  // 只有 ↓ 才激活进入 search/grid/sidebar,↑ 反激活
+  const [kbZone, setKbZone] = useState('outside'); // 'outside' | 'search' | 'grid' | 'sidebar'
   const [kbRow, setKbRow] = useState(-1);
   const [kbCol, setKbCol] = useState(0);
   const kbRowRef = useRef(kbRow);
@@ -585,14 +586,14 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
     
     const oldBtn = sidebarButtonsRef.current[activeCategoryRef.current];
     if (oldBtn) {
-      oldBtn.classList.remove('bg-blue-100', 'text-blue-600');
+      oldBtn.classList.remove('ring-2', 'ring-blue-500', 'ring-inset', 'text-blue-600');
       oldBtn.classList.add('text-qc-fg-muted', 'hover:bg-qc-hover');
     }
-    
+
     const newBtn = sidebarButtonsRef.current[catId];
     if (newBtn) {
       newBtn.classList.remove('text-qc-fg-muted', 'hover:bg-qc-hover');
-      newBtn.classList.add('bg-blue-100', 'text-blue-600');
+      newBtn.classList.add('ring-2', 'ring-blue-500', 'ring-inset', 'text-blue-600');
     }
     
     activeCategoryRef.current = catId;
@@ -600,8 +601,9 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
 
   useEffect(() => {
     setSearchQuery('');
-    // 切换子模式时重置键盘导航状态,起点回 modes(焦点仍在 TabNavigation 模式行,下次 ↓ 才进搜索框)
-    setKbZone('modes');
+    // 切换子模式时重置键盘导航状态:回到 outside(无高亮,←/→ 恢复原功能)
+    setKbZone('outside');
+    navigationStore.setEmojiKbActive(false);
     setKbRow(-1);
     setKbCol(0);
 
@@ -855,6 +857,7 @@ const enterGrid = useCallback(() => {
       const ok = imageLibraryRef.current?.activateKb?.();
       if (ok) {
         setKbZone('grid');
+        navigationStore.setEmojiKbActive(true);
         return;
       }
       return;
@@ -865,6 +868,7 @@ const enterGrid = useCallback(() => {
     setKbRow(firstRowIndex);
     setKbCol(0);
     setKbZone('grid');
+    navigationStore.setEmojiKbActive(true);
     scrollContainerRef.current?.scrollToIndex({ index: firstRowIndex, align: 'center' });
   }, [showImages]);
 
@@ -872,16 +876,21 @@ const enterGrid = useCallback(() => {
     const cats = currentCategories;
     if (cats.length === 0) return;
     setKbZone('sidebar');
+    navigationStore.setEmojiKbActive(true);
     handleCategoryClick(cats[0].id);
   }, [currentCategories, handleCategoryClick]);
 
   const focusSearchInput = useCallback(() => {
     setKbZone('search');
+    navigationStore.setEmojiKbActive(true);
     searchInputRef.current?.focus?.();
   }, []);
 
   const blurSearchInput = useCallback(() => {
     setKbZone('outside');
+    navigationStore.setEmojiKbActive(false);
+    setKbRow(-1);
+    setKbCol(0);
     searchInputRef.current?.blur?.();
   }, []);
 
@@ -945,23 +954,14 @@ const enterGrid = useCallback(() => {
     return true;
   }, [showImages]);
 
-  // 裸方向键分发(无 Alt)。App.jsx 在 emoji tab 时已丢弃 tab-left/right/navigate-up/down,所以这里不会被后端事件覆盖
+  // 裸方向键分发(无 Alt)。App.jsx 在 emoji tab + emojiKbActive=true 时丢弃方向键 handler,让 EmojiTab 接管
   const handleKbKeyDown = useCallback((e) => {
-    if (kbZone === 'outside') return; // 用户主动退出,后续方向键不拦截
+    if (kbZone === 'outside') return; // 默认态:不拦截,让 App.jsx 切主标签/切种类走原功能
     if (skinPickerEmoji || showImageGroupModal) return;
     if (!e.key.startsWith('Arrow')) return;
     const key = e.key;
 
-    // 'modes':刚进 emoji tab,焦点仍在 TabNavigation 模式行;只有 ↓ 才接管(真实 focus 搜索框)
-    if (kbZone === 'modes') {
-      if (key === 'ArrowDown') {
-        e.preventDefault();
-        focusSearchInput();
-      }
-      return;
-    }
-
-    // 搜索框已聚焦时:聚焦搜索框的导航快捷键
+    // 搜索框已聚焦时(搜索框 zone 且 input 真聚焦)
     if (document.activeElement === searchInputRef.current) {
       if (key === 'ArrowDown' || key === 'ArrowRight') {
         e.preventDefault();
@@ -984,7 +984,7 @@ const enterGrid = useCallback(() => {
       } else if (key === 'ArrowLeft') {
         enterSidebar();
       } else if (key === 'ArrowUp') {
-        setKbZone('outside');
+        blurSearchInput();
       }
       return;
     }
@@ -1035,7 +1035,13 @@ const enterGrid = useCallback(() => {
     return () => window.removeEventListener('keydown', handleKbKeyDown);
   }, [handleKbKeyDown]);
 
-  // 虚拟列表数据变化时,夹住 kbRow 到最近的 row 项;网格为空时退出 grid zone
+  // 同步 emojiKbActive 到 navigationStore(兜底:任何 setKbZone 路径都覆盖)
+  useEffect(() => {
+    navigationStore.setEmojiKbActive(kbZone !== 'outside');
+  }, [kbZone]);
+
+  // 虚拟列表数据变化时:kbRow 越界时夹住;网格为空且 zone='grid' 时回 outside
+  // 注意:不再自动 set kbRow=firstRowIndex(主人要默认无高亮)
   useEffect(() => {
     const data = virtualDataRef.current;
     const rowIndexes = [];
@@ -1043,7 +1049,7 @@ const enterGrid = useCallback(() => {
       if (section.type === 'row') rowIndexes.push(index);
     });
     if (rowIndexes.length === 0) {
-      if (kbZone === 'grid') setKbZone('search');
+      if (kbZone === 'grid') setKbZone('outside');
       return;
     }
     if (kbRowRef.current >= 0 && !rowIndexes.includes(kbRowRef.current)) {
@@ -1177,7 +1183,7 @@ const enterGrid = useCallback(() => {
               onClick={() => handleCategoryClick(cat.id)}
               className={`w-8 h-8 mx-auto mb-0.5 flex items-center justify-center rounded-lg transition-colors ${
                 idx === 0
-                  ? 'bg-blue-100 text-blue-600'
+                  ? 'ring-2 ring-blue-500 ring-inset text-blue-600'
                   : 'text-qc-fg-muted hover:bg-qc-hover'
               }`}
             >
