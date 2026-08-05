@@ -98,6 +98,10 @@ fn apply_activation(desired: HotkeyActivation) {
 // 先注销 Windows 层全部注册再清空内部表，消除"半注册/幽灵热键"残留；
 // 同时让导航热键内部状态整体失效，等下次前台切换/显隐时干净重建。
 fn disable_all_shortcuts() {
+    // F2: 必须持 GLOBAL_HOTKEY_SYNC_LOCK。apply_activation(Inactive) 从
+    // sync_hotkeys_for_foreground 的 spawn 线程调用本函数，不持锁会与
+    // 持锁的 register_* 并发留下半注册幽灵热键。
+    let _guard = GLOBAL_HOTKEY_SYNC_LOCK.lock();
     if let Ok(app) = get_app() {
         use tauri_plugin_global_shortcut::GlobalShortcutExt as _;
         let _ = app.global_shortcut().unregister_all();
@@ -1047,7 +1051,7 @@ mod tests {
         }
     }
 
-    // F1 配套：reload 顶层入口 + 配套 disable_hotkeys 必须持锁，
+    // F1 配套:reload 顶层入口 + 配套 disable_hotkeys 必须持锁,
     // 保证 reload/disable 过程仍串行。
     #[test]
     fn reload_outer_entries_hold_sync_lock() {
@@ -1059,6 +1063,22 @@ mod tests {
                 "{name} 作为外层入口必须持 GLOBAL_HOTKEY_SYNC_LOCK"
             );
         }
+    }
+
+    // F2: disable_all_shortcuts 必须持 GLOBAL_HOTKEY_SYNC_LOCK,
+    // 且锁位置早于 REGISTERED_SHORTCUTS.lock().clear()。
+    // apply_activation(Inactive) 在 spawn 线程调用它,不持锁会与持锁
+    // 的 register_* 并发留下半注册幽灵热键。
+    #[test]
+    fn disable_all_shortcuts_holds_sync_lock_before_clear() {
+        let src = global_source();
+        let b = fn_body(&src, "disable_all_shortcuts");
+        let lock_pos = b.find("GLOBAL_HOTKEY_SYNC_LOCK.lock()");
+        let clear_pos = b.find("REGISTERED_SHORTCUTS.lock().clear()");
+        assert!(
+            lock_pos.is_some() && clear_pos.is_some() && lock_pos < clear_pos,
+            "disable_all_shortcuts 必须在清空状态前持 GLOBAL_HOTKEY_SYNC_LOCK"
+        );
     }
 
     // 三个直连 on_shortcut 的注册函数失败路径必须清理幽灵热键：
