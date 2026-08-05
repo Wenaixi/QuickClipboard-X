@@ -72,9 +72,7 @@ function TabNavigation({
   onEmojiModeChange,
   onGroupChange,
   groupsPopupRef,
-  navigationMode = 'horizontal',
-  onKbNav = null,
-  onKbEnter = null
+  navigationMode = 'horizontal'
 }, ref) {
   const {
     t
@@ -201,14 +199,20 @@ function TabNavigation({
     const nextId = items[next];
     focusTabbarButton(nextId);
     if (nextId === 'favorites') {
+      // 切走主标签:清 stale 焦点,防再次 ← 从旧 ID 起算漂移
+      setTabbarFocusId(null);
       onTabChange('favorites');
     } else if (nextId === 'clipboard') {
+      setTabbarFocusId(null);
       onTabChange('clipboard');
     } else if (nextId === 'emoji') {
+      setTabbarFocusId(null);
       onEmojiModeChange('emoji');
     } else if (nextId === 'symbols') {
+      setTabbarFocusId(null);
       onEmojiModeChange('symbols');
     } else if (nextId === 'images') {
+      setTabbarFocusId(null);
       onEmojiModeChange('images');
     }
   }, [tabbarFocusId, emojiMode, focusTabbarButton, onTabChange, onEmojiModeChange]);
