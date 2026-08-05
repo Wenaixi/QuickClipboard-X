@@ -152,10 +152,14 @@ fn register_navigation_hotkeys_from_settings() -> Result<(), String> {
                     "注册导航快捷键 [{}] {} 失败: {}",
                     config.id, config.shortcut, error
                 );
+                // 插件可能在 Err 前部分写入 Windows 层，主动探测并注销清理，
+                // 避免残留吞键的"幽灵热键"。与 global.rs register_shortcut_inner 同款。
+                if app.global_shortcut().is_registered(shortcut) {
+                    let _ = app.global_shortcut().unregister(shortcut);
+                }
                 has_failure = true;
-                // 注册失败（多为 RegisterHotKey 并发撞车 AlreadyRegistered）：
-                // 保持 NAVIGATION_HOTKEYS_REGISTERED=false，让下次前台切换/显隐时
-                // 能重新走一遍完整注销+注册，清除 Windows 层可能残留的"幽灵热键"。
+                // 保持 NAVIGATION_HOTKEYS_REGISTERED=false（has_failure 让下方 store(false)），
+                // 让下次前台切换/显隐时能重新走完整注销+注册。
             }
         }
     }
@@ -386,5 +390,60 @@ fn get_repeat_interval(action: &str) -> Option<Duration> {
         "tab-left" | "tab-right" | "filter-left" | "filter-right" => Some(Duration::from_millis(150)),
         "previous-group" | "next-group" => Some(Duration::from_millis(100)),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    fn navigation_source() -> String {
+        fs::read_to_string(format!(
+            "{}/src/services/system/hotkey/navigation.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读取 navigation.rs 失败")
+    }
+
+    fn strip_line_comments(src: &str) -> String {
+        src.lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn fn_body<'a>(src: &'a str, name: &str) -> &'a str {
+        let markers = [
+            format!("fn {name}("),
+            format!("fn {name}<"),
+            format!("pub fn {name}("),
+            format!("pub fn {name}<"),
+        ];
+        let start = markers
+            .iter()
+            .filter_map(|m| src.find(m))
+            .min()
+            .unwrap_or_else(|| panic!("缺 {name}"));
+        let rest = &src[start..];
+        let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(src.len());
+        &src[start..end]
+    }
+
+    // F3: 注册失败路径必须先 is_registered 探测再 unregister 清理幽灵热键,
+    // 并保留 eprintln 错误日志。与 global.rs register_shortcut_inner 同款。
+    #[test]
+    fn navigation_failure_path_probes_before_unregister() {
+        let src = strip_line_comments(&navigation_source());
+        let b = fn_body(&src, "register_navigation_hotkeys_from_settings");
+        let probe_pos = b.find("is_registered(shortcut)");
+        let cleanup_pos = b.find("unregister(shortcut)");
+        assert!(
+            probe_pos.is_some() && cleanup_pos.is_some() && probe_pos < cleanup_pos,
+            "注册失败路径必须先 is_registered 探测再 unregister 清理幽灵热键"
+        );
+        assert!(
+            b.contains("eprintln!"),
+            "注册失败路径必须保留 eprintln 错误日志"
+        );
     }
 }
