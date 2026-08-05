@@ -246,7 +246,6 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
   const [kbZone, setKbZone] = useState('outside'); // 'outside' | 'search' | 'grid' | 'sidebar'
   const [kbRow, setKbRow] = useState(-1);
   const [kbCol, setKbCol] = useState(0);
-  const [activeCategory, setActiveCategory] = useState('recent');
   const kbRowRef = useRef(kbRow);
   const kbColRef = useRef(kbCol);
   const kbZoneRef = useRef(kbZone);
@@ -260,6 +259,8 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
   const scrollContainerRef = useRef(null);
   const contentMeasureRef = useRef(null);
   const activeCategoryRef = useRef('recent');
+  // 侧栏高亮重渲信号:ref 是唯一真值,改 ref 后 bump 此 tick 触发渲染读新值
+  const [sidebarHighlightTick, setSidebarHighlightTick] = useState(0);
   const sidebarButtonsRef = useRef({});
   const onEnterTabbarRef = useRef(null);
   const onTabbarMoveRef = useRef(null);
@@ -590,11 +591,12 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
 
   virtualDataRef.current = virtualData;
 
-  // 侧栏高亮受控:只改 state,禁止 classList 手改(re-render 会盖掉)
+  // 侧栏高亮受控:只改 ref 真值 + 强制重渲,禁止 classList 手改(re-render 会盖掉)
+  // 单一真值:activeCategoryRef(enterSidebar/moveSidebarBy/高亮渲染都读它)
   const updateSidebarHighlight = useCallback((catId) => {
     if (activeCategoryRef.current === catId) return;
     activeCategoryRef.current = catId;
-    setActiveCategory(catId);
+    setSidebarHighlightTick(tick => tick + 1);
   }, []);
 
   useEffect(() => {
@@ -612,7 +614,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
       const firstCat = showSymbols ? SYMBOL_CATS[0]?.id : EMOJI_CATS[0]?.id;
       if (firstCat) {
         activeCategoryRef.current = firstCat;
-        setActiveCategory(firstCat);
+        setSidebarHighlightTick(tick => tick + 1);
         scrollContainerRef.current?.scrollToIndex({ index: 0 });
       }
     }
@@ -1170,7 +1172,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
               ref={el => { sidebarButtonsRef.current[cat.id] = el; }}
               onClick={() => handleCategoryClick(cat.id)}
               className={`w-8 h-8 mx-auto mb-0.5 flex items-center justify-center rounded-lg transition-colors ${
-                isSidebarCategoryActive(cat.id, activeCategory, currentCategories[0]?.id)
+                isSidebarCategoryActive(cat.id, activeCategoryRef.current, currentCategories[0]?.id)
                   ? 'ring-2 ring-blue-500 ring-inset text-blue-600'
                   : 'text-qc-fg-muted hover:bg-qc-hover'
               }`}
