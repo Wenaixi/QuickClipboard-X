@@ -404,12 +404,8 @@ function App() {
     tabNavigationRef.current?.kbEnter?.();
   };
 
-  // 表情页已激活时,←/→ 切主标签 → 交给 tabbar(模式层),而不是直接切
+  // 表情页已激活时,←/→ 交给 dispatchEmojiNav 转发;outside 态 passthrough 切主标签
   const handleTabLeft = () => {
-    if (activeTab === 'emoji' && navigationStore.emojiKbActive) {
-      handleEmojiTabbarMove(-1);
-      return;
-    }
     if (dispatchEmojiNav('tab-left')) return;
     setActiveTab(currentTab => {
       const tabs = visibleTabs;
@@ -419,10 +415,6 @@ function App() {
     });
   };
   const handleTabRight = () => {
-    if (activeTab === 'emoji' && navigationStore.emojiKbActive) {
-      handleEmojiTabbarMove(1);
-      return;
-    }
     if (dispatchEmojiNav('tab-right')) return;
     setActiveTab(currentTab => {
       const tabs = visibleTabs;
