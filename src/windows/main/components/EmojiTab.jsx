@@ -607,6 +607,8 @@ const EmojiTab = forwardRef(function EmojiTab({
     setKbRow(-1);
     setKbCol(0);
     imageLibraryRef.current?.resetKbIndex?.();
+    // 清掉可能残留的"侧栏 ← 循环"标记:切换子模式后不应再自动回 sidebar
+    sidebarCycleModeRef.current = false;
 
     if (showImages) {
       loadImageGroups(currentImageGroup);
