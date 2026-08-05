@@ -205,6 +205,19 @@ describe('App 转发契约源码护栏', () => {
     assert.ok(body.includes("dispatchEmojiNav('tab-right')"), '→ 未转发');
     assert.ok(body.includes('handleNavAction'), '未调 EmojiTab.handleNavAction');
     assert.ok(body.includes('resolveOutsideAppAction'), '缺 resolveOutsideAppAction');
+    // 门控必须存在:未激活时不得吞键(App 原有 handler 继续跑)
+    assert.ok(
+      body.match(/shouldForward = navigationStore\.emojiKbActive/),
+      'dispatchEmojiNav 必须含 emojiKbActive 门控',
+    );
+    assert.ok(
+      body.match(/resolveOutsideAppAction\(action\) === 'activate'/),
+      'outside 仅 ↓ 激活',
+    );
+    assert.ok(
+      body.includes('if (!shouldForward) return false;'),
+      '未激活必须 return false 放行 App 原 handler',
+    );
     // lazy-load 竞态修复:队列 + callback ref
     assert.ok(body.includes('pendingEmojiNavRef'), '缺 pendingEmojiNavRef 队列');
     assert.ok(body.includes('setEmojiTabRef'), '缺 setEmojiTabRef callback ref');
