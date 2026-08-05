@@ -287,12 +287,13 @@ pub fn register_open_settings_hotkey(shortcut_str: &str) -> Result<(), String> {
 }
 
 pub fn register_quickpaste_hotkey(shortcut_str: &str) -> Result<(), String> {
+    let _guard = GLOBAL_HOTKEY_SYNC_LOCK.lock();
     let app = get_app()?;
-    
+
     unregister_shortcut("quickpaste");
-    
+
     let shortcut = parse_shortcut(shortcut_str)?;
-    
+
     app.global_shortcut()
         .on_shortcut(shortcut, move |app, _shortcut, event| {
             if event.state == ShortcutState::Pressed {
@@ -303,7 +304,7 @@ pub fn register_quickpaste_hotkey(shortcut_str: &str) -> Result<(), String> {
                 if is_foreground_globally_disabled() {
                     return;
                 }
-                
+
                 let settings = crate::get_settings();
                 let is_keyboard_mode = settings.quickpaste_paste_on_modifier_release;
                 let is_visible = crate::windows::quickpaste::is_visible();
@@ -542,6 +543,7 @@ pub fn register_toggle_low_memory_mode_hotkey(shortcut_str: &str) -> Result<(), 
 }
 
 pub fn register_paste_plain_text_hotkey(shortcut_str: &str) -> Result<(), String> {
+    let _guard = GLOBAL_HOTKEY_SYNC_LOCK.lock();
     let app = get_app()?;
 
     unregister_shortcut("paste_plain_text");
@@ -625,10 +627,11 @@ fn handle_paste_plain_text_press(app: &AppHandle) -> Result<(), String> {
 }
 
 pub fn register_number_shortcuts(modifier: &str) -> Result<(), String> {
+    let _guard = GLOBAL_HOTKEY_SYNC_LOCK.lock();
     let app = get_app()?;
-    
+
     unregister_number_shortcuts();
-    
+
     {
         let mut status_map = SHORTCUT_STATUS.lock();
         status_map.remove("number_shortcuts");
@@ -958,7 +961,50 @@ fn reload_from_settings_inner() -> Result<(), String> {
             }
         }
     }
-    
+
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    fn global_source() -> String {
+        fs::read_to_string(format!(
+            "{}/src/services/system/hotkey/global.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读取 global.rs 失败")
+    }
+
+    // 三个直连 on_shortcut 的注册函数必须持 GLOBAL_HOTKEY_SYNC_LOCK：
+    // 否则与 reload_from_settings 并发注册同一组合键会 AlreadyRegistered，
+    // 残留吞键的"幽灵热键"，导致"所有快捷键失效/唤不出剪贴板"。
+    // 护栏用"锁出现于函数体内（下标早于 on_shortcut 调用）"约束，
+    // 避免只 contains 一个锁名被定义处误命中。
+    #[test]
+    fn direct_registration_fns_hold_sync_lock() {
+        let src = global_source();
+        let body = |name: &str| {
+            let start = src.find(&format!("pub fn {name}(")).unwrap_or_else(|| panic!("缺 {name}"));
+            let rest = &src[start..];
+            let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(src.len());
+            &src[start..end]
+        };
+
+        for name in [
+            "register_quickpaste_hotkey",
+            "register_paste_plain_text_hotkey",
+            "register_number_shortcuts",
+        ] {
+            let b = body(name);
+            let lock_pos = b.find("GLOBAL_HOTKEY_SYNC_LOCK.lock()");
+            let on_shortcut_pos = b.find("on_shortcut");
+            assert!(
+                lock_pos.is_some() && lock_pos < on_shortcut_pos,
+                "{name} 必须在 on_shortcut 之前持 GLOBAL_HOTKEY_SYNC_LOCK"
+            );
+        }
+    }
 }
 
