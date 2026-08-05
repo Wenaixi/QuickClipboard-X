@@ -17,6 +17,7 @@ import { useWindowAnimation } from '@shared/hooks/useWindowAnimation';
 import {
   resolveOutsideAppAction,
   shouldForwardNavToEmoji,
+  cycleValue,
 } from './components/emoji/emojiKbNavigation';
 import { applyBackgroundImage, clearBackgroundImage } from '@shared/utils/backgroundManager';
 import { getUpdateBannerState } from '@shared/api/settings';
@@ -454,33 +455,17 @@ function App() {
   const handleFilterLeft = () => {
     blurSearchInput();
     if (activeTab === 'emoji') {
-      setEmojiMode(prev => {
-        const modes = ['emoji', 'symbols', 'images'];
-        const currentIndex = modes.indexOf(prev);
-        return modes[currentIndex === -1 ? modes.length - 1 : (currentIndex === 0 ? modes.length - 1 : currentIndex - 1)];
-      });
+      setEmojiMode(prev => cycleValue(['emoji', 'symbols', 'images'], prev, -1));
     } else {
-      setContentFilter(prev => {
-        const filters = ['all', 'text', 'image', 'file', 'link'];
-        const currentIndex = filters.indexOf(prev);
-        return filters[currentIndex === -1 ? filters.length - 1 : (currentIndex === 0 ? filters.length - 1 : currentIndex - 1)];
-      });
+      setContentFilter(prev => cycleValue(['all', 'text', 'image', 'file', 'link'], prev, -1));
     }
   };
   const handleFilterRight = () => {
     blurSearchInput();
     if (activeTab === 'emoji') {
-      setEmojiMode(prev => {
-        const modes = ['emoji', 'symbols', 'images'];
-        const currentIndex = modes.indexOf(prev);
-        return modes[currentIndex === -1 ? 0 : (currentIndex === modes.length - 1 ? 0 : currentIndex + 1)];
-      });
+      setEmojiMode(prev => cycleValue(['emoji', 'symbols', 'images'], prev, 1));
     } else {
-      setContentFilter(prev => {
-        const filters = ['all', 'text', 'image', 'file', 'link'];
-        const currentIndex = filters.indexOf(prev);
-        return filters[currentIndex === -1 ? 0 : (currentIndex === filters.length - 1 ? 0 : currentIndex + 1)];
-      });
+      setContentFilter(prev => cycleValue(['all', 'text', 'image', 'file', 'link'], prev, 1));
     }
   };
   const handleToggleSearch = () => {
