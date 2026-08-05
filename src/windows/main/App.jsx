@@ -401,9 +401,6 @@ function App() {
   const handleEmojiTabbarMove = (delta) => {
     tabNavigationRef.current?.kbNav?.(delta);
   };
-  const handleEmojiTabbarEnter = () => {
-    tabNavigationRef.current?.kbEnter?.();
-  };
 
   // 表情页已激活时,←/→ 交给 dispatchEmojiNav 转发;outside 态 passthrough 切主标签
   const handleTabLeft = () => {

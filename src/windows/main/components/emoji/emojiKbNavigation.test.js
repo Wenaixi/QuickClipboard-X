@@ -7,7 +7,6 @@ import {
   shouldForwardNavToEmoji,
   resolveZoneNav,
   isSidebarCategoryActive,
-  resolveTabbarMove,
 } from './emojiKbNavigation.js';
 
 describe('resolveActivateKb', () => {
@@ -107,28 +106,6 @@ describe('resolveZoneNav', () => {
   });
 });
 
-describe('resolveTabbarMove', () => {
-  const items = ['emoji', 'symbols', 'images', 'favorites', 'clipboard'];
-  it('右移', () => {
-    assert.equal(resolveTabbarMove(items, 'emoji', 1), 'symbols');
-    assert.equal(resolveTabbarMove(items, 'images', 1), 'favorites');
-  });
-  it('左移', () => {
-    assert.equal(resolveTabbarMove(items, 'symbols', -1), 'emoji');
-    assert.equal(resolveTabbarMove(items, 'favorites', -1), 'images');
-  });
-  it('越界循环', () => {
-    assert.equal(resolveTabbarMove(items, 'clipboard', 1), 'emoji');
-    assert.equal(resolveTabbarMove(items, 'emoji', -1), 'clipboard');
-  });
-  it('未知 current 从第一个开始', () => {
-    assert.equal(resolveTabbarMove(items, 'unknown', 1), 'symbols');
-  });
-  it('空列表 null', () => {
-    assert.equal(resolveTabbarMove([], 'emoji', 1), null);
-  });
-});
-
 describe('isSidebarCategoryActive', () => {
   it('有 active 时精确匹配', () => {
     assert.equal(isSidebarCategoryActive('b', 'b', 'a'), true);
@@ -174,6 +151,48 @@ describe('端到端状态机路径(模拟用户)', () => {
     assert.equal(zone, 'outside');
     assert.equal(shouldForwardNavToEmoji(false, 'tab-left'), false);
     assert.equal(resolveOutsideAppAction('tab-left'), 'passthrough');
+  });
+});
+
+describe('F5 applyNavIntent 进 tabbar 必须 setKbZone(tabbar)', () => {
+  // 回归护栏:旧实现 enter-tabbar 分支只调 onEnterTabbar?.(),kbZone 永远到不了 'tabbar',
+  // resolveZoneNav('tabbar', ...) 死代码,tabbar 内 ←/→ 失能
+  it('case enter-tabbar 分支体内必须 setKbZone("tabbar")', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const src = await fs.readFile(path.join(here, '../EmojiTab.jsx'), 'utf8');
+    const body = src
+      .split('\n')
+      .filter((l) => !l.trimStart().startsWith('//'))
+      .join('\n');
+    const start = body.indexOf("case 'enter-tabbar':");
+    assert.notEqual(start, -1, 'applyNavIntent 缺 enter-tabbar 分支');
+    const nextCase = body.indexOf('case ', start + 1);
+    const branch = body.slice(start, nextCase === -1 ? body.length : nextCase);
+    assert.ok(
+      branch.includes("setKbZone('tabbar')"),
+      'enter-tabbar 分支必须 setKbZone("tabbar"),否则 kbZone 死码'
+    );
+  });
+
+  it('grid-move onFail enter-tabbar 分支体内也必须 setKbZone("tabbar")', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const src = await fs.readFile(path.join(here, '../EmojiTab.jsx'), 'utf8');
+    const body = src
+      .split('\n')
+      .filter((l) => !l.trimStart().startsWith('//'))
+      .join('\n');
+    const match = body.match(/if \(!ok && intent\.onFail === 'enter-tabbar'\)[\s\S]{0,200}/);
+    assert.ok(match, 'applyNavIntent 缺 grid-move onFail enter-tabbar 分支');
+    assert.ok(
+      match[0].includes("setKbZone('tabbar')"),
+      'onFail enter-tabbar 分支必须 setKbZone("tabbar"),否则网格 ← 越界后 kbZone 仍为 grid'
+    );
   });
 });
 
@@ -230,5 +249,66 @@ describe('App 转发契约源码护栏', () => {
     assert.ok(body.includes('resolveActivateKb'), 'activateKb 必须用 resolveActivateKb');
     assert.ok(body.includes('kbImageIndexRef.current = result.index'), '必须同步写 ref');
     assert.ok(body.includes('kbImageIndexRef.current = -1'), 'resetKbIndex 必须同步清 ref');
+  });
+});
+
+// F9: resolveTabbarMove 生产 0 调用(仅测试用),TabNavigation handleKbNav 已内联
+// (idx + delta + items.length) % items.length。未知 current 时 resolveTabbarMove 未知
+// fallback idx=0(恒从 emoji 开始),与 cycleValue delta-aware fallback 分叉。删死代码
+// 函数 + 测试 describe 块 + 文件 import 一行。
+describe('F9 resolveTabbarMove 已删(死导出清理)', () => {
+  it('emojiKbNavigation.js 不导出 resolveTabbarMove', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const src = await fs.readFile(path.join(here, 'emojiKbNavigation.js'), 'utf8');
+    const body = src
+      .split('\n')
+      .filter((l) => !l.trimStart().startsWith('//'))
+      .join('\n');
+    assert.equal(
+      body.includes('resolveTabbarMove'),
+      false,
+      'emojiKbNavigation.js 不应再导出 resolveTabbarMove,生产 0 调用'
+    );
+  });
+
+  it('emojiKbNavigation.test.js 不再 import/describe resolveTabbarMove', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const src = await fs.readFile(path.join(here, 'emojiKbNavigation.test.js'), 'utf8');
+    // 只看静态 import 语句行(浅扫 import { ... } from 'emojiKbNavigation.js')
+    const importLineMatch = src.match(/import\s*\{[\s\S]*?\}\s*from\s*['"`]\.\/emojiKbNavigation/);
+    assert.ok(importLineMatch, '应能找到 import { ... } from emojiKbNavigation 行');
+    assert.equal(
+      importLineMatch[0].includes('resolveTabbarMove'),
+      false,
+      '测试文件 import 不应再含 resolveTabbarMove'
+    );
+    assert.equal(
+      /describe\(\s*['"`]resolveTabbarMove['"`]\s*,/.test(src),
+      false,
+      '不应再 describe("resolveTabbarMove"),description 文本除外'
+    );
+  });
+
+  it('TabNavigation handleKbNav 内联 (idx+delta+len)%len', async () => {
+    // 反向证据:内联公式必须存在
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const src = await fs.readFile(path.join(here, '../TabNavigation.jsx'), 'utf8');
+    const body = src
+      .split('\n')
+      .filter((l) => !l.trimStart().startsWith('//'))
+      .join('\n');
+    assert.ok(
+      /\(idx\s*\+\s*delta\s*\+\s*items\.length\)\s*%\s*items\.length/.test(body),
+      'handleKbNav 应内联循环公式'
+    );
   });
 });
