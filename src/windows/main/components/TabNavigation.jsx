@@ -1,6 +1,6 @@
 import '@tabler/icons-webfont/dist/tabler-icons.min.css';
 import { useTranslation } from 'react-i18next';
-import { useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useLayoutEffect, useState, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { useSnapshot } from 'valtio';
 import { settingsStore } from '@shared/store/settingsStore';
 import { normalizeVisibleOptionalTabs } from '@shared/constants/tabVisibility';
@@ -72,8 +72,10 @@ function TabNavigation({
   onEmojiModeChange,
   onGroupChange,
   groupsPopupRef,
-  navigationMode = 'horizontal'
-}) {
+  navigationMode = 'horizontal',
+  onKbNav = null,
+  onKbEnter = null
+}, ref) {
   const {
     t
   } = useTranslation();
@@ -169,6 +171,65 @@ function TabNavigation({
     : 0;
   const groupButtonWidth = isSidebarLayout ? 92 : GROUP_BUTTON_WIDTH;
   const sidebarShowLabel = isSidebarLayout ? !isSidebarCollapsed : true;
+
+  // 键盘 tabbar 焦点:模式(emoji/symbols/images) + 主标签(favorites/clipboard)
+  // 从 EmojiTab ← 越界进入;←/→ 遍历;Enter 选中;↑/↓ 回搜索/网格
+  const tabbarRefs = useRef({});
+  const [tabbarFocusId, setTabbarFocusId] = useState(null);
+
+  const focusTabbarButton = useCallback((id) => {
+    setTabbarFocusId(id);
+    const el = tabbarRefs.current[id];
+    if (el) {
+      el.focus?.();
+    }
+  }, []);
+
+  const focusTabbar = useCallback(() => {
+    const startId = emojiMode || 'emoji';
+    focusTabbarButton(startId);
+  }, [emojiMode, focusTabbarButton]);
+
+  // ←/→ 遍历模式层:emoji/symbols/images/favorites/clipboard(循环)
+  // 主标签切换会让 EmojiTab unmount(emojiKbActive 由 setActiveTab 清 false)
+  const handleKbNav = useCallback((delta) => {
+    const items = ['emoji', 'symbols', 'images', 'favorites', 'clipboard'];
+    const current = tabbarFocusId || emojiMode || 'emoji';
+    let idx = items.indexOf(current);
+    if (idx < 0) idx = 0;
+    const next = (idx + delta + items.length) % items.length;
+    const nextId = items[next];
+    focusTabbarButton(nextId);
+    if (nextId === 'favorites') {
+      onTabChange('favorites');
+    } else if (nextId === 'clipboard') {
+      onTabChange('clipboard');
+    } else if (nextId === 'emoji') {
+      onEmojiModeChange('emoji');
+    } else if (nextId === 'symbols') {
+      onEmojiModeChange('symbols');
+    } else if (nextId === 'images') {
+      onEmojiModeChange('images');
+    }
+  }, [tabbarFocusId, emojiMode, focusTabbarButton, onTabChange, onEmojiModeChange]);
+
+  const handleKbEnter = useCallback(() => {
+    const current = tabbarFocusId || emojiMode || 'emoji';
+    if (current === 'favorites') onTabChange('favorites');
+    else if (current === 'clipboard') onTabChange('clipboard');
+    else if (current === 'emoji') onEmojiModeChange('emoji');
+    else if (current === 'symbols') onEmojiModeChange('symbols');
+    else if (current === 'images') onEmojiModeChange('images');
+  }, [tabbarFocusId, emojiMode, onTabChange, onEmojiModeChange]);
+
+  useImperativeHandle(ref, () => ({
+    focusTabbar,
+    kbNav: handleKbNav,
+    kbEnter: handleKbEnter
+  }), [focusTabbar, handleKbNav, handleKbEnter]);
+
+  // tabbar 键盘焦点时该按钮高亮
+  const isTabbarActive = (id) => tabbarFocusId === id;
 
   const updateTabIndicator = useCallback(() => {
     const activeElement = tabsRef.current[activeTab];
@@ -499,7 +560,10 @@ function TabNavigation({
                 isActive={activeTab === tab.id}
                 onClick={onTabChange}
                 index={index}
-                buttonRef={el => { tabsRef.current[tab.id] = el; }}
+                buttonRef={el => {
+                  tabsRef.current[tab.id] = el;
+                  tabbarRefs.current[tab.id] = el;
+                }}
                 navigationMode="sidebar"
                 showLabel={sidebarShowLabel}
               />
@@ -514,18 +578,19 @@ function TabNavigation({
           <div className="flex-1 min-h-0 overflow-y-auto px-2 py-2 w-full min-w-0">
             <div className="grid grid-cols-1 gap-1 w-full min-w-0 justify-items-stretch">
               {activeTab === 'emoji'
-                ? emojiModes.map(mode => renderSidebarButton({
-                    id: mode.id,
-                    label: mode.label,
-                    icon: mode.icon,
-                    emoji: mode.emoji,
-                    isActive: emojiMode === mode.id,
-                    onClick: handleEmojiModeChange,
-                    showLabel: sidebarShowLabel,
-                    buttonRef: el => {
-                      emojiModesRef.current[mode.id] = el;
-                    }
-                  }))
+                    ? emojiModes.map(mode => renderSidebarButton({
+                        id: mode.id,
+                        label: mode.label,
+                        icon: mode.icon,
+                        emoji: mode.emoji,
+                        isActive: emojiMode === mode.id,
+                        onClick: handleEmojiModeChange,
+                        showLabel: sidebarShowLabel,
+                        buttonRef: el => {
+                          emojiModesRef.current[mode.id] = el;
+                          tabbarRefs.current[mode.id] = el?.querySelector?.('button') || el;
+                        }
+                      }))
                 : filters.map(filter => renderSidebarButton({
                     id: filter.id,
                     label: filter.label,
@@ -648,7 +713,10 @@ function TabNavigation({
               isActive={activeTab === tab.id}
               onClick={onTabChange}
               index={index}
-              buttonRef={el => tabsRef.current[tab.id] = el}
+              buttonRef={el => {
+                tabsRef.current[tab.id] = el;
+                tabbarRefs.current[tab.id] = el;
+              }}
               navigationMode={isSidebarLayout ? 'sidebar' : 'horizontal'}
             />
           ))}
@@ -689,12 +757,15 @@ function TabNavigation({
           )}
           {activeTab === 'emoji'
             ? emojiModes.map(mode => (
-                <div key={mode.id} ref={el => emojiModesRef.current[mode.id] = el} className="relative flex-1 h-7">
+                <div key={mode.id} ref={el => {
+                  emojiModesRef.current[mode.id] = el;
+                  tabbarRefs.current[mode.id] = el?.querySelector?.('button') || el;
+                }} className="relative flex-1 h-7">
                   <Tooltip content={mode.label} placement={isSidebarLayout ? 'right' : 'bottom'} asChild>
                     <button
                       onClick={() => handleEmojiModeChange(mode.id)}
                       className={`relative z-10 flex items-center justify-center w-full h-full rounded-lg focus:outline-none ${uiAnimationEnabled ? 'hover:scale-105' : ''} ${
-                        emojiMode === mode.id
+                        emojiMode === mode.id || isTabbarActive(mode.id)
                           ? 'qc-active-icon-button bg-[var(--qc-accent)] text-[var(--qc-accent-fg)] shadow-md hover:bg-[var(--qc-accent)]'
                           : 'text-qc-fg-muted hover:bg-qc-hover'
                       }`}
@@ -823,4 +894,4 @@ function TabNavigation({
     </div>
   </div>;
 }
-export default TabNavigation;
+export default forwardRef(TabNavigation);

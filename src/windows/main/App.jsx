@@ -16,6 +16,7 @@ import { useNavigationKeyboard } from '@shared/hooks/useNavigationKeyboard';
 import { useWindowAnimation } from '@shared/hooks/useWindowAnimation';
 import {
   resolveOutsideAppAction,
+  shouldForwardNavToEmoji,
 } from './components/emoji/emojiKbNavigation';
 import { applyBackgroundImage, clearBackgroundImage } from '@shared/utils/backgroundManager';
 import { getUpdateBannerState } from '@shared/api/settings';
@@ -73,19 +74,9 @@ function App() {
   const clipboardTabRef = useRef(null);
   const favoritesTabRef = useRef(null);
   const emojiTabRef = useRef(null);
+  const tabNavigationRef = useRef(null);
   const groupsPopupRef = useRef(null);
   const searchRef = useRef(null);
-  // EmojiTab 是 lazy 加载,在 mount 完成前 emojiTabRef.current 是 null。
-  // 此时按 ↓/←/→ 会被吞掉。用 pendingEmojiNavRef 暂存,等 EmojiTab mount 后 flush。
-  const pendingEmojiNavRef = useRef([]);
-  const setEmojiTabRef = useCallback((instance) => {
-    emojiTabRef.current = instance;
-    if (instance && pendingEmojiNavRef.current.length > 0) {
-      const queue = pendingEmojiNavRef.current;
-      pendingEmojiNavRef.current = [];
-      queue.forEach((action) => instance.handleNavAction?.(action));
-    }
-  }, []);
   const tabNavigationMode = isSidebarTabsLayout
     ? TAB_NAVIGATION_MODE.SIDEBAR
     : TAB_NAVIGATION_MODE.HORIZONTAL;
@@ -387,21 +378,69 @@ function App() {
     searchRef.current?.blur?.();
   };
   // 表情页:后端全局热键是方向键唯一可靠来源(RegisterHotKey 常吞 webview keydown)。
-  // 门控:仅 emojiKbActive(true) 时转发给 EmojiTab;outside 态只有 ↓ 激活,
-  // ←/→/↑ 一律 return false 交回 App 原有 handler(切主标签/blur),绝不吞键。
-  // EmojiTab 还在 lazy 加载时,应转发的事件入队等 mount 后重放。
+  // 已激活 → 转发给 EmojiTab;outside 仅 ↓ 激活;左右 passthrough 切主标签。
   const dispatchEmojiNav = (action) => {
     if (activeTab !== 'emoji') return false;
-    const shouldForward = navigationStore.emojiKbActive
-      || (!navigationStore.emojiKbActive && resolveOutsideAppAction(action) === 'activate');
-    if (!shouldForward) return false;
-    const handler = emojiTabRef.current?.handleNavAction;
-    if (handler) {
-      handler(action);
+    if (shouldForwardNavToEmoji(navigationStore.emojiKbActive, action)) {
+      emojiTabRef.current?.handleNavAction?.(action);
       return true;
     }
-    pendingEmojiNavRef.current.push(action);
-    return true;
+    const outside = resolveOutsideAppAction(action);
+    if (outside === 'activate') {
+      emojiTabRef.current?.handleNavAction?.(action);
+      return true;
+    }
+    if (outside === 'ignore') return true;
+    return false;
+  };
+  // EmojiTab 请求进入 tabbar(模式层)时,交给 TabNavigation 聚焦
+  const handleEmojiEnterTabbar = () => {
+    tabNavigationRef.current?.focusTabbar?.();
+  };
+  const handleEmojiTabbarMove = (delta) => {
+    tabNavigationRef.current?.kbNav?.(delta);
+  };
+  const handleEmojiTabbarEnter = () => {
+    tabNavigationRef.current?.kbEnter?.();
+  };
+
+  // 给 EmojiTab 注入 tabbar 回调(EmojiTab 懒加载,ref 在挂载后才就绪)
+  useEffect(() => {
+    const tab = emojiTabRef.current;
+    if (!tab) return undefined;
+    tab.setEnterTabbarHandler?.(handleEmojiEnterTabbar);
+    tab.setTabbarMoveHandler?.(handleEmojiTabbarMove);
+    return () => {
+      tab.setEnterTabbarHandler?.(null);
+      tab.setTabbarMoveHandler?.(null);
+    };
+  }, [emojiTabRef, handleEmojiEnterTabbar, handleEmojiTabbarMove]);
+  // 表情页已激活时,←/→ 切主标签 → 交给 tabbar(模式层),而不是直接切
+  const handleTabLeft = () => {
+    if (activeTab === 'emoji' && navigationStore.emojiKbActive) {
+      handleEmojiTabbarMove(-1);
+      return;
+    }
+    if (dispatchEmojiNav('tab-left')) return;
+    setActiveTab(currentTab => {
+      const tabs = visibleTabs;
+      const currentIndex = tabs.indexOf(currentTab);
+      if (currentIndex === -1) return tabs[tabs.length - 1];
+      return tabs[currentIndex === 0 ? tabs.length - 1 : currentIndex - 1];
+    });
+  };
+  const handleTabRight = () => {
+    if (activeTab === 'emoji' && navigationStore.emojiKbActive) {
+      handleEmojiTabbarMove(1);
+      return;
+    }
+    if (dispatchEmojiNav('tab-right')) return;
+    setActiveTab(currentTab => {
+      const tabs = visibleTabs;
+      const currentIndex = tabs.indexOf(currentTab);
+      if (currentIndex === -1) return tabs[0];
+      return tabs[currentIndex === tabs.length - 1 ? 0 : currentIndex + 1];
+    });
   };
   const handleNavigateUp = () => {
     if (dispatchEmojiNav('navigate-up')) return;
@@ -462,24 +501,6 @@ function App() {
         return filters[currentIndex === -1 ? 0 : (currentIndex === filters.length - 1 ? 0 : currentIndex + 1)];
       });
     }
-  };
-  const handleTabLeft = () => {
-    if (dispatchEmojiNav('tab-left')) return;
-    setActiveTab(currentTab => {
-      const tabs = visibleTabs;
-      const currentIndex = tabs.indexOf(currentTab);
-      if (currentIndex === -1) return tabs[tabs.length - 1];
-      return tabs[currentIndex === 0 ? tabs.length - 1 : currentIndex - 1];
-    });
-  };
-  const handleTabRight = () => {
-    if (dispatchEmojiNav('tab-right')) return;
-    setActiveTab(currentTab => {
-      const tabs = visibleTabs;
-      const currentIndex = tabs.indexOf(currentTab);
-      if (currentIndex === -1) return tabs[0];
-      return tabs[currentIndex === tabs.length - 1 ? 0 : currentIndex + 1];
-    });
   };
   const handleToggleSearch = () => {
     if (searchRef.current?.toggleFocus) {
@@ -565,11 +586,11 @@ function App() {
     bg-qc-surface
   `.trim().replace(/\s+/g, ' ');
   const TitleBarComponent = <TitleBar ref={searchRef} searchQuery={searchQuery} onSearchChange={setSearchQuery} searchPlaceholder={t('search.placeholder')} position={settings.titleBarPosition} activeTab={activeTab} updateBannerState={updateBannerState} />;
-  const TabNavigationComponent = <TabNavigation activeTab={activeTab} onTabChange={setActiveTab} contentFilter={contentFilter} onFilterChange={setContentFilter} emojiMode={emojiMode} onEmojiModeChange={setEmojiMode} onGroupChange={handleGroupChange} groupsPopupRef={groupsPopupRef} navigationMode={tabNavigationMode} />;
+  const TabNavigationComponent = <TabNavigation ref={tabNavigationRef} activeTab={activeTab} onTabChange={setActiveTab} contentFilter={contentFilter} onFilterChange={setContentFilter} emojiMode={emojiMode} onEmojiModeChange={setEmojiMode} onGroupChange={handleGroupChange} groupsPopupRef={groupsPopupRef} navigationMode={tabNavigationMode} onKbNav={handleEmojiTabbarMove} onKbEnter={handleEmojiTabbarEnter} />;
   const ContentComponent = <div ref={contentDragRef} className="main-content-area flex-1 min-h-0 overflow-hidden relative pb-[8px] bg-qc-surface transition-colors duration-500">
       {activeTab === 'clipboard' && <ClipboardTab ref={clipboardTabRef} contentFilter={contentFilter} searchQuery={searchQuery} />}
       {activeTab === 'favorites' && <FavoritesTab ref={favoritesTabRef} contentFilter={contentFilter} searchQuery={searchQuery} />}
-      {activeTab === 'emoji' && <Suspense fallback={null}><EmojiTab ref={setEmojiTabRef} emojiMode={emojiMode} onEmojiModeChange={setEmojiMode} onEscapeFromSidebar={setActiveTab} /></Suspense>}
+      {activeTab === 'emoji' && <Suspense fallback={null}><EmojiTab ref={emojiTabRef} emojiMode={emojiMode} onEmojiModeChange={setEmojiMode} /></Suspense>}
     </div>;
   const ActionBarComponent = <MultiSelectActionBar activeTab={activeTab} />;
   const renderWorkspace = () => {

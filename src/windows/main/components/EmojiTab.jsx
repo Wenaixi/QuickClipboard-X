@@ -24,7 +24,6 @@ import {
   resolveSidebarCategoryId,
   resolveZoneNav,
   isSidebarCategoryActive,
-  resolveSidebarCycleStep,
 } from './emoji/emojiKbNavigation';
 
 const DEFAULT_GRID_COLS = 8;
@@ -221,11 +220,7 @@ function getImageGroupNameFromDragEvent(event) {
   return target?.dataset?.imageGroupName || '';
 }
 
-const EmojiTab = forwardRef(function EmojiTab({
-  emojiMode,
-  onEmojiModeChange,
-  onEscapeFromSidebar,
-}, ref) {
+const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, ref) {
   const showSymbols = emojiMode === 'symbols';
   const showImages = emojiMode === 'images';
   const { t } = useTranslation();
@@ -265,7 +260,10 @@ const EmojiTab = forwardRef(function EmojiTab({
   const scrollContainerRef = useRef(null);
   const contentMeasureRef = useRef(null);
   const activeCategoryRef = useRef('recent');
-  const virtualDataRef = useRef([]); 
+  const sidebarButtonsRef = useRef({});
+  const onEnterTabbarRef = useRef(null);
+  const onTabbarMoveRef = useRef(null);
+  const virtualDataRef = useRef([]);
   const emojiMetaRef = useRef({});
   const isUserScrollingRef = useRef(false);
   const searchInputRef = useInputFocus();
@@ -607,8 +605,6 @@ const EmojiTab = forwardRef(function EmojiTab({
     setKbRow(-1);
     setKbCol(0);
     imageLibraryRef.current?.resetKbIndex?.();
-    // 清掉可能残留的"侧栏 ← 循环"标记:切换子模式后不应再自动回 sidebar
-    sidebarCycleModeRef.current = false;
 
     if (showImages) {
       loadImageGroups(currentImageGroup);
@@ -885,10 +881,11 @@ const EmojiTab = forwardRef(function EmojiTab({
     if (!catId) return;
     setKbZone('sidebar');
     navigationStore.setEmojiKbActive(true);
-    // 显式同步 activeCategory,避免依赖 updateSidebarHighlight 早返 → 侧栏高亮割裂
-    activeCategoryRef.current = catId;
-    setActiveCategory(catId);
+    // 保留当前分类,不强制 cats[0]
     handleCategoryClick(catId);
+    // 聚焦当前分类按钮(键盘焦点跟随区域)
+    const btn = sidebarButtonsRef.current[catId];
+    btn?.focus?.();
   }, [currentCategories, handleCategoryClick, showImages, currentImageGroup]);
 
   const focusSearchInput = useCallback(() => {
@@ -916,36 +913,11 @@ const EmojiTab = forwardRef(function EmojiTab({
     const target = idx + delta;
     if (target < 0 || target >= cats.length) return false;
     handleCategoryClick(cats[target].id);
+    // 聚焦新分类按钮
+    const btn = sidebarButtonsRef.current[cats[target].id];
+    btn?.focus?.();
     return true;
   }, [currentCategories, handleCategoryClick, showImages, currentImageGroup]);
-
-  // 侧栏 ←:反向循环子模式,到 emoji 时跳出收藏
-  const sidebarCycleModeRef = useRef(false);
-  const cycleModeOrEscape = useCallback(() => {
-    const step = resolveSidebarCycleStep(emojiMode);
-    if (step.action === 'escape') {
-      onEscapeFromSidebar?.(step.tab);
-      return;
-    }
-    sidebarCycleModeRef.current = true;
-    onEmojiModeChange(step.mode);
-  }, [emojiMode, onEmojiModeChange, onEscapeFromSidebar]);
-
-  // emojiMode 切到非 images 时同步 currentImageGroup 类的 active 引用,
-  // 让侧栏高亮和真实激活位置一致(避免两边割裂)
-  useEffect(() => {
-    if (sidebarCycleModeRef.current) {
-      sidebarCycleModeRef.current = false;
-      // 模式 effect 已把 kbZone 设为 outside,这里恢复 sidebar
-      const firstCat = showSymbols ? SYMBOL_CATS[0]?.id : EMOJI_CATS[0]?.id;
-      if (firstCat) {
-        activeCategoryRef.current = firstCat;
-        setActiveCategory(firstCat);
-      }
-      setKbZone('sidebar');
-      navigationStore.setEmojiKbActive(true);
-    }
-  }, [emojiMode, showSymbols]);
 
   const moveGridBy = useCallback((dRow, dCol) => {
     if (showImages) {
@@ -1008,16 +980,20 @@ const EmojiTab = forwardRef(function EmojiTab({
       case 'enter-sidebar':
         enterSidebar();
         break;
+      case 'enter-tabbar':
+        // 交给 App → TabNavigation 聚焦模式层
+        onEnterTabbarRef.current?.();
+        break;
+      case 'tabbar-move':
+        onTabbarMoveRef.current?.(intent.delta);
+        break;
       case 'deactivate':
         blurSearchInput();
-        break;
-      case 'cycle-mode-or-escape':
-        cycleModeOrEscape();
         break;
       case 'grid-move': {
         const ok = moveGridBy(intent.dRow, intent.dCol);
         if (!ok && intent.onFail === 'enter-search') focusSearchInput();
-        if (!ok && intent.onFail === 'enter-sidebar') enterSidebar();
+        if (!ok && intent.onFail === 'enter-tabbar') onEnterTabbarRef.current?.();
         break;
       }
       case 'sidebar-move': {
@@ -1028,7 +1004,7 @@ const EmojiTab = forwardRef(function EmojiTab({
       default:
         break;
     }
-  }, [focusSearchInput, enterGrid, enterSidebar, blurSearchInput, moveGridBy, moveSidebarBy, cycleModeOrEscape]);
+  }, [focusSearchInput, enterGrid, enterSidebar, blurSearchInput, moveGridBy, moveSidebarBy]);
 
   // 主路径:App 转发后端 navigation-action。不挂 window keydown,
   // 避免与 RegisterHotKey 在搜索框聚焦时双触发(进 grid 两次/跳格)。
@@ -1082,6 +1058,10 @@ const EmojiTab = forwardRef(function EmojiTab({
   useImperativeHandle(ref, () => ({
     executeCurrentItem,
     handleNavAction,
+    setEnterTabbarHandler: (fn) => { onEnterTabbarRef.current = fn; },
+    setTabbarMoveHandler: (fn) => { onTabbarMoveRef.current = fn; },
+    enterTabbar: () => onEnterTabbarRef.current?.(),
+    tabbarMove: (delta) => onTabbarMoveRef.current?.(delta),
   }), [executeCurrentItem, handleNavAction]);
 
   const moveActiveImageToGroup = useCallback(async (targetGroup) => {
@@ -1187,6 +1167,7 @@ const EmojiTab = forwardRef(function EmojiTab({
         ) : currentCategories.map((cat, idx) => (
           <Tooltip key={cat.id} content={t(cat.labelKey)} placement="right" asChild>
             <button
+              ref={el => { sidebarButtonsRef.current[cat.id] = el; }}
               onClick={() => handleCategoryClick(cat.id)}
               className={`w-8 h-8 mx-auto mb-0.5 flex items-center justify-center rounded-lg transition-colors ${
                 isSidebarCategoryActive(cat.id, activeCategory, currentCategories[0]?.id)
