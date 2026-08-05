@@ -330,16 +330,16 @@ pub fn register_quickpaste_hotkey(shortcut_str: &str) -> Result<(), String> {
                 if is_foreground_globally_disabled() {
                     return;
                 }
-                
+
                 let settings = crate::get_settings();
                 if settings.quickpaste_paste_on_modifier_release {
                     return;
                 }
-                
+
                 if let Some(window) = app.get_webview_window("quickpaste") {
                     let _ = window.emit("quickpaste-hide", ());
                 }
-                
+
                 let app_clone = app.clone();
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_millis(50));
@@ -349,7 +349,14 @@ pub fn register_quickpaste_hotkey(shortcut_str: &str) -> Result<(), String> {
                 });
             }
         })
-        .map_err(|e| format!("注册便捷粘贴快捷键失败: {}", e))?;
+        .map_err(|e| {
+            // 注册失败：插件可能在 Err 前部分写入 Windows 层，主动探测并
+            // 注销清理，避免残留吞键的"幽灵热键"。
+            if app.global_shortcut().is_registered(shortcut) {
+                let _ = app.global_shortcut().unregister(shortcut);
+            }
+            format!("注册便捷粘贴快捷键失败: {}", e)
+        })?;
     
     REGISTERED_SHORTCUTS.lock().push(("quickpaste".to_string(), shortcut_str.to_string()));
     
@@ -581,7 +588,14 @@ pub fn register_paste_plain_text_hotkey(shortcut_str: &str) -> Result<(), String
                 }
             }
         })
-        .map_err(|e| format!("注册纯文本粘贴快捷键失败: {}", e))?;
+        .map_err(|e| {
+            // 注册失败：插件可能在 Err 前部分写入 Windows 层，主动探测并
+            // 注销清理，避免残留吞键的"幽灵热键"。
+            if app.global_shortcut().is_registered(shortcut) {
+                let _ = app.global_shortcut().unregister(shortcut);
+            }
+            format!("注册纯文本粘贴快捷键失败: {}", e)
+        })?;
 
     REGISTERED_SHORTCUTS
         .lock()
@@ -700,6 +714,11 @@ pub fn register_number_shortcuts(modifier: &str) -> Result<(), String> {
                         "注册数字快捷键 {} 失败: {}，继续注册其他快捷键",
                         shortcut_str, e
                     );
+                    // 注册失败：插件可能在 Err 前部分写入 Windows 层，主动探测并
+                    // 注销清理，避免残留吞键的"幽灵热键"。
+                    if app.global_shortcut().is_registered(shortcut) {
+                        let _ = app.global_shortcut().unregister(shortcut);
+                    }
                     failed_shortcuts.push(shortcut_str);
                 }
             }
@@ -1003,6 +1022,34 @@ mod tests {
             assert!(
                 lock_pos.is_some() && lock_pos < on_shortcut_pos,
                 "{name} 必须在 on_shortcut 之前持 GLOBAL_HOTKEY_SYNC_LOCK"
+            );
+        }
+    }
+
+    // 三个直连 on_shortcut 的注册函数失败路径必须清理幽灵热键：
+    // 插件可能在 Err 前部分写入 Windows 层，若不探测注销会残留吞键。
+    // 与 register_shortcut_inner 的 Err 分支同款清理。
+    #[test]
+    fn direct_registration_fns_cleanup_ghost_hotkey_on_failure() {
+        let src = global_source();
+        let body = |name: &str| {
+            let start = src.find(&format!("pub fn {name}(")).unwrap_or_else(|| panic!("缺 {name}"));
+            let rest = &src[start..];
+            let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(src.len());
+            &src[start..end]
+        };
+
+        for name in [
+            "register_quickpaste_hotkey",
+            "register_paste_plain_text_hotkey",
+            "register_number_shortcuts",
+        ] {
+            let b = body(name);
+            let cleanup_pos = b.find("is_registered(shortcut)");
+            let unregister_pos = b.find("unregister(shortcut)");
+            assert!(
+                cleanup_pos.is_some() && unregister_pos.is_some() && cleanup_pos < unregister_pos,
+                "{name} 失败路径必须 is_registered 探测后 unregister 清理幽灵热键"
             );
         }
     }
