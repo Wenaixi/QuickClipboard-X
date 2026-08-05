@@ -600,8 +600,8 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
   useEffect(() => {
     setSearchQuery('');
     // 切换子模式时重置键盘导航状态:回到 outside(无高亮,←/→ 恢复原功能)
+    // emojiKbActive 由下方 useEffect([kbZone]) 单点兜底,这里只改 zone
     setKbZone('outside');
-    navigationStore.setEmojiKbActive(false);
     setKbRow(-1);
     setKbCol(0);
     imageLibraryRef.current?.resetKbIndex?.();
@@ -858,7 +858,6 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
       const ok = imageLibraryRef.current?.activateKb?.();
       if (ok) {
         setKbZone('grid');
-        navigationStore.setEmojiKbActive(true);
         return;
       }
       return;
@@ -869,7 +868,6 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
     setKbRow(firstRowIndex);
     setKbCol(0);
     setKbZone('grid');
-    navigationStore.setEmojiKbActive(true);
     scrollContainerRef.current?.scrollToIndex({ index: firstRowIndex, align: 'center' });
   }, [showImages]);
 
@@ -880,7 +878,6 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
     const catId = resolveSidebarCategoryId(cats, activeId);
     if (!catId) return;
     setKbZone('sidebar');
-    navigationStore.setEmojiKbActive(true);
     // 保留当前分类,不强制 cats[0]
     handleCategoryClick(catId);
     // 聚焦当前分类按钮(键盘焦点跟随区域)
@@ -890,13 +887,11 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
 
   const focusSearchInput = useCallback(() => {
     setKbZone('search');
-    navigationStore.setEmojiKbActive(true);
     searchInputRef.current?.focus?.();
   }, []);
 
   const blurSearchInput = useCallback(() => {
     setKbZone('outside');
-    navigationStore.setEmojiKbActive(false);
     setKbRow(-1);
     setKbCol(0);
     imageLibraryRef.current?.resetKbIndex?.();
