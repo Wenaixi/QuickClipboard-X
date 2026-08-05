@@ -177,6 +177,48 @@ describe('端到端状态机路径(模拟用户)', () => {
   });
 });
 
+describe('F5 applyNavIntent 进 tabbar 必须 setKbZone(tabbar)', () => {
+  // 回归护栏:旧实现 enter-tabbar 分支只调 onEnterTabbar?.(),kbZone 永远到不了 'tabbar',
+  // resolveZoneNav('tabbar', ...) 死代码,tabbar 内 ←/→ 失能
+  it('case enter-tabbar 分支体内必须 setKbZone("tabbar")', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const src = await fs.readFile(path.join(here, '../EmojiTab.jsx'), 'utf8');
+    const body = src
+      .split('\n')
+      .filter((l) => !l.trimStart().startsWith('//'))
+      .join('\n');
+    const start = body.indexOf("case 'enter-tabbar':");
+    assert.notEqual(start, -1, 'applyNavIntent 缺 enter-tabbar 分支');
+    const nextCase = body.indexOf('case ', start + 1);
+    const branch = body.slice(start, nextCase === -1 ? body.length : nextCase);
+    assert.ok(
+      branch.includes("setKbZone('tabbar')"),
+      'enter-tabbar 分支必须 setKbZone("tabbar"),否则 kbZone 死码'
+    );
+  });
+
+  it('grid-move onFail enter-tabbar 分支体内也必须 setKbZone("tabbar")', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const src = await fs.readFile(path.join(here, '../EmojiTab.jsx'), 'utf8');
+    const body = src
+      .split('\n')
+      .filter((l) => !l.trimStart().startsWith('//'))
+      .join('\n');
+    const match = body.match(/if \(!ok && intent\.onFail === 'enter-tabbar'\)[\s\S]{0,200}/);
+    assert.ok(match, 'applyNavIntent 缺 grid-move onFail enter-tabbar 分支');
+    assert.ok(
+      match[0].includes("setKbZone('tabbar')"),
+      'onFail enter-tabbar 分支必须 setKbZone("tabbar"),否则网格 ← 越界后 kbZone 仍为 grid'
+    );
+  });
+});
+
 describe('App 转发契约源码护栏', () => {
   it('App.jsx 含 dispatchEmojiNav 与四向 action', async () => {
     const fs = await import('node:fs/promises');

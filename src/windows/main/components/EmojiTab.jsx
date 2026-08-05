@@ -243,7 +243,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
   const [useEmojiFallbackFont, setUseEmojiFallbackFont] = useState(false);
   // 键盘区域导航:默认 outside(无高亮,←/→ 切主标签);↓ 经 App 转发激活
   // 主路径是后端 global hotkey → App.dispatchEmojiNav → handleNavAction(不依赖 webview keydown)
-  const [kbZone, setKbZone] = useState('outside'); // 'outside' | 'search' | 'grid' | 'sidebar'
+  const [kbZone, setKbZone] = useState('outside'); // 'outside' | 'search' | 'grid' | 'sidebar' | 'tabbar'
   const [kbRow, setKbRow] = useState(-1);
   const [kbCol, setKbCol] = useState(0);
   const kbRowRef = useRef(kbRow);
@@ -981,6 +981,8 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
         enterSidebar();
         break;
       case 'enter-tabbar':
+        // 进 tabbar 同步写 kbZone,否则 resolveZoneNav('tabbar', ...) 死码
+        setKbZone('tabbar');
         // 交给 TabNavigation 聚焦模式层
         onEnterTabbar?.();
         break;
@@ -993,7 +995,10 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
       case 'grid-move': {
         const ok = moveGridBy(intent.dRow, intent.dCol);
         if (!ok && intent.onFail === 'enter-search') focusSearchInput();
-        if (!ok && intent.onFail === 'enter-tabbar') onEnterTabbar?.();
+        if (!ok && intent.onFail === 'enter-tabbar') {
+          setKbZone('tabbar');
+          onEnterTabbar?.();
+        }
         break;
       }
       case 'sidebar-move': {
