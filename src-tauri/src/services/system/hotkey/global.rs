@@ -67,6 +67,14 @@ pub struct ShortcutStatus {
 static SHORTCUT_STATUS: Lazy<Mutex<HashMap<String, ShortcutStatus>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
+// 全局热键注册/注销/重载串行锁：前台切换(sync_hotkeys_for_foreground)、
+// 设置变更(reload_from_settings)、单键注册(register_shortcut)可能从不同线程
+// 同时触发，RegisterHotKey 对同一组合键并发注册会返回 AlreadyRegistered，
+// 失败后内部表与 Windows 层不一致，残留吞键的"幽灵热键"——
+// 62e6b718 只给 navigation 加了锁，global.rs 的整体热键注册漏了，这是
+// "所有快捷键失效"的根因之一。串行化后从根源消除并发撞车。
+static GLOBAL_HOTKEY_SYNC_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
 pub fn init_hotkey_manager(app: AppHandle, _window: WebviewWindow) {
     *APP_HANDLE.lock() = Some(app);
 }
@@ -180,10 +188,18 @@ pub fn register_shortcut<F>(id: &str, shortcut_str: &str, handler: F) -> Result<
 where
     F: Fn(&AppHandle) + Send + Sync + 'static,
 {
+    let _guard = GLOBAL_HOTKEY_SYNC_LOCK.lock();
+    register_shortcut_inner(id, shortcut_str, handler)
+}
+
+fn register_shortcut_inner<F>(id: &str, shortcut_str: &str, handler: F) -> Result<(), String>
+where
+    F: Fn(&AppHandle) + Send + Sync + 'static,
+{
     let app = get_app()?;
-    
+
     unregister_shortcut(id);
-    
+
     let shortcut = match parse_shortcut(shortcut_str) {
         Ok(s) => s,
         Err(_e) => {
@@ -191,7 +207,7 @@ where
             return Err("REGISTRATION_FAILED".to_string());
         }
     };
-    
+
     match app.global_shortcut()
         .on_shortcut(shortcut, move |app, _shortcut, event| {
             if event.state == ShortcutState::Pressed {
@@ -205,6 +221,11 @@ where
             Ok(())
         }
         Err(e) => {
+            // 注册失败：插件可能在 Err 前部分写入 Windows 层，主动探测并
+            // 注销清理，避免残留吞键的"幽灵热键"。
+            if app.global_shortcut().is_registered(shortcut) {
+                let _ = app.global_shortcut().unregister(shortcut);
+            }
             let error_msg = if e.to_string().contains("already registered") {
                 "CONFLICT".to_string()
             } else {
@@ -764,6 +785,7 @@ fn simulate_paste_only() -> Result<(), String> {
 }
 
 pub fn unregister_all() {
+    let _guard = GLOBAL_HOTKEY_SYNC_LOCK.lock();
     let shortcuts = REGISTERED_SHORTCUTS.lock().clone();
     for (id, _) in shortcuts {
         unregister_shortcut(&id);
@@ -828,6 +850,11 @@ fn clear_shortcut_status(id: &str) {
 }
 
 pub fn reload_from_settings() -> Result<(), String> {
+    let _guard = GLOBAL_HOTKEY_SYNC_LOCK.lock();
+    reload_from_settings_inner()
+}
+
+fn reload_from_settings_inner() -> Result<(), String> {
     let settings = crate::get_settings();
     
     unregister_all();
