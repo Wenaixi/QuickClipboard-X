@@ -105,3 +105,11 @@ export function resolveTabbarMove(items, currentId, delta) {
   const next = (idx + delta + items.length) % items.length;
   return items[next];
 }
+
+/** 循环切换数组元素:prev 不在数组中时从头开始,越界回绕 */
+export function cycleValue(arr, prev, delta) {
+  const currentIndex = arr.indexOf(prev);
+  if (currentIndex === -1) return arr[delta > 0 ? 0 : arr.length - 1];
+  const next = (currentIndex + delta + arr.length) % arr.length;
+  return arr[next];
+}
