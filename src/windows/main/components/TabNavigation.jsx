@@ -217,20 +217,10 @@ function TabNavigation({
     }
   }, [tabbarFocusId, emojiMode, focusTabbarButton, onTabChange, onEmojiModeChange]);
 
-  const handleKbEnter = useCallback(() => {
-    const current = tabbarFocusId || emojiMode || 'emoji';
-    if (current === 'favorites') onTabChange('favorites');
-    else if (current === 'clipboard') onTabChange('clipboard');
-    else if (current === 'emoji') onEmojiModeChange('emoji');
-    else if (current === 'symbols') onEmojiModeChange('symbols');
-    else if (current === 'images') onEmojiModeChange('images');
-  }, [tabbarFocusId, emojiMode, onTabChange, onEmojiModeChange]);
-
   useImperativeHandle(ref, () => ({
     focusTabbar,
-    kbNav: handleKbNav,
-    kbEnter: handleKbEnter
-  }), [focusTabbar, handleKbNav, handleKbEnter]);
+    kbNav: handleKbNav
+  }), [focusTabbar, handleKbNav]);
 
   // tabbar 键盘焦点时该按钮高亮
   const isTabbarActive = (id) => tabbarFocusId === id;

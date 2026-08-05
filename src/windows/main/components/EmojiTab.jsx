@@ -243,7 +243,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
   const [useEmojiFallbackFont, setUseEmojiFallbackFont] = useState(false);
   // 键盘区域导航:默认 outside(无高亮,←/→ 切主标签);↓ 经 App 转发激活
   // 主路径是后端 global hotkey → App.dispatchEmojiNav → handleNavAction(不依赖 webview keydown)
-  const [kbZone, setKbZone] = useState('outside'); // 'outside' | 'search' | 'grid' | 'sidebar'
+  const [kbZone, setKbZone] = useState('outside'); // 'outside' | 'search' | 'grid' | 'sidebar' | 'tabbar'
   const [kbRow, setKbRow] = useState(-1);
   const [kbCol, setKbCol] = useState(0);
   const kbRowRef = useRef(kbRow);
@@ -600,8 +600,8 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
   useEffect(() => {
     setSearchQuery('');
     // 切换子模式时重置键盘导航状态:回到 outside(无高亮,←/→ 恢复原功能)
+    // emojiKbActive 由下方 useEffect([kbZone]) 单点兜底,这里只改 zone
     setKbZone('outside');
-    navigationStore.setEmojiKbActive(false);
     setKbRow(-1);
     setKbCol(0);
     imageLibraryRef.current?.resetKbIndex?.();
@@ -858,7 +858,6 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
       const ok = imageLibraryRef.current?.activateKb?.();
       if (ok) {
         setKbZone('grid');
-        navigationStore.setEmojiKbActive(true);
         return;
       }
       return;
@@ -869,7 +868,6 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
     setKbRow(firstRowIndex);
     setKbCol(0);
     setKbZone('grid');
-    navigationStore.setEmojiKbActive(true);
     scrollContainerRef.current?.scrollToIndex({ index: firstRowIndex, align: 'center' });
   }, [showImages]);
 
@@ -880,7 +878,6 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
     const catId = resolveSidebarCategoryId(cats, activeId);
     if (!catId) return;
     setKbZone('sidebar');
-    navigationStore.setEmojiKbActive(true);
     // 保留当前分类,不强制 cats[0]
     handleCategoryClick(catId);
     // 聚焦当前分类按钮(键盘焦点跟随区域)
@@ -890,13 +887,11 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
 
   const focusSearchInput = useCallback(() => {
     setKbZone('search');
-    navigationStore.setEmojiKbActive(true);
     searchInputRef.current?.focus?.();
   }, []);
 
   const blurSearchInput = useCallback(() => {
     setKbZone('outside');
-    navigationStore.setEmojiKbActive(false);
     setKbRow(-1);
     setKbCol(0);
     imageLibraryRef.current?.resetKbIndex?.();
@@ -981,6 +976,8 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
         enterSidebar();
         break;
       case 'enter-tabbar':
+        // 进 tabbar 同步写 kbZone,否则 resolveZoneNav('tabbar', ...) 死码
+        setKbZone('tabbar');
         // 交给 TabNavigation 聚焦模式层
         onEnterTabbar?.();
         break;
@@ -993,7 +990,10 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
       case 'grid-move': {
         const ok = moveGridBy(intent.dRow, intent.dCol);
         if (!ok && intent.onFail === 'enter-search') focusSearchInput();
-        if (!ok && intent.onFail === 'enter-tabbar') onEnterTabbar?.();
+        if (!ok && intent.onFail === 'enter-tabbar') {
+          setKbZone('tabbar');
+          onEnterTabbar?.();
+        }
         break;
       }
       case 'sidebar-move': {
