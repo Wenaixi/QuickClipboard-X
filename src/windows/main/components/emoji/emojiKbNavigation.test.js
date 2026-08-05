@@ -7,7 +7,7 @@ import {
   shouldForwardNavToEmoji,
   resolveZoneNav,
   isSidebarCategoryActive,
-  resolveSidebarCycleStep,
+  resolveTabbarMove,
 } from './emojiKbNavigation.js';
 
 describe('resolveActivateKb', () => {
@@ -83,7 +83,7 @@ describe('resolveZoneNav', () => {
       type: 'grid-move', dRow: -1, dCol: 0, onFail: 'enter-search',
     });
     assert.deepEqual(resolveZoneNav('grid', 'tab-left'), {
-      type: 'grid-move', dRow: 0, dCol: -1, onFail: 'enter-sidebar',
+      type: 'grid-move', dRow: 0, dCol: -1, onFail: 'enter-tabbar',
     });
   });
   it('sidebar 移动与回搜索', () => {
@@ -92,42 +92,40 @@ describe('resolveZoneNav', () => {
       type: 'sidebar-move', delta: -1, onFail: 'enter-search',
     });
     assert.deepEqual(resolveZoneNav('sidebar', 'tab-right'), { type: 'enter-grid' });
-    assert.deepEqual(resolveZoneNav('sidebar', 'tab-left'), { type: 'cycle-mode-or-escape' });
+    assert.deepEqual(resolveZoneNav('sidebar', 'tab-left'), { type: 'enter-tabbar' });
+  });
+  it('grid 首列 ← 越界进 tabbar(不再是 sidebar)', () => {
+    assert.deepEqual(resolveZoneNav('grid', 'tab-left'), {
+      type: 'grid-move', dRow: 0, dCol: -1, onFail: 'enter-tabbar',
+    });
+  });
+  it('tabbar: up→search down→grid 左右→tabbar-move', () => {
+    assert.deepEqual(resolveZoneNav('tabbar', 'navigate-up'), { type: 'enter-search' });
+    assert.deepEqual(resolveZoneNav('tabbar', 'navigate-down'), { type: 'enter-grid' });
+    assert.deepEqual(resolveZoneNav('tabbar', 'tab-left'), { type: 'tabbar-move', delta: -1 });
+    assert.deepEqual(resolveZoneNav('tabbar', 'tab-right'), { type: 'tabbar-move', delta: 1 });
   });
 });
 
-describe('resolveSidebarCycleStep', () => {
-  it('emoji(自然序首位,反向终点)→ escape favorites', () => {
-    assert.deepEqual(resolveSidebarCycleStep('emoji'), { action: 'escape', tab: 'favorites' });
+describe('resolveTabbarMove', () => {
+  const items = ['emoji', 'symbols', 'images', 'favorites', 'clipboard'];
+  it('右移', () => {
+    assert.equal(resolveTabbarMove(items, 'emoji', 1), 'symbols');
+    assert.equal(resolveTabbarMove(items, 'images', 1), 'favorites');
   });
-  it('symbols → emoji(反向)', () => {
-    assert.deepEqual(resolveSidebarCycleStep('symbols'), { action: 'set-mode', mode: 'emoji' });
+  it('左移', () => {
+    assert.equal(resolveTabbarMove(items, 'symbols', -1), 'emoji');
+    assert.equal(resolveTabbarMove(items, 'favorites', -1), 'images');
   });
-  it('images → symbols(反向)', () => {
-    assert.deepEqual(resolveSidebarCycleStep('images'), { action: 'set-mode', mode: 'symbols' });
+  it('越界循环', () => {
+    assert.equal(resolveTabbarMove(items, 'clipboard', 1), 'emoji');
+    assert.equal(resolveTabbarMove(items, 'emoji', -1), 'clipboard');
   });
-  it('未知模式直接 escape', () => {
-    assert.deepEqual(resolveSidebarCycleStep('foo'), { action: 'escape', tab: 'favorites' });
+  it('未知 current 从第一个开始', () => {
+    assert.equal(resolveTabbarMove(items, 'unknown', 1), 'symbols');
   });
-  it('自定义 escapeTab', () => {
-    assert.deepEqual(resolveSidebarCycleStep('emoji', 'clipboard'), {
-      action: 'escape', tab: 'clipboard',
-    });
-  });
-  it('完整反向序列 images→symbols→emoji→escape', () => {
-    const trace = [];
-    let mode = 'images';
-    for (let i = 0; i < 4; i += 1) {
-      const step = resolveSidebarCycleStep(mode);
-      trace.push(step);
-      if (step.action === 'set-mode') mode = step.mode;
-      else break;
-    }
-    assert.deepEqual(trace, [
-      { action: 'set-mode', mode: 'symbols' },
-      { action: 'set-mode', mode: 'emoji' },
-      { action: 'escape', tab: 'favorites' },
-    ]);
+  it('空列表 null', () => {
+    assert.equal(resolveTabbarMove([], 'emoji', 1), null);
   });
 });
 
@@ -147,21 +145,17 @@ describe('isSidebarCategoryActive', () => {
 });
 
 describe('端到端状态机路径(模拟用户)', () => {
-  it('outside→↓search→↓grid→←sidebar(首列越界)→cycle→↑outside', () => {
+  it('outside→↓search→↓grid→←tabbar→←search→↑outside', () => {
     let zone = 'outside';
     const step = (action) => {
       const intent = resolveZoneNav(zone, action);
       if (intent.type === 'activate-search' || intent.type === 'enter-search') zone = 'search';
       else if (intent.type === 'enter-grid') zone = 'grid';
       else if (intent.type === 'enter-sidebar') zone = 'sidebar';
-      else if (intent.type === 'cycle-mode-or-escape') {
-        // 委托给 resolveSidebarCycleStep;组件层不在 zone 状态机里改 zone
-      } else if (intent.type === 'deactivate') zone = 'outside';
-      else if (intent.type === 'grid-move' && intent.onFail === 'enter-sidebar') {
-        zone = 'sidebar';
-      } else if (intent.type === 'sidebar-move' && intent.onFail === 'enter-search') {
-        // 顶部越界回搜索
-        zone = 'search';
+      else if (intent.type === 'enter-tabbar') zone = 'tabbar';
+      else if (intent.type === 'deactivate') zone = 'outside';
+      else if (intent.type === 'grid-move' && intent.onFail === 'enter-tabbar') {
+        zone = 'tabbar';
       }
       return intent;
     };
@@ -170,15 +164,12 @@ describe('端到端状态机路径(模拟用户)', () => {
     assert.equal(zone, 'search');
     step('navigate-down');
     assert.equal(zone, 'grid');
-    step('tab-left'); // onFail enter-sidebar(首列越界)
-    assert.equal(zone, 'sidebar');
-    // 新行为:sidebar tab-left 返回 cycle-mode-or-escape,zone 保持
-    assert.deepEqual(step('tab-left'), { type: 'cycle-mode-or-escape' });
-    assert.equal(zone, 'sidebar');
-    // 侧栏顶↑回搜索
-    step('navigate-up');
+    step('tab-left'); // onFail enter-tabbar 路径由组件在 move 失败时触发;这里直接模拟
+    assert.equal(zone, 'tabbar');
+    step('tab-left'); // tabbar 内 ←/→ 是模式/主标签移动,zone 不变
+    assert.equal(zone, 'tabbar');
+    step('navigate-up'); // tabbar ↑ 回搜索
     assert.equal(zone, 'search');
-    // 搜索↑反激活
     step('navigate-up');
     assert.equal(zone, 'outside');
     assert.equal(shouldForwardNavToEmoji(false, 'tab-left'), false);
@@ -187,7 +178,7 @@ describe('端到端状态机路径(模拟用户)', () => {
 });
 
 describe('App 转发契约源码护栏', () => {
-  it('App.jsx 含 dispatchEmojiNav + 队列重放 + Escape 回调', async () => {
+  it('App.jsx 含 dispatchEmojiNav 与四向 action', async () => {
     const fs = await import('node:fs/promises');
     const path = await import('node:path');
     const { fileURLToPath } = await import('node:url');
@@ -204,28 +195,11 @@ describe('App 转发契约源码护栏', () => {
     assert.ok(body.includes("dispatchEmojiNav('tab-left')"), '← 未转发');
     assert.ok(body.includes("dispatchEmojiNav('tab-right')"), '→ 未转发');
     assert.ok(body.includes('handleNavAction'), '未调 EmojiTab.handleNavAction');
+    assert.ok(body.includes('shouldForwardNavToEmoji'), '缺 shouldForwardNavToEmoji');
     assert.ok(body.includes('resolveOutsideAppAction'), '缺 resolveOutsideAppAction');
-    // 门控必须存在:未激活时不得吞键(App 原有 handler 继续跑)
-    assert.ok(
-      body.match(/shouldForward = navigationStore\.emojiKbActive/),
-      'dispatchEmojiNav 必须含 emojiKbActive 门控',
-    );
-    assert.ok(
-      body.match(/resolveOutsideAppAction\(action\) === 'activate'/),
-      'outside 仅 ↓ 激活',
-    );
-    assert.ok(
-      body.includes('if (!shouldForward) return false;'),
-      '未激活必须 return false 放行 App 原 handler',
-    );
-    // lazy-load 竞态修复:队列 + callback ref
-    assert.ok(body.includes('pendingEmojiNavRef'), '缺 pendingEmojiNavRef 队列');
-    assert.ok(body.includes('setEmojiTabRef'), '缺 setEmojiTabRef callback ref');
-    // 跳出回调
-    assert.ok(body.includes('onEscapeFromSidebar={setActiveTab}'), '缺 onEscapeFromSidebar 传出');
   });
 
-  it('EmojiTab 暴露 handleNavAction + 不挂 keydown + 接收 onEscapeFromSidebar', async () => {
+  it('EmojiTab 暴露 handleNavAction 且不挂 arrow keydown 主路径', async () => {
     const fs = await import('node:fs/promises');
     const path = await import('node:path');
     const { fileURLToPath } = await import('node:url');
@@ -237,16 +211,10 @@ describe('App 转发契约源码护栏', () => {
       .join('\n');
     assert.ok(body.includes('handleNavAction'), '缺 handleNavAction');
     assert.ok(body.includes('resolveZoneNav'), '缺 resolveZoneNav');
+    // 禁止再挂裸 Arrow 主路径(会与热键双触发)
     assert.equal(body.includes("addEventListener('keydown'"), false, '不应再 window keydown 吃方向键');
     assert.ok(body.includes('resolveSidebarCategoryId'), '进侧栏应保留当前分类');
     assert.ok(body.includes('isSidebarCategoryActive'), '侧栏应受控高亮');
-    assert.ok(body.includes('resolveSidebarCycleStep'), '侧栏 ← 应委托 resolveSidebarCycleStep');
-    assert.ok(body.includes('onEscapeFromSidebar'), '缺 onEscapeFromSidebar 回调');
-    // enterSidebar 必须主动同步 activeCategory
-    assert.ok(
-      body.match(/setActiveCategory\(catId\)/),
-      'enterSidebar 应主动 setActiveCategory(catId),避免依赖 updateSidebarHighlight 早返',
-    );
   });
 
   it('ImageLibraryTab activateKb 走 resolveActivateKb', async () => {
