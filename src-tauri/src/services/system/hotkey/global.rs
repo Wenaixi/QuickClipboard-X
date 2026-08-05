@@ -73,7 +73,7 @@ static SHORTCUT_STATUS: Lazy<Mutex<HashMap<String, ShortcutStatus>>> =
 // 失败后内部表与 Windows 层不一致，残留吞键的"幽灵热键"——
 // 62e6b718 只给 navigation 加了锁，global.rs 的整体热键注册漏了，这是
 // "所有快捷键失效"的根因之一。串行化后从根源消除并发撞车。
-static GLOBAL_HOTKEY_SYNC_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+pub(super) static GLOBAL_HOTKEY_SYNC_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 pub fn init_hotkey_manager(app: AppHandle, _window: WebviewWindow) {
     *APP_HANDLE.lock() = Some(app);
@@ -188,7 +188,7 @@ pub fn register_shortcut<F>(id: &str, shortcut_str: &str, handler: F) -> Result<
 where
     F: Fn(&AppHandle) + Send + Sync + 'static,
 {
-    let _guard = GLOBAL_HOTKEY_SYNC_LOCK.lock();
+    // F1: 假设调用方已持 GLOBAL_HOTKEY_SYNC_LOCK；同线程再 lock 会自死锁。
     register_shortcut_inner(id, shortcut_str, handler)
 }
 
@@ -287,7 +287,7 @@ pub fn register_open_settings_hotkey(shortcut_str: &str) -> Result<(), String> {
 }
 
 pub fn register_quickpaste_hotkey(shortcut_str: &str) -> Result<(), String> {
-    let _guard = GLOBAL_HOTKEY_SYNC_LOCK.lock();
+    // F1: 假设调用方已持 GLOBAL_HOTKEY_SYNC_LOCK；不在此 lock。
     let app = get_app()?;
 
     unregister_shortcut("quickpaste");
@@ -550,7 +550,7 @@ pub fn register_toggle_low_memory_mode_hotkey(shortcut_str: &str) -> Result<(), 
 }
 
 pub fn register_paste_plain_text_hotkey(shortcut_str: &str) -> Result<(), String> {
-    let _guard = GLOBAL_HOTKEY_SYNC_LOCK.lock();
+    // F1: 假设调用方已持 GLOBAL_HOTKEY_SYNC_LOCK；不在此 lock。
     let app = get_app()?;
 
     unregister_shortcut("paste_plain_text");
@@ -641,7 +641,7 @@ fn handle_paste_plain_text_press(app: &AppHandle) -> Result<(), String> {
 }
 
 pub fn register_number_shortcuts(modifier: &str) -> Result<(), String> {
-    let _guard = GLOBAL_HOTKEY_SYNC_LOCK.lock();
+    // F1: 假设调用方已持 GLOBAL_HOTKEY_SYNC_LOCK；不在此 lock。
     let app = get_app()?;
 
     unregister_number_shortcuts();
@@ -807,7 +807,9 @@ fn simulate_paste_only() -> Result<(), String> {
 }
 
 pub fn unregister_all() {
-    let _guard = GLOBAL_HOTKEY_SYNC_LOCK.lock();
+    // F1: 假设调用方已持 GLOBAL_HOTKEY_SYNC_LOCK；reload_from_settings_inner
+    // 持锁贯穿整个 reload，此处再 lock 同一把 parking_lot Mutex 会
+    // 同线程不可重入自死锁。
     let shortcuts = REGISTERED_SHORTCUTS.lock().clone();
     for (id, _) in shortcuts {
         unregister_shortcut(&id);
@@ -829,7 +831,10 @@ pub fn disable_hotkeys() {
     if !HOTKEYS_ENABLED.load(Ordering::Relaxed) {
         return;
     }
-    
+
+    // F1: outer 持 GLOBAL_HOTKEY_SYNC_LOCK 覆盖 unregister_all 假设锁已持的调用契约，
+    // 否则 disable_hotkeys 内的 unregister_all 不持锁无法走完串行化。
+    let _guard = GLOBAL_HOTKEY_SYNC_LOCK.lock();
     unregister_all();
     HOTKEYS_ENABLED.store(false, Ordering::Relaxed);
     println!("已禁用全局热键");
@@ -996,32 +1001,62 @@ mod tests {
         .expect("读取 global.rs 失败")
     }
 
-    // 三个直连 on_shortcut 的注册函数必须持 GLOBAL_HOTKEY_SYNC_LOCK：
-    // 否则与 reload_from_settings 并发注册同一组合键会 AlreadyRegistered，
-    // 残留吞键的"幽灵热键"，导致"所有快捷键失效/唤不出剪贴板"。
-    // 护栏用"锁出现于函数体内（下标早于 on_shortcut 调用）"约束，
-    // 避免只 contains 一个锁名被定义处误命中。
-    #[test]
-    fn direct_registration_fns_hold_sync_lock() {
-        let src = global_source();
-        let body = |name: &str| {
-            let start = src.find(&format!("pub fn {name}(")).unwrap_or_else(|| panic!("缺 {name}"));
-            let rest = &src[start..];
-            let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(src.len());
-            &src[start..end]
-        };
+    fn fn_body<'a>(src: &'a str, name: &str) -> &'a str {
+        // 兼容 pub fn / fn / 带泛型 <F> 三种签名。
+        let markers = [
+            format!("pub fn {name}("),
+            format!("pub fn {name}<"),
+            format!("fn {name}("),
+            format!("fn {name}<"),
+        ];
+        let start = markers
+            .iter()
+            .filter_map(|m| src.find(m))
+            .min()
+            .unwrap_or_else(|| panic!("缺 {name}"));
+        let rest = &src[start..];
+        // 取函数体的闭合 `}` 之后，跳过 `\n}` 两字符的尾巴。
+        // fallback 罕见（如找遍到 EOF），直接到 src 末尾。
+        let end = rest
+            .find("\n}")
+            .map(|i| start + i + 2)
+            .unwrap_or(src.len());
+        &src[start..end]
+    }
 
+    // F1: reload 顶层入口持锁后调用的内层函数禁止再 lock，
+    // 否则 parking_lot 同线程不可重入自死锁——启动/settings 保存/托盘/
+    // 前台切换全挂死。内层契约：reload_from_settings 顶层持锁贯穿整个
+    // reload 过程，unregister_all / register_* 全部假设锁已持。
+    #[test]
+    fn reload_inner_and_callees_must_not_reenter_sync_lock() {
+        let src = global_source();
         for name in [
+            "reload_from_settings_inner",
+            "unregister_all",
+            "register_shortcut",
             "register_quickpaste_hotkey",
             "register_paste_plain_text_hotkey",
             "register_number_shortcuts",
         ] {
-            let b = body(name);
-            let lock_pos = b.find("GLOBAL_HOTKEY_SYNC_LOCK.lock()");
-            let on_shortcut_pos = b.find("on_shortcut");
+            let b = fn_body(&src, name);
             assert!(
-                lock_pos.is_some() && lock_pos < on_shortcut_pos,
-                "{name} 必须在 on_shortcut 之前持 GLOBAL_HOTKEY_SYNC_LOCK"
+                !b.contains("GLOBAL_HOTKEY_SYNC_LOCK.lock()"),
+                "{name} 在 reload 持锁路径上禁止再 lock，否则同线程自死锁"
+            );
+        }
+    }
+
+    // F1 配套：reload 顶层入口 + 配套 disable_hotkeys 必须持锁，
+    // 保证 reload/disable 过程仍串行。
+    #[test]
+    fn reload_outer_entries_hold_sync_lock() {
+        let src = global_source();
+        for name in ["reload_from_settings", "disable_hotkeys"] {
+            let b = fn_body(&src, name);
+            assert!(
+                b.contains("GLOBAL_HOTKEY_SYNC_LOCK.lock()"),
+                "{name} 作为外层入口必须持 GLOBAL_HOTKEY_SYNC_LOCK"
             );
         }
     }
