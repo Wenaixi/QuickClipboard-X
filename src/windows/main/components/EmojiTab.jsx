@@ -220,7 +220,7 @@ function getImageGroupNameFromDragEvent(event) {
   return target?.dataset?.imageGroupName || '';
 }
 
-const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, ref) {
+const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, onEnterTabbar, onTabbarMove }, ref) {
   const showSymbols = emojiMode === 'symbols';
   const showImages = emojiMode === 'images';
   const { t } = useTranslation();
@@ -262,8 +262,6 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
   // 侧栏高亮重渲信号:ref 是唯一真值,改 ref 后 bump 此 tick 触发渲染读新值
   const [sidebarHighlightTick, setSidebarHighlightTick] = useState(0);
   const sidebarButtonsRef = useRef({});
-  const onEnterTabbarRef = useRef(null);
-  const onTabbarMoveRef = useRef(null);
   const virtualDataRef = useRef([]);
   const emojiMetaRef = useRef({});
   const isUserScrollingRef = useRef(false);
@@ -983,11 +981,11 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
         enterSidebar();
         break;
       case 'enter-tabbar':
-        // 交给 App → TabNavigation 聚焦模式层
-        onEnterTabbarRef.current?.();
+        // 交给 TabNavigation 聚焦模式层
+        onEnterTabbar?.();
         break;
       case 'tabbar-move':
-        onTabbarMoveRef.current?.(intent.delta);
+        onTabbarMove?.(intent.delta);
         break;
       case 'deactivate':
         blurSearchInput();
@@ -995,7 +993,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
       case 'grid-move': {
         const ok = moveGridBy(intent.dRow, intent.dCol);
         if (!ok && intent.onFail === 'enter-search') focusSearchInput();
-        if (!ok && intent.onFail === 'enter-tabbar') onEnterTabbarRef.current?.();
+        if (!ok && intent.onFail === 'enter-tabbar') onEnterTabbar?.();
         break;
       }
       case 'sidebar-move': {
@@ -1006,7 +1004,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
       default:
         break;
     }
-  }, [focusSearchInput, enterGrid, enterSidebar, blurSearchInput, moveGridBy, moveSidebarBy]);
+  }, [focusSearchInput, enterGrid, enterSidebar, blurSearchInput, moveGridBy, moveSidebarBy, onEnterTabbar, onTabbarMove]);
 
   // 主路径:App 转发后端 navigation-action。不挂 window keydown,
   // 避免与 RegisterHotKey 在搜索框聚焦时双触发(进 grid 两次/跳格)。
@@ -1059,11 +1057,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange }, 
 
   useImperativeHandle(ref, () => ({
     executeCurrentItem,
-    handleNavAction,
-    setEnterTabbarHandler: (fn) => { onEnterTabbarRef.current = fn; },
-    setTabbarMoveHandler: (fn) => { onTabbarMoveRef.current = fn; },
-    enterTabbar: () => onEnterTabbarRef.current?.(),
-    tabbarMove: (delta) => onTabbarMoveRef.current?.(delta),
+    handleNavAction
   }), [executeCurrentItem, handleNavAction]);
 
   const moveActiveImageToGroup = useCallback(async (targetGroup) => {

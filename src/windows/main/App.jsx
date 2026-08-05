@@ -404,17 +404,6 @@ function App() {
     tabNavigationRef.current?.kbEnter?.();
   };
 
-  // 给 EmojiTab 注入 tabbar 回调(EmojiTab 懒加载,ref 在挂载后才就绪)
-  useEffect(() => {
-    const tab = emojiTabRef.current;
-    if (!tab) return undefined;
-    tab.setEnterTabbarHandler?.(handleEmojiEnterTabbar);
-    tab.setTabbarMoveHandler?.(handleEmojiTabbarMove);
-    return () => {
-      tab.setEnterTabbarHandler?.(null);
-      tab.setTabbarMoveHandler?.(null);
-    };
-  }, [emojiTabRef, handleEmojiEnterTabbar, handleEmojiTabbarMove]);
   // 表情页已激活时,←/→ 切主标签 → 交给 tabbar(模式层),而不是直接切
   const handleTabLeft = () => {
     if (activeTab === 'emoji' && navigationStore.emojiKbActive) {
@@ -590,7 +579,7 @@ function App() {
   const ContentComponent = <div ref={contentDragRef} className="main-content-area flex-1 min-h-0 overflow-hidden relative pb-[8px] bg-qc-surface transition-colors duration-500">
       {activeTab === 'clipboard' && <ClipboardTab ref={clipboardTabRef} contentFilter={contentFilter} searchQuery={searchQuery} />}
       {activeTab === 'favorites' && <FavoritesTab ref={favoritesTabRef} contentFilter={contentFilter} searchQuery={searchQuery} />}
-      {activeTab === 'emoji' && <Suspense fallback={null}><EmojiTab ref={emojiTabRef} emojiMode={emojiMode} onEmojiModeChange={setEmojiMode} /></Suspense>}
+      {activeTab === 'emoji' && <Suspense fallback={null}><EmojiTab ref={emojiTabRef} emojiMode={emojiMode} onEmojiModeChange={setEmojiMode} onEnterTabbar={handleEmojiEnterTabbar} onTabbarMove={handleEmojiTabbarMove} /></Suspense>}
     </div>;
   const ActionBarComponent = <MultiSelectActionBar activeTab={activeTab} />;
   const renderWorkspace = () => {
