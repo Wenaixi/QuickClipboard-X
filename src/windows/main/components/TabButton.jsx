@@ -46,6 +46,9 @@ function TabButton({
   return (
     <div
       ref={buttonRef}
+      // tabIndex={-1} 让 outer div 编程可达(.focus() 不再 no-op),
+      // 用于 tabbar 焦点路径(主标签透传到此处,与 emoji 模式 querySelector('button') 对齐)
+      tabIndex={-1}
       className={isSidebarLayout
         ? (showLabel ? 'relative inline-flex h-9 w-full' : 'relative inline-flex h-9 w-10')
         : 'relative flex-1 h-7'}

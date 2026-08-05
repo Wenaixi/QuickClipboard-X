@@ -72,3 +72,26 @@ test('F6 App.jsx 不再有 handleEmojiTabbarEnter', async () => {
   assert.equal(body.includes('handleEmojiTabbarEnter'), false, 'App 不应有 handleEmojiTabbarEnter');
   assert.equal(body.includes('kbEnter'), false, 'App 不应再调 kbEnter');
 });
+
+// F7: focusTabbarButton 对主标签调 el.focus?.(),但 TabButton 把 buttonRef 挂外层 div
+// 无 tabIndex → .focus() no-op;emoji 模式 tabbarRefs.current[id] = el.querySelector?.('button')
+// 拿到内层真 button。两路径不一致 → 主标签 tabbar 焦点无视觉/JS 生效。
+// 修复:TabButton.jsx outer div 加 tabIndex={-1} 让 div 编程可达,el.focus?.() 真正生效。
+test('F7 TabButton outer div 可编程 focus(tabIndex=-1)', async () => {
+  const fs = await import('node:fs/promises');
+  const path = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const src = await fs.readFile(path.join(here, '../TabButton.jsx'), 'utf8');
+  const body = src
+    .split('\n')
+    .filter((l) => !l.trimStart().startsWith('//'))
+    .join('\n');
+  assert.ok(/ref=\{buttonRef\}/.test(body), 'TabButton 外层 div 应仍挂 buttonRef');
+  const outerDivMatch = body.match(/<div\s+ref=\{buttonRef\}[\s\S]{0,200}>/);
+  assert.ok(outerDivMatch, '应找到外层 div 标签块');
+  assert.ok(
+    outerDivMatch[0].includes('tabIndex={-1}'),
+    '外层 div 必须 tabIndex={-1},否则 focus no-op'
+  );
+});
