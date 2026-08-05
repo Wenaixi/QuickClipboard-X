@@ -387,16 +387,19 @@ function App() {
     searchRef.current?.blur?.();
   };
   // 表情页:后端全局热键是方向键唯一可靠来源(RegisterHotKey 常吞 webview keydown)。
-  // 已激活 → 转发给 EmojiTab;outside 仅 ↓ 激活;左右 passthrough 切主标签。
-  // EmojiTab 还在 lazy 加载时,事件入队等 mount 后重放,避免被吞。
+  // 门控:仅 emojiKbActive(true) 时转发给 EmojiTab;outside 态只有 ↓ 激活,
+  // ←/→/↑ 一律 return false 交回 App 原有 handler(切主标签/blur),绝不吞键。
+  // EmojiTab 还在 lazy 加载时,应转发的事件入队等 mount 后重放。
   const dispatchEmojiNav = (action) => {
     if (activeTab !== 'emoji') return false;
+    const shouldForward = navigationStore.emojiKbActive
+      || (!navigationStore.emojiKbActive && resolveOutsideAppAction(action) === 'activate');
+    if (!shouldForward) return false;
     const handler = emojiTabRef.current?.handleNavAction;
     if (handler) {
       handler(action);
       return true;
     }
-    if (resolveOutsideAppAction(action) === 'ignore') return true;
     pendingEmojiNavRef.current.push(action);
     return true;
   };
