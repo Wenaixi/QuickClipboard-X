@@ -20,6 +20,12 @@ describe('resolveActivateKb', () => {
   it('已有 index 保持', () => {
     assert.deepEqual(resolveActivateKb(3, 12), { ok: true, index: 3 });
   });
+  it('越界 clamp 到最后一个合法槽位', () => {
+    // 回归:搜索缩小结果集后旧 index 可能 >= total,旧实现原样返回越界 index,
+    // grid 激活写越界 index → 高亮消失 + Enter 失效
+    assert.deepEqual(resolveActivateKb(5, 3), { ok: true, index: 2 });
+    assert.deepEqual(resolveActivateKb(99, 1), { ok: true, index: 0 });
+  });
 });
 
 describe('resolveSidebarCategoryId', () => {
