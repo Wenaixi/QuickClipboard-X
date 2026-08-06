@@ -860,6 +860,9 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
         setKbZone('grid');
         return;
       }
+      // G6 修:图片库异步未就绪(activateKb 返回 false)时降级到搜索框,
+      // 保留键盘导航态(search)给用户视觉反馈,而不是静默吞掉 ↓ 键
+      focusSearchInput();
       return;
     }
     const data = virtualDataRef.current;
