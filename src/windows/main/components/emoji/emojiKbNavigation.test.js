@@ -90,9 +90,9 @@ describe('resolveZoneNav', () => {
     assert.deepEqual(resolveZoneNav('grid', 'tab-left'), {
       type: 'grid-move', dRow: 0, dCol: -1, onFail: 'enter-sidebar',
     });
-    // 最右列 → 越界切下一个子模式(emoji→符号→图片→emoji 循环)
+    // 最右列 → 越界回到当前分类第一个格子(由组件 gridHome 执行)
     assert.deepEqual(resolveZoneNav('grid', 'tab-right'), {
-      type: 'grid-move', dRow: 0, dCol: 1, onFail: 'next-mode',
+      type: 'grid-move', dRow: 0, dCol: 1, onFail: 'grid-home',
     });
   });
   it('sidebar 移动与回搜索', () => {
@@ -108,9 +108,9 @@ describe('resolveZoneNav', () => {
       type: 'grid-move', dRow: 0, dCol: -1, onFail: 'enter-sidebar',
     });
   });
-  it('grid 最右列 → 越界切下一个子模式(emoji→符号→图片→emoji 循环)', () => {
+  it('grid 最右列 → 越界回到当前分类第一个格子(不切子模式)', () => {
     assert.deepEqual(resolveZoneNav('grid', 'tab-right'), {
-      type: 'grid-move', dRow: 0, dCol: 1, onFail: 'next-mode',
+      type: 'grid-move', dRow: 0, dCol: 1, onFail: 'grid-home',
     });
   });
   it('tabbar: up→search down→grid 左右→tabbar-move', () => {

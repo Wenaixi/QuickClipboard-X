@@ -992,6 +992,30 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
     return true;
   }, [showImages]);
 
+  const gridHome = useCallback(() => {
+    if (showImages) {
+      const api = imageLibraryRef.current;
+      if (api) {
+        const index = api.getKbIndex?.() ?? kbImageIndexRef.current;
+        const row = Math.floor(index / gridCols);
+        if (index >= 0 && row > 0) {
+          api.navigateUp({ rows: row });
+        }
+      }
+      return;
+    }
+    const data = virtualDataRef.current;
+    const rowIndexes = [];
+    data.forEach((section, index) => {
+      if (section.type === 'row') rowIndexes.push(index);
+    });
+    if (rowIndexes.length === 0) return;
+    const firstRow = rowIndexes[0];
+    setKbRow(firstRow);
+    setKbCol(0);
+    scrollContainerRef.current?.scrollToIndex({ index: firstRow, align: 'center' });
+  }, [showImages, gridCols]);
+
   // 执行 zone 意图(resolveZoneNav 的 type)
   const applyNavIntent = useCallback((intent) => {
     if (!intent || intent.type === 'none') return;
@@ -1034,12 +1058,9 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
         const ok = moveGridBy(intent.dRow, intent.dCol);
         if (!ok && intent.onFail === 'enter-search') focusSearchInput();
         if (!ok && intent.onFail === 'enter-sidebar') enterSidebar();
-        // 最右列 → 越界循环切换子模式:emoji→符号→图片→emoji
-        // 用 resetKbNav 让 emojiMode effect 的 setKbZone('outside') 同值短路,
-        // 保留键盘导航态不闪退;子模式 effect 会重置到该模式起点
-        if (!ok && intent.onFail === 'next-mode') {
-          resetKbNav();
-          onEmojiModeChange?.(cycleValue(['emoji', 'symbols', 'images'], emojiMode, 1));
+        // 最右列 → 越界回到当前分类第一个格子(不切子模式)
+        if (!ok && intent.onFail === 'grid-home') {
+          gridHome();
         }
         if (!ok && intent.onFail === 'enter-tabbar') {
           setKbZone('tabbar');
@@ -1055,7 +1076,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
       default:
         break;
     }
-  }, [focusSearchInput, enterGrid, enterSidebar, blurSearchInput, moveGridBy, moveSidebarBy, onEnterTabbar, onTabbarMove, onSwitchTab]);
+  }, [focusSearchInput, enterGrid, enterSidebar, blurSearchInput, moveGridBy, moveSidebarBy, gridHome, onEnterTabbar, onTabbarMove, onSwitchTab]);
 
   // 主路径:App 转发后端 navigation-action。不挂 window keydown,
   // 避免与 RegisterHotKey 在搜索框聚焦时双触发(进 grid 两次/跳格)。
