@@ -825,8 +825,12 @@ pub fn enable_hotkeys() -> Result<(), String> {
         return Ok(());
     }
 
+    // F2: 与 disable_hotkeys 对称——先持锁再 store+reload，
+    // 避免 store(true) 在锁外被并发 disable 覆盖或读到撕裂状态；
+    // 持锁后必须调 reload_from_settings_inner（顶层 reload 会再 lock 自死锁）。
+    let _guard = GLOBAL_HOTKEY_SYNC_LOCK.lock();
     HOTKEYS_ENABLED.store(true, Ordering::Relaxed);
-    reload_from_settings()?;
+    reload_from_settings_inner()?;
     println!("已启用全局热键");
     Ok(())
 }
@@ -1056,13 +1060,33 @@ mod tests {
     #[test]
     fn reload_outer_entries_hold_sync_lock() {
         let src = global_source();
-        for name in ["reload_from_settings", "disable_hotkeys"] {
+        for name in ["reload_from_settings", "disable_hotkeys", "enable_hotkeys"] {
             let b = fn_body(&src, name);
             assert!(
                 b.contains("GLOBAL_HOTKEY_SYNC_LOCK.lock()"),
                 "{name} 作为外层入口必须持 GLOBAL_HOTKEY_SYNC_LOCK"
             );
         }
+    }
+
+    // F2: enable_hotkeys 持锁后必须调 reload_from_settings_inner
+    // （顶层 reload_from_settings 会再 lock 同一把锁，同线程自死锁），
+    // 且锁位置早于 HOTKEYS_ENABLED.store(true)。
+    #[test]
+    fn enable_hotkeys_holds_lock_and_calls_inner_reload() {
+        let src = global_source();
+        let b = fn_body(&src, "enable_hotkeys");
+        let lock_pos = b.find("GLOBAL_HOTKEY_SYNC_LOCK.lock()");
+        let store_pos = b.find("HOTKEYS_ENABLED.store(true");
+        let inner_pos = b.find("reload_from_settings_inner()");
+        assert!(
+            lock_pos.is_some() && store_pos.is_some() && inner_pos.is_some() && lock_pos < store_pos,
+            "enable_hotkeys 必须持锁后 store 并调 reload_from_settings_inner"
+        );
+        assert!(
+            b.find("reload_from_settings()").is_none(),
+            "enable_hotkeys 持锁内禁止调顶层 reload_from_settings（自死锁）"
+        );
     }
 
     // F2: disable_all_shortcuts 必须持 GLOBAL_HOTKEY_SYNC_LOCK,
