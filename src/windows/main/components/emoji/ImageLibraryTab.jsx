@@ -525,6 +525,8 @@ const ImageLibraryTab = forwardRef(function ImageLibraryTab({
     setSelectedImageKeys(new Set());
     setSelectionAnchorKey('');
     setSelectionBox(null);
+    // 同步清 ref,避免 reset 后同 tick activateKb 读到旧 index(与 resetKbIndex 同款)
+    kbImageIndexRef.current = -1;
     setKbImageIndex(-1);
   }, [currentGroup, reloadKey]);
 
@@ -1018,7 +1020,9 @@ const ImageLibraryTab = forwardRef(function ImageLibraryTab({
   // 键盘导航:在 displayImageItems 中以行优先顺序移动,越界返回 false
   const kbMove = useCallback((dx, dy) => {
     const current = kbImageIndexRef.current;
-    const total = displayImageTotal;
+    // 边界用实际已加载数组长度:懒加载未加载槽位是 loading 占位格,
+    // 用全量 displayImageTotal 会把高亮停在占位格上而 Enter 静默无操作
+    const total = displayImageItemsRef.current.length;
     if (current < 0 || total <= 0 || imageCols <= 0) return false;
     const row = Math.floor(current / imageCols);
     const col = current % imageCols;
@@ -1030,13 +1034,15 @@ const ImageLibraryTab = forwardRef(function ImageLibraryTab({
     setKbImageIndex(next);
     imageScrollerRef.current?.scrollToIndex({ index: nextRow, align: 'center' });
     return true;
-  }, [displayImageTotal, imageCols]);
+  }, [imageCols]);
 
   const executeCurrent = useCallback(async () => {
     const index = kbImageIndexRef.current;
     if (index < 0) return;
     const item = displayImageItemsRef.current[index];
-    if (!item || !isSelectableImageItem(item) || isUploading) return;
+    // 懒加载未加载槽位是 loading 占位格,直接静默返回,不再走高亮但无操作路径
+    if (!item || item.loading) return;
+    if (!isSelectableImageItem(item) || isUploading) return;
     try {
       await restoreLastFocus();
       await invoke('paste_image_file', { filePath: item.path });
