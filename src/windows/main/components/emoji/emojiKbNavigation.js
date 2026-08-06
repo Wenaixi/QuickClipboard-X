@@ -66,7 +66,8 @@ export function resolveZoneNav(kbZone, action) {
     if (action === 'navigate-down') return { type: 'grid-move', dRow: 1, dCol: 0 };
     if (action === 'navigate-up') return { type: 'grid-move', dRow: -1, dCol: 0, onFail: 'enter-search' };
     if (action === 'tab-right') return { type: 'grid-move', dRow: 0, dCol: 1 };
-    if (action === 'tab-left') return { type: 'grid-move', dRow: 0, dCol: -1, onFail: 'enter-tabbar' };
+    // grid 首列 ← 越界进侧栏(与搜索框 ← 同一目的地);侧栏再 ← 才进 tabbar 模式层
+    if (action === 'tab-left') return { type: 'grid-move', dRow: 0, dCol: -1, onFail: 'enter-sidebar' };
     return { type: 'none' };
   }
 
