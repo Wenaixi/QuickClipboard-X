@@ -17,7 +17,7 @@ test('EmojiTab 用 onEnterTabbar/onTabbarMove props 而非 setter 注入', async
     .filter((l) => !l.trimStart().startsWith('//'))
     .join('\n');
   // 声明新 props
-  assert.ok(/function EmojiTab\(\{ emojiMode, onEmojiModeChange, onEnterTabbar, onTabbarMove, onSwitchTab \}/.test(body), '应声明 onEnterTabbar/onTabbarMove props');
+  assert.ok(/function EmojiTab\(\{ emojiMode, onEmojiModeChange, onEnterTabbar, onTabbarMove, onSwitchTab, searchQuery = '' \}/.test(body), '应声明 onEnterTabbar/onTabbarMove/searchQuery props');
   // 删 setter 注入
   assert.equal(body.includes('setEnterTabbarHandler'), false, '不应再有 setEnterTabbarHandler');
   assert.equal(body.includes('setTabbarMoveHandler'), false, '不应再有 setTabbarMoveHandler');
