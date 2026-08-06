@@ -12,6 +12,8 @@ import Tooltip from '@shared/components/common/Tooltip.jsx';
 const FILTER_BUTTON_SIZE = 28;
 const FILTER_BUTTON_GAP = 4;
 const GROUP_BUTTON_WIDTH = 60;
+const GROUP_REVEAL_EDGE_ZONE = 24;
+const GROUP_REVEAL_HIDE_DELAY = 300;
 const FILTER_IDS = ['all', 'text', 'image', 'file', 'link'];
 
 function getCollapsedFilterWidth(filterCount, groupButtonWidth) {
@@ -83,6 +85,8 @@ function TabNavigation({
   const isSidebarLayout = navigationMode === 'sidebar';
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isGroupsPanelOpen, setIsGroupsPanelOpen] = useState(false);
+  const [isGroupButtonRevealed, setIsGroupButtonRevealed] = useState(false);
+  const groupRevealTimerRef = useRef(null);
   const tabsRef = useRef({});
   const filtersRef = useRef({});
   const emojiModesRef = useRef({});
@@ -168,6 +172,7 @@ function TabNavigation({
     ? expandableFilters.length * FILTER_BUTTON_SIZE + (expandableFilters.length - 1) * FILTER_BUTTON_GAP
     : 0;
   const groupButtonWidth = isSidebarLayout ? 92 : GROUP_BUTTON_WIDTH;
+  const groupButtonVisible = isSidebarLayout || isGroupButtonRevealed || isGroupsPanelOpen;
   const sidebarShowLabel = isSidebarLayout ? !isSidebarCollapsed : true;
 
   // 键盘 tabbar 焦点:模式(emoji/symbols/images) + 主标签(favorites/clipboard)
@@ -265,6 +270,10 @@ function TabNavigation({
         clearTimeout(filterCollapseTimerRef.current);
         filterCollapseTimerRef.current = null;
       }
+      if (groupRevealTimerRef.current) {
+        clearTimeout(groupRevealTimerRef.current);
+        groupRevealTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -272,14 +281,16 @@ function TabNavigation({
     if (isSidebarLayout) {
       return undefined;
     }
-
+    if (isGroupsPanelOpen) {
+      setIsGroupButtonRevealed(true);
+    }
     const timer = setTimeout(() => {
       setTabAnimationKey(prev => prev + 1);
     }, 300);
     return () => {
       clearTimeout(timer);
     };
-  }, [activeTab, isSidebarLayout]);
+  }, [activeTab, isSidebarLayout, isGroupsPanelOpen]);
 
   useEffect(() => {
     if (!isSidebarLayout) {
@@ -310,6 +321,7 @@ function TabNavigation({
 
   useEffect(() => {
     setIsFilterExpanded(false);
+    setIsGroupButtonRevealed(false);
   }, [activeTab]);
 
   useEffect(() => {
@@ -469,6 +481,50 @@ function TabNavigation({
 
   const handleEmojiModeChange = (id) => {
     onEmojiModeChange(id);
+  };
+
+  // 分组按钮边缘悬停弹出:鼠标移到顶栏最右边缘时按钮滑出,离开后收回。
+  // 按钮本身悬停(或面板打开)时保持显示,避免闪烁。
+  const handleGroupRevealMouseMove = (event) => {
+    if (isSidebarLayout || isGroupsPanelOpen || isGroupButtonRevealed) {
+      return;
+    }
+    const rightArea = rightAreaRef.current;
+    if (!rightArea) {
+      return;
+    }
+    const rect = rightArea.getBoundingClientRect();
+    if (rect.width <= 0) {
+      return;
+    }
+    if (rect.right - event.clientX <= GROUP_REVEAL_EDGE_ZONE) {
+      if (groupRevealTimerRef.current) {
+        clearTimeout(groupRevealTimerRef.current);
+        groupRevealTimerRef.current = null;
+      }
+      setIsGroupButtonRevealed(true);
+    }
+  };
+
+  const handleGroupRevealMouseLeave = () => {
+    if (isSidebarLayout || isGroupsPanelOpen) {
+      return;
+    }
+    if (groupRevealTimerRef.current) {
+      clearTimeout(groupRevealTimerRef.current);
+    }
+    groupRevealTimerRef.current = setTimeout(() => {
+      setIsGroupButtonRevealed(false);
+      groupRevealTimerRef.current = null;
+    }, GROUP_REVEAL_HIDE_DELAY);
+  };
+
+  // controlsContainer 的 onMouseLeave 会同时被 filter 折叠与分组按钮收回使用。
+  // filter 分支保留原 onMouseLeave 语义(仅非 emoji 时);分组收回挂在额外
+  // onMouseLeave 上,两者独立互不覆盖。
+  const handleControlsContainerMouseLeave = (event) => {
+    handleFilterAreaMouseLeave(event);
+    handleGroupRevealMouseLeave();
   };
 
   const handleFilterAreaMouseEnter = () => {
@@ -746,7 +802,7 @@ function TabNavigation({
               ? 'w-full justify-center'
               : 'w-full'
           }`}
-          onMouseLeave={activeTab === 'emoji' ? undefined : handleFilterAreaMouseLeave}
+          onMouseLeave={handleControlsContainerMouseLeave}
         >
           {!isSidebarLayout && (
             <div ref={controlsIndicatorRef} className={`absolute left-0 w-0 rounded-lg pointer-events-none ${uiAnimationEnabled ? 'transition-all duration-300 ease-out' : ''}`} style={{
@@ -874,9 +930,9 @@ function TabNavigation({
                   <div
                     className={`overflow-visible shrink-0 ${uiAnimationEnabled ? 'transition-all duration-300 ease-out' : ''}`}
                     style={{
-                      width: shouldHideGroupButton ? '0px' : `${groupButtonWidth}px`,
-                      opacity: shouldHideGroupButton ? 0 : 1,
-                      pointerEvents: shouldHideGroupButton ? 'none' : 'auto'
+                      width: shouldHideGroupButton || !groupButtonVisible ? '0px' : `${groupButtonWidth}px`,
+                      opacity: shouldHideGroupButton || !groupButtonVisible ? 0 : 1,
+                      pointerEvents: shouldHideGroupButton || !groupButtonVisible ? 'none' : 'auto'
                     }}
                   >
                     <GroupsPopup
