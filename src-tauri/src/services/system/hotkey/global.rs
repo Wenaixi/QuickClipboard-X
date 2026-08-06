@@ -74,6 +74,12 @@ static SHORTCUT_STATUS: Lazy<Mutex<HashMap<String, ShortcutStatus>>> =
 // 62e6b718 只给 navigation 加了锁，global.rs 的整体热键注册漏了，这是
 // "所有快捷键失效"的根因之一。串行化后从根源消除并发撞车。
 pub(super) static GLOBAL_HOTKEY_SYNC_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+// 锁序契约：GLOBAL 必须先于 NAVIGATION 获取。global 层入口
+// (reload_from_settings/disable_hotkeys/unregister_all/enable_hotkeys)
+// 内部会调 navigation::sync_navigation_hotkeys_for_foreground（后者持
+// NAVIGATION_SYNC_LOCK），若某处先持 NAVIGATION 锁再调 global 层入口
+// 就构成 AB-BA 死锁定时炸弹。任何持 NAVIGATION 锁调 global 层入口的
+// 代码都是死锁，新增调用点前先对照本契约。
 
 pub fn init_hotkey_manager(app: AppHandle, _window: WebviewWindow) {
     *APP_HANDLE.lock() = Some(app);
@@ -1041,6 +1047,7 @@ mod tests {
     // 否则 parking_lot 同线程不可重入自死锁——启动/settings 保存/托盘/
     // 前台切换全挂死。内层契约：reload_from_settings 顶层持锁贯穿整个
     // reload 过程，unregister_all / register_* 全部假设锁已持。
+    // 锁序契约（F8）见 GLOBAL_HOTKEY_SYNC_LOCK 定义处注释。
     #[test]
     fn reload_inner_and_callees_must_not_reenter_sync_lock() {
         let src = global_source();
@@ -1091,6 +1098,24 @@ mod tests {
         assert!(
             b.find("reload_from_settings()").is_none(),
             "enable_hotkeys 持锁内禁止调顶层 reload_from_settings（自死锁）"
+        );
+    }
+
+    // F8: 锁序契约必须成文——global 层入口(持 GLOBAL)内部调 navigation
+    // sync(持 NAVIGATION),反向顺序即 AB-BA 死锁。注释须在锁定义处。
+    #[test]
+    fn lock_order_contract_documented_at_global_lock_definition() {
+        let src = global_source();
+        let def_pos = src.find("static GLOBAL_HOTKEY_SYNC_LOCK");
+        let doc_pos = src.find("锁序契约");
+        let nav_pos = src.find("NAVIGATION");
+        assert!(
+            doc_pos.is_some() && def_pos.is_some() && def_pos < doc_pos,
+            "GLOBAL_HOTKEY_SYNC_LOCK 定义处必须成文锁序契约注释"
+        );
+        assert!(
+            nav_pos.is_some(),
+            "锁序契约注释必须点名 NAVIGATION 锁"
         );
     }
 
