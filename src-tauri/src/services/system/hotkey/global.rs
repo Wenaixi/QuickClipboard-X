@@ -74,6 +74,12 @@ static SHORTCUT_STATUS: Lazy<Mutex<HashMap<String, ShortcutStatus>>> =
 // 62e6b718 只给 navigation 加了锁，global.rs 的整体热键注册漏了，这是
 // "所有快捷键失效"的根因之一。串行化后从根源消除并发撞车。
 pub(super) static GLOBAL_HOTKEY_SYNC_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+// 锁序契约：GLOBAL 必须先于 NAVIGATION 获取。global 层入口
+// (reload_from_settings/disable_hotkeys/unregister_all/enable_hotkeys)
+// 内部会调 navigation::sync_navigation_hotkeys_for_foreground（后者持
+// NAVIGATION_SYNC_LOCK），若某处先持 NAVIGATION 锁再调 global 层入口
+// 就构成 AB-BA 死锁定时炸弹。任何持 NAVIGATION 锁调 global 层入口的
+// 代码都是死锁，新增调用点前先对照本契约。
 
 pub fn init_hotkey_manager(app: AppHandle, _window: WebviewWindow) {
     *APP_HANDLE.lock() = Some(app);
@@ -193,13 +199,6 @@ where
     F: Fn(&AppHandle) + Send + Sync + 'static,
 {
     // F1: 假设调用方已持 GLOBAL_HOTKEY_SYNC_LOCK；同线程再 lock 会自死锁。
-    register_shortcut_inner(id, shortcut_str, handler)
-}
-
-fn register_shortcut_inner<F>(id: &str, shortcut_str: &str, handler: F) -> Result<(), String>
-where
-    F: Fn(&AppHandle) + Send + Sync + 'static,
-{
     let app = get_app()?;
 
     unregister_shortcut(id);
@@ -226,7 +225,11 @@ where
         }
         Err(e) => {
             // 注册失败：插件可能在 Err 前部分写入 Windows 层，主动探测并
-            // 注销清理，避免残留吞键的"幽灵热键"。
+            // 注销清理，避免残留吞键的"幽灵热键"。探测按组合键而非 id：
+            // 若用户把两个快捷键配成相同组合键（配置错误），可能误摘
+            // 同组合键的其他 id 条目——属配置错误可接受，UI 侧已有
+            // duplicate 检测提示，不按 id 探测是刻意取舍（插件 API 只
+            // 提供按 Shortcut 的 is_registered/unregister）。
             if app.global_shortcut().is_registered(shortcut) {
                 let _ = app.global_shortcut().unregister(shortcut);
             }
@@ -749,12 +752,17 @@ pub fn unregister_number_shortcuts() {
         .filter(|(id, _)| id.starts_with("number_"))
         .cloned()
         .collect();
-    
+
     for (id, shortcut_str) in number_shortcuts {
         if let Ok(shortcut) = parse_shortcut(&shortcut_str) {
             if let Ok(app) = get_app() {
-                let _ = app.global_shortcut().unregister(shortcut);
-                println!("已注销数字快捷键: {}", shortcut_str);
+                // F5: 与 unregister_shortcut 同款——先 is_registered 探测再
+                // 注销，避免对未注册的裸键 UnregisterHotKey 空跑后内部表
+                // 与 Windows 层脱节，残留吞键的"幽灵热键"。
+                if app.global_shortcut().is_registered(shortcut) {
+                    let _ = app.global_shortcut().unregister(shortcut);
+                    println!("已注销数字快捷键: {}", shortcut_str);
+                }
             }
         }
         shortcuts.retain(|(sid, _)| sid != &id);
@@ -825,8 +833,12 @@ pub fn enable_hotkeys() -> Result<(), String> {
         return Ok(());
     }
 
+    // F2: 与 disable_hotkeys 对称——先持锁再 store+reload，
+    // 避免 store(true) 在锁外被并发 disable 覆盖或读到撕裂状态；
+    // 持锁后必须调 reload_from_settings_inner（顶层 reload 会再 lock 自死锁）。
+    let _guard = GLOBAL_HOTKEY_SYNC_LOCK.lock();
     HOTKEYS_ENABLED.store(true, Ordering::Relaxed);
-    reload_from_settings()?;
+    reload_from_settings_inner()?;
     println!("已启用全局热键");
     Ok(())
 }
@@ -850,6 +862,11 @@ pub fn is_hotkeys_enabled() -> bool {
 
 // 更新快捷键状态
 fn update_shortcut_status(id: &str, shortcut: &str, success: bool, error: Option<String>) {
+    set_shortcut_status(id, shortcut, success, error);
+}
+
+// 更新快捷键状态（pub: navigation.rs 注册失败时写导航键状态表）
+pub fn set_shortcut_status(id: &str, shortcut: &str, success: bool, error: Option<String>) {
     let mut status_map = SHORTCUT_STATUS.lock();
     status_map.insert(
         id.to_string(),
@@ -1005,6 +1022,13 @@ mod tests {
         .expect("读取 global.rs 失败")
     }
 
+    fn strip_line_comments(src: &str) -> String {
+        src.lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     fn fn_body<'a>(src: &'a str, name: &str) -> &'a str {
         // 兼容 pub fn / fn / 带泛型 <F> 三种签名。
         let markers = [
@@ -1028,10 +1052,31 @@ mod tests {
         &src[start..end]
     }
 
+    // F5: unregister_number_shortcuts 必须先 is_registered 探测再注销,
+    // 与 unregister_shortcut 同款——裸 UnregisterHotKey 空跑会让内部表
+    // 与 Windows 层脱节,残留吞键的幽灵热键。
+    #[test]
+    fn unregister_number_shortcuts_probes_before_unregister() {
+        let src = strip_line_comments(&global_source());
+        let start = src
+            .find("pub fn unregister_number_shortcuts()")
+            .expect("缺 unregister_number_shortcuts");
+        let rest = &src[start..];
+        let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(src.len());
+        let b = &src[start..end];
+        let probe_pos = b.find("is_registered(shortcut)");
+        let unregister_pos = b.find("unregister(shortcut)");
+        assert!(
+            probe_pos.is_some() && unregister_pos.is_some() && probe_pos < unregister_pos,
+            "unregister_number_shortcuts 必须先 is_registered 探测再 unregister"
+        );
+    }
+
     // F1: reload 顶层入口持锁后调用的内层函数禁止再 lock，
     // 否则 parking_lot 同线程不可重入自死锁——启动/settings 保存/托盘/
     // 前台切换全挂死。内层契约：reload_from_settings 顶层持锁贯穿整个
     // reload 过程，unregister_all / register_* 全部假设锁已持。
+    // 锁序契约（F8）见 GLOBAL_HOTKEY_SYNC_LOCK 定义处注释。
     #[test]
     fn reload_inner_and_callees_must_not_reenter_sync_lock() {
         let src = global_source();
@@ -1056,13 +1101,51 @@ mod tests {
     #[test]
     fn reload_outer_entries_hold_sync_lock() {
         let src = global_source();
-        for name in ["reload_from_settings", "disable_hotkeys"] {
+        for name in ["reload_from_settings", "disable_hotkeys", "enable_hotkeys"] {
             let b = fn_body(&src, name);
             assert!(
                 b.contains("GLOBAL_HOTKEY_SYNC_LOCK.lock()"),
                 "{name} 作为外层入口必须持 GLOBAL_HOTKEY_SYNC_LOCK"
             );
         }
+    }
+
+    // F2: enable_hotkeys 持锁后必须调 reload_from_settings_inner
+    // （顶层 reload_from_settings 会再 lock 同一把锁，同线程自死锁），
+    // 且锁位置早于 HOTKEYS_ENABLED.store(true)。
+    #[test]
+    fn enable_hotkeys_holds_lock_and_calls_inner_reload() {
+        let src = global_source();
+        let b = fn_body(&src, "enable_hotkeys");
+        let lock_pos = b.find("GLOBAL_HOTKEY_SYNC_LOCK.lock()");
+        let store_pos = b.find("HOTKEYS_ENABLED.store(true");
+        let inner_pos = b.find("reload_from_settings_inner()");
+        assert!(
+            lock_pos.is_some() && store_pos.is_some() && inner_pos.is_some() && lock_pos < store_pos,
+            "enable_hotkeys 必须持锁后 store 并调 reload_from_settings_inner"
+        );
+        assert!(
+            b.find("reload_from_settings()").is_none(),
+            "enable_hotkeys 持锁内禁止调顶层 reload_from_settings（自死锁）"
+        );
+    }
+
+    // F8: 锁序契约必须成文——global 层入口(持 GLOBAL)内部调 navigation
+    // sync(持 NAVIGATION),反向顺序即 AB-BA 死锁。注释须在锁定义处。
+    #[test]
+    fn lock_order_contract_documented_at_global_lock_definition() {
+        let src = global_source();
+        let def_pos = src.find("static GLOBAL_HOTKEY_SYNC_LOCK");
+        let doc_pos = src.find("锁序契约");
+        let nav_pos = src.find("NAVIGATION");
+        assert!(
+            doc_pos.is_some() && def_pos.is_some() && def_pos < doc_pos,
+            "GLOBAL_HOTKEY_SYNC_LOCK 定义处必须成文锁序契约注释"
+        );
+        assert!(
+            nav_pos.is_some(),
+            "锁序契约注释必须点名 NAVIGATION 锁"
+        );
     }
 
     // F2: disable_all_shortcuts 必须持 GLOBAL_HOTKEY_SYNC_LOCK,
@@ -1083,7 +1166,7 @@ mod tests {
 
     // 三个直连 on_shortcut 的注册函数失败路径必须清理幽灵热键：
     // 插件可能在 Err 前部分写入 Windows 层，若不探测注销会残留吞键。
-    // 与 register_shortcut_inner 的 Err 分支同款清理。
+    // 与 register_shortcut 的 Err 分支同款清理。
     #[test]
     fn direct_registration_fns_cleanup_ghost_hotkey_on_failure() {
         let src = global_source();

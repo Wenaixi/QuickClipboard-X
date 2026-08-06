@@ -217,40 +217,40 @@ function ShortcutsSection({ settings, onSettingChange, activeTab }) {
         return (
           <SettingsSection title={t('settings.shortcuts.windowTitle')} description={t('settings.shortcuts.windowDesc')}>
             <SettingItem label={t('settings.shortcuts.navigateUp')} description={t('settings.shortcuts.navigateUpDesc')}>
-              <ShortcutInput value={settings.navigateUpShortcut} onChange={value => onSettingChange('navigateUpShortcut', value)} onReset={() => onSettingChange('navigateUpShortcut', 'ArrowUp')} hasError={hasErrorStatus('navigateUpShortcut')} errorMessage={getErrorMessage('navigateUpShortcut')} />
+              <ShortcutInput value={settings.navigateUpShortcut} onChange={value => onSettingChange('navigateUpShortcut', value)} onReset={() => onSettingChange('navigateUpShortcut', 'ArrowUp')} hasError={hasErrorStatus('navigateUpShortcut', 'navigation_navigate_up')} errorMessage={getErrorMessage('navigateUpShortcut', 'navigation_navigate_up')} />
             </SettingItem>
             <SettingItem label={t('settings.shortcuts.navigateDown')} description={t('settings.shortcuts.navigateDownDesc')}>
-              <ShortcutInput value={settings.navigateDownShortcut} onChange={value => onSettingChange('navigateDownShortcut', value)} onReset={() => onSettingChange('navigateDownShortcut', 'ArrowDown')} hasError={hasErrorStatus('navigateDownShortcut')} errorMessage={getErrorMessage('navigateDownShortcut')} />
+              <ShortcutInput value={settings.navigateDownShortcut} onChange={value => onSettingChange('navigateDownShortcut', value)} onReset={() => onSettingChange('navigateDownShortcut', 'ArrowDown')} hasError={hasErrorStatus('navigateDownShortcut', 'navigation_navigate_down')} errorMessage={getErrorMessage('navigateDownShortcut', 'navigation_navigate_down')} />
             </SettingItem>
             <SettingItem label={t('settings.shortcuts.tabLeft')} description={t('settings.shortcuts.tabLeftDesc')}>
-              <ShortcutInput value={settings.tabLeftShortcut} onChange={value => onSettingChange('tabLeftShortcut', value)} onReset={() => onSettingChange('tabLeftShortcut', 'ArrowLeft')} hasError={hasErrorStatus('tabLeftShortcut')} errorMessage={getErrorMessage('tabLeftShortcut')} />
+              <ShortcutInput value={settings.tabLeftShortcut} onChange={value => onSettingChange('tabLeftShortcut', value)} onReset={() => onSettingChange('tabLeftShortcut', 'ArrowLeft')} hasError={hasErrorStatus('tabLeftShortcut', 'navigation_tab_left')} errorMessage={getErrorMessage('tabLeftShortcut', 'navigation_tab_left')} />
             </SettingItem>
             <SettingItem label={t('settings.shortcuts.tabRight')} description={t('settings.shortcuts.tabRightDesc')}>
-              <ShortcutInput value={settings.tabRightShortcut} onChange={value => onSettingChange('tabRightShortcut', value)} onReset={() => onSettingChange('tabRightShortcut', 'ArrowRight')} hasError={hasErrorStatus('tabRightShortcut')} errorMessage={getErrorMessage('tabRightShortcut')} />
+              <ShortcutInput value={settings.tabRightShortcut} onChange={value => onSettingChange('tabRightShortcut', value)} onReset={() => onSettingChange('tabRightShortcut', 'ArrowRight')} hasError={hasErrorStatus('tabRightShortcut', 'navigation_tab_right')} errorMessage={getErrorMessage('tabRightShortcut', 'navigation_tab_right')} />
             </SettingItem>
             <SettingItem label={t('settings.shortcuts.focusSearch')} description={t('settings.shortcuts.focusSearchDesc')}>
-              <ShortcutInput value={settings.focusSearchShortcut} onChange={value => onSettingChange('focusSearchShortcut', value)} onReset={() => onSettingChange('focusSearchShortcut', 'Tab')} hasError={hasErrorStatus('focusSearchShortcut')} errorMessage={getErrorMessage('focusSearchShortcut')} />
+              <ShortcutInput value={settings.focusSearchShortcut} onChange={value => onSettingChange('focusSearchShortcut', value)} onReset={() => onSettingChange('focusSearchShortcut', 'Tab')} hasError={hasErrorStatus('focusSearchShortcut', 'navigation_focus_search')} errorMessage={getErrorMessage('focusSearchShortcut', 'navigation_focus_search')} />
             </SettingItem>
             <SettingItem label={t('settings.shortcuts.hideWindow')} description={t('settings.shortcuts.hideWindowDesc')}>
-              <ShortcutInput value={settings.hideWindowShortcut} onChange={value => onSettingChange('hideWindowShortcut', value)} onReset={() => onSettingChange('hideWindowShortcut', 'Escape')} hasError={hasErrorStatus('hideWindowShortcut')} errorMessage={getErrorMessage('hideWindowShortcut')} />
+              <ShortcutInput value={settings.hideWindowShortcut} onChange={value => onSettingChange('hideWindowShortcut', value)} onReset={() => onSettingChange('hideWindowShortcut', 'Escape')} hasError={hasErrorStatus('hideWindowShortcut', 'navigation_hide_window')} errorMessage={getErrorMessage('hideWindowShortcut', 'navigation_hide_window')} />
             </SettingItem>
             <SettingItem label={t('settings.shortcuts.executeItem')} description={t('settings.shortcuts.executeItemDesc')}>
-              <ShortcutInput value={settings.pasteItemShortcut} onChange={value => onSettingChange('pasteItemShortcut', value)} onReset={() => onSettingChange('pasteItemShortcut', 'Enter')} hasError={hasErrorStatus('pasteItemShortcut')} errorMessage={getErrorMessage('pasteItemShortcut')} />
+              <ShortcutInput value={settings.pasteItemShortcut} onChange={value => onSettingChange('pasteItemShortcut', value)} onReset={() => onSettingChange('pasteItemShortcut', 'Enter')} hasError={hasErrorStatus('pasteItemShortcut', 'navigation_execute_item')} errorMessage={getErrorMessage('pasteItemShortcut', 'navigation_execute_item')} />
             </SettingItem>
             <SettingItem label={t('settings.shortcuts.previousGroup')} description={t('settings.shortcuts.previousGroupDesc')}>
-              <ShortcutInput value={settings.previousGroupShortcut} onChange={value => onSettingChange('previousGroupShortcut', value)} onReset={() => onSettingChange('previousGroupShortcut', 'Ctrl+ArrowUp')} hasError={hasErrorStatus('previousGroupShortcut')} errorMessage={getErrorMessage('previousGroupShortcut')} />
+              <ShortcutInput value={settings.previousGroupShortcut} onChange={value => onSettingChange('previousGroupShortcut', value)} onReset={() => onSettingChange('previousGroupShortcut', 'Ctrl+ArrowUp')} hasError={hasErrorStatus('previousGroupShortcut', 'navigation_previous_group')} errorMessage={getErrorMessage('previousGroupShortcut', 'navigation_previous_group')} />
             </SettingItem>
             <SettingItem label={t('settings.shortcuts.nextGroup')} description={t('settings.shortcuts.nextGroupDesc')}>
-              <ShortcutInput value={settings.nextGroupShortcut} onChange={value => onSettingChange('nextGroupShortcut', value)} onReset={() => onSettingChange('nextGroupShortcut', 'Ctrl+ArrowDown')} hasError={hasErrorStatus('nextGroupShortcut')} errorMessage={getErrorMessage('nextGroupShortcut')} />
+              <ShortcutInput value={settings.nextGroupShortcut} onChange={value => onSettingChange('nextGroupShortcut', value)} onReset={() => onSettingChange('nextGroupShortcut', 'Ctrl+ArrowDown')} hasError={hasErrorStatus('nextGroupShortcut', 'navigation_next_group')} errorMessage={getErrorMessage('nextGroupShortcut', 'navigation_next_group')} />
             </SettingItem>
             <SettingItem label={t('settings.shortcuts.togglePin')} description={t('settings.shortcuts.togglePinDesc')}>
-              <ShortcutInput value={settings.togglePinShortcut} onChange={value => onSettingChange('togglePinShortcut', value)} onReset={() => onSettingChange('togglePinShortcut', 'Ctrl+P')} hasError={hasErrorStatus('togglePinShortcut')} errorMessage={getErrorMessage('togglePinShortcut')} />
+              <ShortcutInput value={settings.togglePinShortcut} onChange={value => onSettingChange('togglePinShortcut', value)} onReset={() => onSettingChange('togglePinShortcut', 'Ctrl+P')} hasError={hasErrorStatus('togglePinShortcut', 'navigation_toggle_pin')} errorMessage={getErrorMessage('togglePinShortcut', 'navigation_toggle_pin')} />
             </SettingItem>
             <SettingItem label={t('settings.shortcuts.filterLeft')} description={t('settings.shortcuts.filterLeftDesc')}>
-              <ShortcutInput value={settings.filterLeftShortcut} onChange={value => onSettingChange('filterLeftShortcut', value)} onReset={() => onSettingChange('filterLeftShortcut', 'Ctrl+ArrowLeft')} hasError={hasErrorStatus('filterLeftShortcut')} errorMessage={getErrorMessage('filterLeftShortcut')} />
+              <ShortcutInput value={settings.filterLeftShortcut} onChange={value => onSettingChange('filterLeftShortcut', value)} onReset={() => onSettingChange('filterLeftShortcut', 'Ctrl+ArrowLeft')} hasError={hasErrorStatus('filterLeftShortcut', 'navigation_filter_left')} errorMessage={getErrorMessage('filterLeftShortcut', 'navigation_filter_left')} />
             </SettingItem>
             <SettingItem label={t('settings.shortcuts.filterRight')} description={t('settings.shortcuts.filterRightDesc')}>
-              <ShortcutInput value={settings.filterRightShortcut} onChange={value => onSettingChange('filterRightShortcut', value)} onReset={() => onSettingChange('filterRightShortcut', 'Ctrl+ArrowRight')} hasError={hasErrorStatus('filterRightShortcut')} errorMessage={getErrorMessage('filterRightShortcut')} />
+              <ShortcutInput value={settings.filterRightShortcut} onChange={value => onSettingChange('filterRightShortcut', value)} onReset={() => onSettingChange('filterRightShortcut', 'Ctrl+ArrowRight')} hasError={hasErrorStatus('filterRightShortcut', 'navigation_filter_right')} errorMessage={getErrorMessage('filterRightShortcut', 'navigation_filter_right')} />
             </SettingItem>
           </SettingsSection>
         );

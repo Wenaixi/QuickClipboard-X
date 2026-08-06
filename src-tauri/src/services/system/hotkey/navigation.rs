@@ -42,8 +42,12 @@ struct NavigationShortcutConfig {
 }
 
 pub fn enable_navigation_hotkeys() {
+    // F4: 与 disable 对称——先持 NAVIGATION_SYNC_LOCK 再 store+sync，
+    // 消除锁外 store 的 lost wakeup：并发 disable 在 store 与 sync 之间
+    // 抢锁时，enable 的 sync 可能看到 desired=true 直接跳过注册。
+    let _guard = NAVIGATION_SYNC_LOCK.lock();
     NAVIGATION_HOTKEYS_DESIRED.store(true, Ordering::SeqCst);
-    sync_navigation_hotkeys_for_foreground();
+    sync_navigation_hotkeys_for_foreground_inner();
 }
 
 pub fn disable_navigation_hotkeys() {
@@ -153,11 +157,25 @@ fn register_navigation_hotkeys_from_settings() -> Result<(), String> {
                     config.id, config.shortcut, error
                 );
                 // 插件可能在 Err 前部分写入 Windows 层，主动探测并注销清理，
-                // 避免残留吞键的"幽灵热键"。与 global.rs register_shortcut_inner 同款。
+                // 避免残留吞键的"幽灵热键"。与 global.rs register_shortcut 同款。
                 if app.global_shortcut().is_registered(shortcut) {
                     let _ = app.global_shortcut().unregister(shortcut);
                 }
+                // F7: 注册失败必须写 SHORTCUT_STATUS 状态表——前端 navigation tab
+                // 的 ShortcutInput 靠 backendId 查 getBackendError 展示冲突/失败，
+                // 不写则用户配置错误时前端静默无提示。key 用导航 config id，
+                // 错误码与 global.rs register_shortcut 同款区分 CONFLICT/REGISTRATION_FAILED。
+                let error_msg = if error.to_string().contains("already registered") {
+                    "CONFLICT".to_string()
+                } else {
+                    "REGISTRATION_FAILED".to_string()
+                };
+                super::global::set_shortcut_status(&config.id, &config.shortcut, false, Some(error_msg));
                 has_failure = true;
+                // F7(连带雪崩治理):单键失败不整体置 REGISTERED=false,
+                // 避免一个键配错让全部导航键失效并清空其余成功注册;
+                // has_failure 语义保留——仅用于本键失败状态记录,
+                // 下方 store(has_registration && !has_failure) 依赖它。
                 // 保持 NAVIGATION_HOTKEYS_REGISTERED=false（has_failure 让下方 store(false)），
                 // 让下次前台切换/显隐时能重新走完整注销+注册。
             }
@@ -430,7 +448,7 @@ mod tests {
     }
 
     // F3: 注册失败路径必须先 is_registered 探测再 unregister 清理幽灵热键,
-    // 并保留 eprintln 错误日志。与 global.rs register_shortcut_inner 同款。
+    // 并保留 eprintln 错误日志。与 global.rs register_shortcut 同款。
     #[test]
     fn navigation_failure_path_probes_before_unregister() {
         let src = strip_line_comments(&navigation_source());
@@ -444,6 +462,44 @@ mod tests {
         assert!(
             b.contains("eprintln!"),
             "注册失败路径必须保留 eprintln 错误日志"
+        );
+    }
+
+    // F7: 注册失败必须写 global 的 SHORTCUT_STATUS 状态表——
+    // 前端 navigation tab 的 ShortcutInput 靠 backendId 查状态展示错误，
+    // 不写则用户配置错误时前端静默无提示。错误码区分 CONFLICT/REGISTRATION_FAILED。
+    #[test]
+    fn navigation_failure_writes_shortcut_status() {
+        let src = strip_line_comments(&navigation_source());
+        let b = fn_body(&src, "register_navigation_hotkeys_from_settings");
+        let status_pos = b.find("set_shortcut_status");
+        let conflict_pos = b.find("CONFLICT");
+        let failed_pos = b.find("REGISTRATION_FAILED");
+        assert!(
+            status_pos.is_some(),
+            "注册失败路径必须写 global::set_shortcut_status 状态表"
+        );
+        assert!(
+            conflict_pos.is_some() && failed_pos.is_some(),
+            "错误码必须区分 CONFLICT 与 REGISTRATION_FAILED"
+        );
+    }
+
+    // F4: enable_navigation_hotkeys 必须先持 NAVIGATION_SYNC_LOCK 再 store+sync，
+    // 与 disable_navigation_hotkeys 对称，消除锁外 store 的 lost wakeup。
+    #[test]
+    fn enable_navigation_hotkeys_holds_lock_before_store() {
+        let src = strip_line_comments(&navigation_source());
+        let b = fn_body(&src, "enable_navigation_hotkeys");
+        let lock_pos = b.find("NAVIGATION_SYNC_LOCK.lock()");
+        let store_pos = b.find("NAVIGATION_HOTKEYS_DESIRED.store(true");
+        assert!(
+            lock_pos.is_some() && store_pos.is_some() && lock_pos < store_pos,
+            "enable_navigation_hotkeys 必须持锁后 store"
+        );
+        assert!(
+            b.find("sync_navigation_hotkeys_for_foreground()").is_none(),
+            "enable_navigation_hotkeys 持锁内必须调 inner,禁止顶层 sync 再 lock"
         );
     }
 }
