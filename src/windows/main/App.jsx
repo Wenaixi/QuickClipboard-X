@@ -69,6 +69,7 @@ function App() {
   const [activeTab, setActiveTab] = useState('clipboard');
   const [contentFilter, setContentFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [emojiMode, setEmojiMode] = useState('emoji'); // 'emoji' | 'symbols' | 'images'
   const [updateBannerState, setUpdateBannerState] = useState(null);
   const [isSidebarTabsLayout, setIsSidebarTabsLayout] = useState(getIsSidebarTabsLayout);
@@ -413,6 +414,7 @@ function App() {
 
   // 表情页已激活时,←/→ 交给 dispatchEmojiNav 转发;outside 态 passthrough 切主标签
   const handleTabLeft = () => {
+    if (isSearchFocused) return;
     if (dispatchEmojiNav('tab-left')) return;
     setActiveTab(currentTab => {
       const tabs = visibleTabs;
@@ -422,6 +424,7 @@ function App() {
     });
   };
   const handleTabRight = () => {
+    if (isSearchFocused) return;
     if (dispatchEmojiNav('tab-right')) return;
     setActiveTab(currentTab => {
       const tabs = visibleTabs;
@@ -431,6 +434,7 @@ function App() {
     });
   };
   const handleNavigateUp = () => {
+    if (isSearchFocused) return;
     if (dispatchEmojiNav('navigate-up')) return;
     blurSearchInput();
     if (activeTab === 'clipboard' && clipboardTabRef.current?.navigateUp) {
@@ -440,6 +444,7 @@ function App() {
     }
   };
   const handleNavigateDown = () => {
+    if (isSearchFocused) return;
     if (dispatchEmojiNav('navigate-down')) return;
     blurSearchInput();
     if (activeTab === 'clipboard' && clipboardTabRef.current?.navigateDown) {
@@ -449,6 +454,7 @@ function App() {
     }
   };
   const handleExecuteItem = () => {
+    if (isSearchFocused) return;
     blurSearchInput();
     if (activeTab === 'clipboard' && clipboardTabRef.current?.executeCurrentItem) {
       clipboardTabRef.current.executeCurrentItem();
@@ -459,6 +465,7 @@ function App() {
     }
   };
   const handleFilterLeft = () => {
+    if (isSearchFocused) return;
     blurSearchInput();
     if (activeTab === 'emoji') {
       // G3 修:过滤热键(⌘+←/→)切子模式是"键盘驱动"路径,不应踢出键盘导航态。
@@ -474,6 +481,7 @@ function App() {
     }
   };
   const handleFilterRight = () => {
+    if (isSearchFocused) return;
     blurSearchInput();
     if (activeTab === 'emoji') {
       // G3 修:同上,过滤热键切子模式不踢出键盘导航态
@@ -490,6 +498,7 @@ function App() {
     if (searchRef.current?.toggleFocus) {
       searchRef.current.toggleFocus();
     }
+    setIsSearchFocused(searchRef.current?.isFocused?.() === true);
   };
 
   // 固定/取消固定窗口
@@ -569,7 +578,7 @@ function App() {
     transition-colors duration-500 ease-in-out
     bg-qc-surface
   `.trim().replace(/\s+/g, ' ');
-  const TitleBarComponent = <TitleBar ref={searchRef} searchQuery={searchQuery} onSearchChange={setSearchQuery} searchPlaceholder={t('search.placeholder')} position={settings.titleBarPosition} activeTab={activeTab} updateBannerState={updateBannerState} />;
+  const TitleBarComponent = <TitleBar ref={searchRef} searchQuery={searchQuery} onSearchChange={setSearchQuery} searchPlaceholder={t('search.placeholder')} position={settings.titleBarPosition} activeTab={activeTab} updateBannerState={updateBannerState} onSearchFocusChange={setIsSearchFocused} />;
   const TabNavigationComponent = <TabNavigation ref={tabNavigationRef} activeTab={activeTab} onTabChange={setActiveTab} contentFilter={contentFilter} onFilterChange={setContentFilter} emojiMode={emojiMode} onEmojiModeChange={setEmojiMode} onGroupChange={handleGroupChange} groupsPopupRef={groupsPopupRef} navigationMode={tabNavigationMode} />;
   const ContentComponent = <div ref={contentDragRef} className="main-content-area flex-1 min-h-0 overflow-hidden relative pb-[8px] bg-qc-surface transition-colors duration-500">
       {activeTab === 'clipboard' && <ClipboardTab ref={clipboardTabRef} contentFilter={contentFilter} searchQuery={searchQuery} />}
