@@ -24,6 +24,7 @@ import {
   resolveSidebarCategoryId,
   resolveZoneNav,
   isSidebarCategoryActive,
+  cycleValue,
 } from './emoji/emojiKbNavigation';
 
 const DEFAULT_GRID_COLS = 8;
@@ -895,6 +896,20 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
     searchInputRef.current?.focus?.();
   }, []);
 
+  // 鼠标点击搜索框 = 键盘区域导航的 search zone 激活(与 ↓ 键聚焦等价):
+  // 同步 setKbZone + 聚焦,后续 ↓ 进网格 / ← 进侧栏 / ↑ 退出 的路径一致
+  const handleSearchInputMouseDown = useCallback((e) => {
+    // 保留默认聚焦行为,只同步键盘导航 zone
+    setKbZone('search');
+    const zone = kbZoneRef.current;
+    // 从 grid/sidebar 点击搜索框也回到 search(与 blurSearchInput 对称的重新进入)
+    if (zone !== 'search') {
+      setKbRow(-1);
+      setKbCol(0);
+      imageLibraryRef.current?.resetKbIndex?.();
+    }
+  }, []);
+
   const blurSearchInput = useCallback(() => {
     setKbZone('outside');
     setKbRow(-1);
@@ -1012,6 +1027,13 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
         const ok = moveGridBy(intent.dRow, intent.dCol);
         if (!ok && intent.onFail === 'enter-search') focusSearchInput();
         if (!ok && intent.onFail === 'enter-sidebar') enterSidebar();
+        // 最右列 → 越界循环切换子模式:emoji→符号→图片→emoji
+        // 用 resetKbNav 让 emojiMode effect 的 setKbZone('outside') 同值短路,
+        // 保留键盘导航态不闪退;子模式 effect 会重置到该模式起点
+        if (!ok && intent.onFail === 'next-mode') {
+          resetKbNav();
+          onEmojiModeChange?.(cycleValue(['emoji', 'symbols', 'images'], emojiMode, 1));
+        }
         if (!ok && intent.onFail === 'enter-tabbar') {
           setKbZone('tabbar');
           onEnterTabbar?.();
@@ -1223,8 +1245,9 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
               type="text"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
+              onMouseDown={handleSearchInputMouseDown}
               placeholder={showImages ? (t('emoji.searchImagePlaceholder') || '搜索文件名...') : t('emoji.searchPlaceholder')}
-              className="w-full h-8 pl-8 pr-8 text-sm bg-qc-panel border border-qc-border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 text-qc-fg placeholder:text-qc-fg-subtle"
+              className="w-full h-8 pl-8 pr-8 text-sm bg-qc-panel border border-qc-border rounded-lg outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-qc-fg placeholder:text-qc-fg-subtle"
             />
             {searchQuery && (
               <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-qc-fg-subtle hover:text-qc-fg-muted">
