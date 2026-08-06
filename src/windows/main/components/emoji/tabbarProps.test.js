@@ -97,6 +97,33 @@ test('G3 App handleFilterLeft/Right 在 setEmojiMode 前调 resetKbNav(过滤热
   );
 });
 
+// G4: dispatchEmojiNav 在 emojiTabRef.current===null(lazy 挂载中)时可选链 no-op
+// + return true 吞键。修复:ref null 时 return false,放行给其他 handler
+// (handleTabLeft/Right 的 passthrough 切主标签、handleNavigateUp/Down 的列表导航)。
+test('G4 dispatchEmojiNav 在 emojiTabRef null(lazy 挂载中)时不吞键,return false 放行', async () => {
+  const fs = await import('node:fs/promises');
+  const path = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const src = await fs.readFile(path.join(here, '../../App.jsx'), 'utf8');
+  const body = src
+    .split('\n')
+    .filter((l) => !l.trimStart().startsWith('//'))
+    .join('\n');
+  const dispatch = body.slice(body.indexOf('const dispatchEmojiNav'), body.indexOf('// EmojiTab 请求'));
+  // 两个转发分支(shouldForwardNavToEmoji / outside activate)都必须先检查 ref null 并 return false
+  const forwardBlock = dispatch.slice(dispatch.indexOf('shouldForwardNavToEmoji'), dispatch.indexOf('resolveOutsideAppAction'));
+  const activateBlock = dispatch.slice(dispatch.indexOf('outside === \'activate\''), dispatch.indexOf('outside === \'ignore\''));
+  assert.ok(
+    /if \(!emojiTabRef\.current\) return false;/.test(forwardBlock),
+    'shouldForwardNavToEmoji 分支必须检查 emojiTabRef null 并 return false'
+  );
+  assert.ok(
+    /if \(!emojiTabRef\.current\) return false;/.test(activateBlock),
+    'outside activate 分支必须检查 emojiTabRef null 并 return false'
+  );
+});
+
 test('App.jsx 直传 onEnterTabbar/onTabbarMove props 且删注入 useEffect', async () => {
   const fs = await import('node:fs/promises');
   const path = await import('node:path');
