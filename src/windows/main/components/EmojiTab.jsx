@@ -1042,7 +1042,11 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
   }, [virtualData, kbZone]);
 
   // 输出选中项:图片模式转发图库,emoji/符号粘贴 kbRow/kbCol 格
+  // tabbar 态 Enter 走 TabNavigation 选中(handleKbNav 切换),此处不得用
+  // 网格陈旧坐标粘贴——search 态同理(无网格选中),直接 no-op。
   const executeCurrentItem = useCallback(() => {
+    const zone = kbZoneRef.current;
+    if (zone !== 'grid') return;
     if (showImages) {
       imageLibraryRef.current?.executeCurrent?.();
       return;
