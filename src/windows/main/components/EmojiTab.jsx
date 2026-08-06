@@ -1029,6 +1029,12 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
   }, [skinPickerEmoji, showImageGroupModal, applyNavIntent]);
 
   // 同步 emojiKbActive 到 navigationStore(兜底:任何 setKbZone 路径都覆盖)
+  // G7 时序边界说明:store 写发生在 effect 提交期,晚于本帧 render 的
+  // kbZoneRef 同步(render 期)。连续两次 ↓(间隔 <16ms 同一提交批次)时,
+  // useNavigationKeyboard listen 读 store=true 但 kbZoneRef 仍是旧值,
+  // resolveZoneNav 决策基于旧 zone。verifier 实证无用户可见 bug(<16ms
+  // 自动连发才可达,人工按键间隔远超),此单点写是刻意设计:任何 setKbZone
+  // 路径都覆盖,避免双写竞态(F8 已删 5 处显式写收敛于此)。
   useEffect(() => {
     navigationStore.setEmojiKbActive(kbZone !== 'outside');
   }, [kbZone]);
