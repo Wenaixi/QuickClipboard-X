@@ -26,6 +26,33 @@ test('EmojiTab 用 onEnterTabbar/onTabbarMove props 而非 setter 注入', async
   assert.ok(body.includes('onTabbarMove?.(intent.delta)'), 'tabbar-move 应直接调 onTabbarMove prop');
 });
 
+// G1: executeCurrentItem 必须加 kbZone==='grid' 守卫,否则 tabbar/search 态按 Enter
+// (后端 Enter 热键 → handleExecuteItem)会粘贴 grid 上次停留的陈旧项
+test('G1 executeCurrentItem 开头必须有 kbZone==="grid" 守卫', async () => {
+  const fs = await import('node:fs/promises');
+  const path = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const src = await fs.readFile(path.join(here, '../EmojiTab.jsx'), 'utf8');
+  const body = src
+    .split('\n')
+    .filter((l) => !l.trimStart().startsWith('//'))
+    .join('\n');
+  const execStart = body.indexOf('const executeCurrentItem');
+  const execEnd = body.indexOf('useImperativeHandle', execStart);
+  const exec = body.slice(execStart, execEnd);
+  // 守卫必须出现在函数体最前(粘贴逻辑之前),且读 kbZoneRef 避开 stale closure
+  assert.ok(
+    /const zone = kbZoneRef\.current;[\s\S]*?if \(zone !== 'grid'\) return;/.test(exec),
+    'executeCurrentItem 函数体开头必须有 kbZoneRef 守卫,否则 tabbar 态 Enter 粘贴陈旧项'
+  );
+  // 守卫必须位于 showImages 分支之前(所有粘贴路径都被拦截)
+  assert.ok(
+    exec.indexOf("if (zone !== 'grid') return;") < exec.indexOf('if (showImages)'),
+    'kbZone 守卫必须早于 showImages 分支'
+  );
+});
+
 test('App.jsx 直传 onEnterTabbar/onTabbarMove props 且删注入 useEffect', async () => {
   const fs = await import('node:fs/promises');
   const path = await import('node:path');
