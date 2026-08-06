@@ -65,9 +65,9 @@ export function resolveZoneNav(kbZone, action) {
   if (kbZone === 'grid') {
     if (action === 'navigate-down') return { type: 'grid-move', dRow: 1, dCol: 0 };
     if (action === 'navigate-up') return { type: 'grid-move', dRow: -1, dCol: 0, onFail: 'enter-search' };
-    // 最右列 → 越界切下一个子模式(emoji→符号→图片→emoji 循环),由组件 onEmojiModeChange 执行
+    // 最右列 → 越界循环切换子模式:emoji→符号→图片→emoji,由组件 onEmojiModeChange 执行
     if (action === 'tab-right') return { type: 'grid-move', dRow: 0, dCol: 1, onFail: 'next-mode' };
-    // grid 首列 ← 越界进侧栏(与搜索框 ← 同一目的地);侧栏再 ← 才进 tabbar 模式层
+    // grid 首列 ← 越界进侧栏(与搜索框 ← 同一目的地)
     if (action === 'tab-left') return { type: 'grid-move', dRow: 0, dCol: -1, onFail: 'enter-sidebar' };
     return { type: 'none' };
   }
