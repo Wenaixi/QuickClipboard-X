@@ -383,11 +383,14 @@ function App() {
   const dispatchEmojiNav = (action) => {
     if (activeTab !== 'emoji') return false;
     if (shouldForwardNavToEmoji(navigationStore.emojiKbActive, action)) {
+      // G4 修:lazy 挂载中(emojiTabRef null)不吞键,放行给其他 handler
+      if (!emojiTabRef.current) return false;
       emojiTabRef.current?.handleNavAction?.(action);
       return true;
     }
     const outside = resolveOutsideAppAction(action);
     if (outside === 'activate') {
+      if (!emojiTabRef.current) return false;
       emojiTabRef.current?.handleNavAction?.(action);
       return true;
     }
