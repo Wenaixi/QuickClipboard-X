@@ -53,6 +53,50 @@ test('G1 executeCurrentItem 开头必须有 kbZone==="grid" 守卫', async () =>
   );
 });
 
+// G3: 过滤热键(handleFilterLeft/Right)切子模式会触发 emojiMode effect 无条件
+// setKbZone('outside'),grid 态按 Ctrl+← 后键盘导航焦点丢失且 ←/→ 变切主标签。
+// 修复:App 在 setEmojiMode 前调 EmojiTab.resetKbNav() 把 kbZone 先置 outside,
+// 让 effect 同值短路不跑,键盘导航态得以保留。EmojiTab 必须暴露 resetKbNav/getKbZone。
+test('G3 EmojiTab 暴露 resetKbNav/getKbZone 供 App 过滤热键路径使用', async () => {
+  const fs = await import('node:fs/promises');
+  const path = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const src = await fs.readFile(path.join(here, '../EmojiTab.jsx'), 'utf8');
+  const body = src
+    .split('\n')
+    .filter((l) => !l.trimStart().startsWith('//'))
+    .join('\n');
+  // 必须暴露 resetKbNav 与 getKbZone(useImperativeHandle 内)
+  assert.ok(
+    /resetKbNav[\s\S]*?getKbZone[\s\S]*?useImperativeHandle[\s\S]*?resetKbNav[\s\S]*?getKbZone/.test(body),
+    'EmojiTab 必须定义并暴露 resetKbNav/getKbZone'
+  );
+});
+
+test('G3 App handleFilterLeft/Right 在 setEmojiMode 前调 resetKbNav(过滤热键不踢出键盘导航态)', async () => {
+  const fs = await import('node:fs/promises');
+  const path = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const src = await fs.readFile(path.join(here, '../../App.jsx'), 'utf8');
+  const body = src
+    .split('\n')
+    .filter((l) => !l.trimStart().startsWith('//'))
+    .join('\n');
+  const filterLeft = body.slice(body.indexOf('const handleFilterLeft'), body.indexOf('const handleFilterRight'));
+  const filterRight = body.slice(body.indexOf('const handleFilterRight'), body.indexOf('const handleToggleSearch'));
+  // 两个 handler 都必须在 setEmojiMode 前调用 resetKbNav
+  assert.ok(
+    /resetKbNav[\s\S]*?setEmojiMode/.test(filterLeft),
+    'handleFilterLeft 必须在 setEmojiMode 前调 resetKbNav'
+  );
+  assert.ok(
+    /resetKbNav[\s\S]*?setEmojiMode/.test(filterRight),
+    'handleFilterRight 必须在 setEmojiMode 前调 resetKbNav'
+  );
+});
+
 test('App.jsx 直传 onEnterTabbar/onTabbarMove props 且删注入 useEffect', async () => {
   const fs = await import('node:fs/promises');
   const path = await import('node:path');

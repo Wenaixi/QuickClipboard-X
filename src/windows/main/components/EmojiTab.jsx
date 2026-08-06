@@ -898,6 +898,17 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
     searchInputRef.current?.blur?.();
   }, []);
 
+  // G3:过滤热键路径(App handleFilterLeft/Right)切子模式前调用——把 kbZone 置
+  // outside,让 emojiMode effect 的 setKbZone('outside') 同值短路,effect 不跑,
+  // 键盘导航态(如 grid 高亮)得以保留
+  const resetKbNav = useCallback(() => {
+    setKbZone('outside');
+    setKbRow(-1);
+    setKbCol(0);
+    imageLibraryRef.current?.resetKbIndex?.();
+  }, []);
+  const getKbZone = useCallback(() => kbZoneRef.current, []);
+
   const moveSidebarBy = useCallback((delta) => {
     const cats = currentCategories;
     if (cats.length === 0) return false;
@@ -1061,8 +1072,10 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
 
   useImperativeHandle(ref, () => ({
     executeCurrentItem,
-    handleNavAction
-  }), [executeCurrentItem, handleNavAction]);
+    handleNavAction,
+    resetKbNav,
+    getKbZone
+  }), [executeCurrentItem, handleNavAction, resetKbNav, getKbZone]);
 
   const moveActiveImageToGroup = useCallback(async (targetGroup) => {
     const items = activeImageDragItemsRef.current || [];
