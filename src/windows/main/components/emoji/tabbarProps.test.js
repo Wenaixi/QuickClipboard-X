@@ -124,6 +124,28 @@ test('G4 dispatchEmojiNav 在 emojiTabRef null(lazy 挂载中)时不吞键,retur
   );
 });
 
+// G6: enterGrid 图片分支 activateKb() 返回 false(图库异步未就绪)时静默 return,
+// ↓ 键被吞无任何反馈。修复:失败时降级 focusSearchInput()(保持 search 态给视觉反馈)。
+test('G6 enterGrid 图片分支 activateKb 失败时降级 focusSearchInput', async () => {
+  const fs = await import('node:fs/promises');
+  const path = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const src = await fs.readFile(path.join(here, '../EmojiTab.jsx'), 'utf8');
+  const body = src
+    .split('\n')
+    .filter((l) => !l.trimStart().startsWith('//'))
+    .join('\n');
+  const enterGridStart = body.indexOf('const enterGrid');
+  const enterGridEnd = body.indexOf('const enterSidebar', enterGridStart);
+  const enterGrid = body.slice(enterGridStart, enterGridEnd);
+  // activateKb 失败分支必须调用 focusSearchInput 降级
+  assert.ok(
+    /activateKb[\s\S]*?focusSearchInput\(\)/.test(enterGrid),
+    'enterGrid 图片分支 activateKb 失败后必须降级 focusSearchInput'
+  );
+});
+
 test('App.jsx 直传 onEnterTabbar/onTabbarMove props 且删注入 useEffect', async () => {
   const fs = await import('node:fs/promises');
   const path = await import('node:path');
