@@ -324,7 +324,53 @@ fn recreate_main_window(app: &AppHandle) -> Result<(), String> {
 
     let _ = crate::windows::main_window::restore_edge_snap_on_startup(&window);
 
+    // F3: 低占用模式进入时 disable_navigation_keys()，退出重建主窗口
+    // 必须对称恢复，否则退出后导航键（Enter/Tab/Esc 等）永久失效。
+    // 与 enable_mouse_monitoring 同处成功路径，恢复顺序与进入时相反。
+    crate::input_monitor::enable_navigation_keys();
     crate::input_monitor::enable_mouse_monitoring();
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    fn manager_source() -> String {
+        fs::read_to_string(format!(
+            "{}/src/services/low_memory/manager.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读取 manager.rs 失败")
+    }
+
+    fn strip_line_comments(src: &str) -> String {
+        src.lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    // F3: 退出低占用模式重建主窗口必须恢复导航键——进入时
+    // enter_low_memory_mode 调了 disable_navigation_keys()，
+    // 不恢复则退出后导航键永久失效。
+    #[test]
+    fn recreate_main_window_reenables_navigation_keys() {
+        let src = strip_line_comments(&manager_source());
+        let start = src
+            .find("fn recreate_main_window(app: &AppHandle)")
+            .expect("缺 recreate_main_window");
+        let rest = &src[start..];
+        let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(src.len());
+        let b = &src[start..end];
+        assert!(
+            b.contains("enable_navigation_keys()"),
+            "recreate_main_window 必须恢复导航键监听"
+        );
+        assert!(
+            b.find("enable_navigation_keys()") < b.find("enable_mouse_monitoring()"),
+            "导航键恢复必须先于鼠标监控恢复"
+        );
+    }
 }
