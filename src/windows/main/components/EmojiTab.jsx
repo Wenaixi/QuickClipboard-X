@@ -215,7 +215,7 @@ const ImageGroupSidebarButton = forwardRef(function ImageGroupSidebarButton({
       </button>
     </div>
   );
-};
+});
 
 function getImageGroupNameFromDragEvent(event) {
   const target = event.target?.closest?.('[data-image-group-name]');
