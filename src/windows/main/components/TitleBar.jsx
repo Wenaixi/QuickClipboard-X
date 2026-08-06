@@ -58,6 +58,7 @@ const TitleBar = forwardRef(
       searchQuery,
       onSearchChange,
       searchPlaceholder,
+      onSearchFocusChange = null,
       position = "top",
       activeTab = "clipboard",
       updateBannerState = null,
@@ -689,6 +690,7 @@ const TitleBar = forwardRef(
             placeholder={searchPlaceholder}
             isVertical={isVertical}
             position={position}
+            onFocusChange={onSearchFocusChange}
           />
 
           <div

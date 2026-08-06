@@ -9,7 +9,8 @@ const TitleBarSearch = forwardRef(({
   onChange,
   placeholder,
   isVertical = false,
-  position = 'top'
+  position = 'top',
+  onFocusChange = null
 }, ref) => {
   const [isFocused, setIsFocused] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -19,6 +20,10 @@ const TitleBarSearch = forwardRef(({
   const isComposingRef = useRef(false);
   const settings = useSnapshot(settingsStore);
   const uiAnimationEnabled = settings.uiAnimationEnabled !== false;
+  const notifyFocusChange = (focused) => {
+    setIsFocused(focused);
+    onFocusChange?.(focused);
+  };
 
   // 搜索框清空按钮样式
   const searchInputStyle = `
@@ -56,7 +61,7 @@ const TitleBarSearch = forwardRef(({
     }
   };
   const handleFocus = () => {
-    setIsFocused(true);
+    notifyFocusChange(true);
     if (inputRef.current && inputValue) {
       setTimeout(() => {
         inputRef.current.select();
@@ -121,7 +126,7 @@ const TitleBarSearch = forwardRef(({
             <style>{searchInputStyle}</style>
             <div ref={searchRef} className={`titlebar-search relative flex ${isVertical ? 'flex-col items-center justify-end h-7' : 'min-w-0 flex-1 flex-row items-center justify-end'}`}>
                 {/* 输入框 - 根据方向展开 */}
-                <input ref={inputRef} type="search" value={inputValue} onChange={handleChange} onCompositionStart={handleCompositionStart} onCompositionEnd={handleCompositionEnd} onFocus={handleFocus} onBlur={() => setIsFocused(false)} placeholder={placeholder} style={isVertical ? {
+                <input ref={inputRef} type="search" value={inputValue} onChange={handleChange} onCompositionStart={handleCompositionStart} onCompositionEnd={handleCompositionEnd} onFocus={handleFocus} onBlur={() => notifyFocusChange(false)} placeholder={placeholder} style={isVertical ? {
         writingMode: 'vertical-rl',
         textAlign: 'start'
       } : {}} className={`${isVertical ? 'absolute bottom-6 left-0 w-7 py-2' : 'h-7 min-w-0'} text-sm bg-qc-panel border border-qc-border rounded-lg outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-qc-fg placeholder:text-qc-fg-subtle shadow-sm ${uiAnimationEnabled ? 'transition-all duration-300 ease-in-out' : ''} ${isExpanded ? isVertical ? 'h-48 opacity-100 mb-1' : 'flex-1 opacity-100 mr-1 px-2' : isVertical ? 'h-0 opacity-0 pointer-events-none border-0' : 'w-0 flex-none opacity-0 pointer-events-none border-0 px-0'}`} />
