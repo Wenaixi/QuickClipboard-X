@@ -803,6 +803,7 @@ function TabNavigation({
               : 'w-full'
           }`}
           onMouseLeave={handleControlsContainerMouseLeave}
+          onMouseMove={handleGroupRevealMouseMove}
         >
           {!isSidebarLayout && (
             <div ref={controlsIndicatorRef} className={`absolute left-0 w-0 rounded-lg pointer-events-none ${uiAnimationEnabled ? 'transition-all duration-300 ease-out' : ''}`} style={{

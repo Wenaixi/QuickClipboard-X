@@ -90,6 +90,10 @@ describe('resolveZoneNav', () => {
     assert.deepEqual(resolveZoneNav('grid', 'tab-left'), {
       type: 'grid-move', dRow: 0, dCol: -1, onFail: 'enter-sidebar',
     });
+    // 最右列 → 越界切下一个子模式(emoji→符号→图片→emoji 循环)
+    assert.deepEqual(resolveZoneNav('grid', 'tab-right'), {
+      type: 'grid-move', dRow: 0, dCol: 1, onFail: 'next-mode',
+    });
   });
   it('sidebar 移动与回搜索', () => {
     assert.deepEqual(resolveZoneNav('sidebar', 'navigate-down'), { type: 'sidebar-move', delta: 1 });
@@ -102,6 +106,11 @@ describe('resolveZoneNav', () => {
   it('grid 首列 ← 越界进侧栏(不再是 tabbar)', () => {
     assert.deepEqual(resolveZoneNav('grid', 'tab-left'), {
       type: 'grid-move', dRow: 0, dCol: -1, onFail: 'enter-sidebar',
+    });
+  });
+  it('grid 最右列 → 越界切下一个子模式(emoji→符号→图片→emoji 循环)', () => {
+    assert.deepEqual(resolveZoneNav('grid', 'tab-right'), {
+      type: 'grid-move', dRow: 0, dCol: 1, onFail: 'next-mode',
     });
   });
   it('tabbar: up→search down→grid 左右→tabbar-move', () => {
