@@ -75,7 +75,8 @@ export function resolveZoneNav(kbZone, action) {
     if (action === 'navigate-down') return { type: 'sidebar-move', delta: 1 };
     if (action === 'navigate-up') return { type: 'sidebar-move', delta: -1, onFail: 'enter-search' };
     if (action === 'tab-right') return { type: 'enter-grid' };
-    if (action === 'tab-left') return { type: 'enter-tabbar' };
+    // 侧栏再 ← 直接切到收藏主标签(跳过 tabbar 模式层)
+    if (action === 'tab-left') return { type: 'switch-tab', tab: 'favorites' };
     return { type: 'none' };
   }
 

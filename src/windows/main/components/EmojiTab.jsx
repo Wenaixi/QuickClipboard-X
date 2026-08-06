@@ -222,7 +222,7 @@ function getImageGroupNameFromDragEvent(event) {
   return target?.dataset?.imageGroupName || '';
 }
 
-const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, onEnterTabbar, onTabbarMove }, ref) {
+const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, onEnterTabbar, onTabbarMove, onSwitchTab }, ref) {
   const showSymbols = emojiMode === 'symbols';
   const showImages = emojiMode === 'images';
   const { t } = useTranslation();
@@ -997,6 +997,11 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
         // 交给 TabNavigation 聚焦模式层
         onEnterTabbar?.();
         break;
+      case 'switch-tab':
+        // 侧栏 ← 直接切主标签(收藏),不走 tabbar 模式层
+        setKbZone('outside');
+        onSwitchTab?.(intent.tab);
+        break;
       case 'tabbar-move':
         onTabbarMove?.(intent.delta);
         break;
@@ -1021,7 +1026,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
       default:
         break;
     }
-  }, [focusSearchInput, enterGrid, enterSidebar, blurSearchInput, moveGridBy, moveSidebarBy, onEnterTabbar, onTabbarMove]);
+  }, [focusSearchInput, enterGrid, enterSidebar, blurSearchInput, moveGridBy, moveSidebarBy, onEnterTabbar, onTabbarMove, onSwitchTab]);
 
   // 主路径:App 转发后端 navigation-action。不挂 window keydown,
   // 避免与 RegisterHotKey 在搜索框聚焦时双触发(进 grid 两次/跳格)。
