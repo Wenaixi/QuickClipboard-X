@@ -190,8 +190,20 @@ function TabNavigation({
 
   // ←/→ 遍历模式层:emoji/symbols/images/favorites/clipboard(循环)
   // 主标签切换会让 EmojiTab unmount(emojiKbActive 由 setActiveTab 清 false)
+  // G2 修:null 写只保留分支链后一处——分支内每处 null 写 + focus 写被 React 18
+  // 批处理合并成最后一次 null,focus 高亮永不显示。分支链后的统一清在切换生效
+  // 后执行,同批次内高亮先显示、随后整批提交时焦点已清,行为正确。
   const handleKbNav = useCallback((delta) => {
-    const items = ['emoji', 'symbols', 'images', 'favorites', 'clipboard'];
+    // G5 修:items 从可见 tabs 派生(过滤掉不可见 tab),与 :116 tabs 过滤脱钩
+    // 问题:硬编码 ['emoji','symbols','images','favorites','clipboard'] 在隐藏
+    // favorites 后循环到它 → focus no-op + onTabChange('favorites') 被
+    // App.jsx:88-93 守卫弹回 clipboard,瞬闪。顺序:emoji 子模式 3 项在前 +
+    // 可见主标签在后。
+    const emojiModeItems = ['emoji', 'symbols', 'images'];
+    // 主标签顺序:clipboard 恒可见 + favorites 按可见性(tabs 已过滤)
+    const visibleMainTabs = tabs.map(tab => tab.id);
+    const items = [...emojiModeItems, ...visibleMainTabs];
+    // 用局部变量记录本帧焦点起点,不依赖 state 的异步值
     const current = tabbarFocusId || emojiMode || 'emoji';
     let idx = items.indexOf(current);
     if (idx < 0) idx = 0;
@@ -199,23 +211,19 @@ function TabNavigation({
     const nextId = items[next];
     focusTabbarButton(nextId);
     if (nextId === 'favorites') {
-      // 切走主标签:清 stale 焦点,防再次 ← 从旧 ID 起算漂移
-      setTabbarFocusId(null);
       onTabChange('favorites');
     } else if (nextId === 'clipboard') {
-      setTabbarFocusId(null);
       onTabChange('clipboard');
     } else if (nextId === 'emoji') {
-      setTabbarFocusId(null);
       onEmojiModeChange('emoji');
     } else if (nextId === 'symbols') {
-      setTabbarFocusId(null);
       onEmojiModeChange('symbols');
     } else if (nextId === 'images') {
-      setTabbarFocusId(null);
       onEmojiModeChange('images');
     }
-  }, [tabbarFocusId, emojiMode, focusTabbarButton, onTabChange, onEmojiModeChange]);
+    // 切换生效后统一清 stale 焦点,防再次 ← 从旧 ID 起算漂移
+    setTabbarFocusId(null);
+  }, [tabbarFocusId, emojiMode, focusTabbarButton, onTabChange, onEmojiModeChange, tabs]);
 
   useImperativeHandle(ref, () => ({
     focusTabbar,

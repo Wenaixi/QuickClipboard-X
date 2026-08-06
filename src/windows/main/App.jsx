@@ -383,11 +383,14 @@ function App() {
   const dispatchEmojiNav = (action) => {
     if (activeTab !== 'emoji') return false;
     if (shouldForwardNavToEmoji(navigationStore.emojiKbActive, action)) {
+      // G4 修:lazy 挂载中(emojiTabRef null)不吞键,放行给其他 handler
+      if (!emojiTabRef.current) return false;
       emojiTabRef.current?.handleNavAction?.(action);
       return true;
     }
     const outside = resolveOutsideAppAction(action);
     if (outside === 'activate') {
+      if (!emojiTabRef.current) return false;
       emojiTabRef.current?.handleNavAction?.(action);
       return true;
     }
@@ -452,6 +455,13 @@ function App() {
   const handleFilterLeft = () => {
     blurSearchInput();
     if (activeTab === 'emoji') {
+      // G3 修:过滤热键(⌘+←/→)切子模式是"键盘驱动"路径,不应踢出键盘导航态。
+      // emojiMode effect 会 reset kbZone 到 outside——这里先重置 nav 让 effect 短路
+      // (same-value setState 不触发 effect),保住 grid 高亮继续可用。
+      const lastZone = emojiTabRef.current?.getKbZone?.();
+      if (lastZone !== 'outside') {
+        emojiTabRef.current?.resetKbNav?.();
+      }
       setEmojiMode(prev => cycleValue(['emoji', 'symbols', 'images'], prev, -1));
     } else {
       setContentFilter(prev => cycleValue(['all', 'text', 'image', 'file', 'link'], prev, -1));
@@ -460,6 +470,11 @@ function App() {
   const handleFilterRight = () => {
     blurSearchInput();
     if (activeTab === 'emoji') {
+      // G3 修:同上,过滤热键切子模式不踢出键盘导航态
+      const lastZone = emojiTabRef.current?.getKbZone?.();
+      if (lastZone !== 'outside') {
+        emojiTabRef.current?.resetKbNav?.();
+      }
       setEmojiMode(prev => cycleValue(['emoji', 'symbols', 'images'], prev, 1));
     } else {
       setContentFilter(prev => cycleValue(['all', 'text', 'image', 'file', 'link'], prev, 1));

@@ -862,6 +862,9 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
         setKbZone('grid');
         return;
       }
+      // G6 修:图片库异步未就绪(activateKb 返回 false)时降级到搜索框,
+      // 保留键盘导航态(search)给用户视觉反馈,而不是静默吞掉 ↓ 键
+      focusSearchInput();
       return;
     }
     const data = virtualDataRef.current;
@@ -899,6 +902,17 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
     imageLibraryRef.current?.resetKbIndex?.();
     searchInputRef.current?.blur?.();
   }, []);
+
+  // G3:过滤热键路径(App handleFilterLeft/Right)切子模式前调用——把 kbZone 置
+  // outside,让 emojiMode effect 的 setKbZone('outside') 同值短路,effect 不跑,
+  // 键盘导航态(如 grid 高亮)得以保留
+  const resetKbNav = useCallback(() => {
+    setKbZone('outside');
+    setKbRow(-1);
+    setKbCol(0);
+    imageLibraryRef.current?.resetKbIndex?.();
+  }, []);
+  const getKbZone = useCallback(() => kbZoneRef.current, []);
 
   const moveSidebarBy = useCallback((delta) => {
     const cats = currentCategories;
@@ -1017,6 +1031,12 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
   }, [skinPickerEmoji, showImageGroupModal, applyNavIntent]);
 
   // 同步 emojiKbActive 到 navigationStore(兜底:任何 setKbZone 路径都覆盖)
+  // G7 时序边界说明:store 写发生在 effect 提交期,晚于本帧 render 的
+  // kbZoneRef 同步(render 期)。连续两次 ↓(间隔 <16ms 同一提交批次)时,
+  // useNavigationKeyboard listen 读 store=true 但 kbZoneRef 仍是旧值,
+  // resolveZoneNav 决策基于旧 zone。verifier 实证无用户可见 bug(<16ms
+  // 自动连发才可达,人工按键间隔远超),此单点写是刻意设计:任何 setKbZone
+  // 路径都覆盖,避免双写竞态(F8 已删 5 处显式写收敛于此)。
   useEffect(() => {
     navigationStore.setEmojiKbActive(kbZone !== 'outside');
   }, [kbZone]);
@@ -1044,7 +1064,11 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
   }, [virtualData, kbZone]);
 
   // 输出选中项:图片模式转发图库,emoji/符号粘贴 kbRow/kbCol 格
+  // tabbar 态 Enter 走 TabNavigation 选中(handleKbNav 切换),此处不得用
+  // 网格陈旧坐标粘贴——search 态同理(无网格选中),直接 no-op。
   const executeCurrentItem = useCallback(() => {
+    const zone = kbZoneRef.current;
+    if (zone !== 'grid') return;
     if (showImages) {
       imageLibraryRef.current?.executeCurrent?.();
       return;
@@ -1059,8 +1083,10 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
 
   useImperativeHandle(ref, () => ({
     executeCurrentItem,
-    handleNavAction
-  }), [executeCurrentItem, handleNavAction]);
+    handleNavAction,
+    resetKbNav,
+    getKbZone
+  }), [executeCurrentItem, handleNavAction, resetKbNav, getKbZone]);
 
   const moveActiveImageToGroup = useCallback(async (targetGroup) => {
     const items = activeImageDragItemsRef.current || [];
