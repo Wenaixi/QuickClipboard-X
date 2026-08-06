@@ -28,15 +28,31 @@ test('TabNavigation 切走主标签/子模式时清 tabbarFocusId', async () => 
     .split('\n')
     .filter((l) => !l.trimStart().startsWith('//'))
     .join('\n');
-  // onTabChange 调用时必须先 setTabbarFocusId(null)(清 stale 焦点)
+  // 清 stale 焦点语义改为"切换生效后统一清",不再在每个分支内重复写
+  const fnStart = body.indexOf('const handleKbNav');
+  const fnEnd = body.indexOf('useImperativeHandle', fnStart);
+  const fnBody = body.slice(fnStart, fnEnd);
+  // onTabChange 调用前不再要求 setTabbarFocusId(null)(G2 修后焦点先写后清,批处理只留最后一次)
+  assert.ok(fnBody.includes('focusTabbarButton'), 'handleKbNav 应调用 focusTabbarButton');
   assert.ok(
-    /setTabbarFocusId\(null\)[\s\S]*?onTabChange\(/.test(body),
-    'onTabChange 前必须 setTabbarFocusId(null)'
+    /onTabChange\(/.test(fnBody),
+    'handleKbNav 应调 onTabChange'
   );
-  // onEmojiModeChange 调用时同样清
   assert.ok(
-    /setTabbarFocusId\(null\)[\s\S]*?onEmojiModeChange\(/.test(body),
-    'onEmojiModeChange 前必须 setTabbarFocusId(null)'
+    /onEmojiModeChange\(/.test(fnBody),
+    'handleKbNav 应调 onEmojiModeChange'
+  );
+  // G2: 5 个分支内的 null 写全部收敛为"切换生效后统一清"
+  assert.equal(
+    (fnBody.match(/setTabbarFocusId\(null\)/g) || []).length,
+    1,
+    'handleKbNav 内 setTabbarFocusId(null) 只能有 1 处(统一清),否则 React 批处理吞掉 focus 高亮'
+  );
+  // 统一清必须位于分支 if/else 链之后(以最后一个分支调用 onEmojiModeChange('images') 为锚)
+  const lastImagesCallIdx = fnBody.indexOf("onEmojiModeChange('images')");
+  assert.ok(
+    lastImagesCallIdx >= 0 && fnBody.lastIndexOf('setTabbarFocusId(null)') > lastImagesCallIdx,
+    '统一清 null 必须在分支链之后,否则高亮仍被吞'
   );
 });
 
