@@ -752,12 +752,20 @@ pub fn unregister_number_shortcuts() {
         .filter(|(id, _)| id.starts_with("number_"))
         .cloned()
         .collect();
-    
+
     for (id, shortcut_str) in number_shortcuts {
         if let Ok(shortcut) = parse_shortcut(&shortcut_str) {
             if let Ok(app) = get_app() {
-                let _ = app.global_shortcut().unregister(shortcut);
-                println!("已注销数字快捷键: {}", shortcut_str);
+                // F5: 与 unregister_shortcut 同款——先 is_registered 探测再
+                // 注销，避免对未注册的裸键 UnregisterHotKey 空跑后内部表
+                // 与 Windows 层脱节，残留吞键的"幽灵热键"。
+                // F5: 与 unregister_shortcut 同款——先 is_registered 探测再
+                // 注销，避免对未注册的裸键 UnregisterHotKey 空跑后内部表
+                // 与 Windows 层脱节，残留吞键的"幽灵热键"。
+                if app.global_shortcut().is_registered(shortcut) {
+                    let _ = app.global_shortcut().unregister(shortcut);
+                    println!("已注销数字快捷键: {}", shortcut_str);
+                }
             }
         }
         shortcuts.retain(|(sid, _)| sid != &id);
@@ -1017,6 +1025,13 @@ mod tests {
         .expect("读取 global.rs 失败")
     }
 
+    fn strip_line_comments(src: &str) -> String {
+        src.lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     fn fn_body<'a>(src: &'a str, name: &str) -> &'a str {
         // 兼容 pub fn / fn / 带泛型 <F> 三种签名。
         let markers = [
@@ -1038,6 +1053,26 @@ mod tests {
             .map(|i| start + i + 2)
             .unwrap_or(src.len());
         &src[start..end]
+    }
+
+    // F5: unregister_number_shortcuts 必须先 is_registered 探测再注销,
+    // 与 unregister_shortcut 同款——裸 UnregisterHotKey 空跑会让内部表
+    // 与 Windows 层脱节,残留吞键的幽灵热键。
+    #[test]
+    fn unregister_number_shortcuts_probes_before_unregister() {
+        let src = strip_line_comments(&global_source());
+        let start = src
+            .find("pub fn unregister_number_shortcuts()")
+            .expect("缺 unregister_number_shortcuts");
+        let rest = &src[start..];
+        let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(src.len());
+        let b = &src[start..end];
+        let probe_pos = b.find("is_registered(shortcut)");
+        let unregister_pos = b.find("unregister(shortcut)");
+        assert!(
+            probe_pos.is_some() && unregister_pos.is_some() && probe_pos < unregister_pos,
+            "unregister_number_shortcuts 必须先 is_registered 探测再 unregister"
+        );
     }
 
     // F1: reload 顶层入口持锁后调用的内层函数禁止再 lock，
