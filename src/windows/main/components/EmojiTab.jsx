@@ -1006,6 +1006,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
       case 'grid-move': {
         const ok = moveGridBy(intent.dRow, intent.dCol);
         if (!ok && intent.onFail === 'enter-search') focusSearchInput();
+        if (!ok && intent.onFail === 'enter-sidebar') enterSidebar();
         if (!ok && intent.onFail === 'enter-tabbar') {
           setKbZone('tabbar');
           onEnterTabbar?.();

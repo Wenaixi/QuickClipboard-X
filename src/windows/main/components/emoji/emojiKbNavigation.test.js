@@ -88,7 +88,7 @@ describe('resolveZoneNav', () => {
       type: 'grid-move', dRow: -1, dCol: 0, onFail: 'enter-search',
     });
     assert.deepEqual(resolveZoneNav('grid', 'tab-left'), {
-      type: 'grid-move', dRow: 0, dCol: -1, onFail: 'enter-tabbar',
+      type: 'grid-move', dRow: 0, dCol: -1, onFail: 'enter-sidebar',
     });
   });
   it('sidebar 移动与回搜索', () => {
@@ -99,9 +99,9 @@ describe('resolveZoneNav', () => {
     assert.deepEqual(resolveZoneNav('sidebar', 'tab-right'), { type: 'enter-grid' });
     assert.deepEqual(resolveZoneNav('sidebar', 'tab-left'), { type: 'enter-tabbar' });
   });
-  it('grid 首列 ← 越界进 tabbar(不再是 sidebar)', () => {
+  it('grid 首列 ← 越界进侧栏(不再是 tabbar)', () => {
     assert.deepEqual(resolveZoneNav('grid', 'tab-left'), {
-      type: 'grid-move', dRow: 0, dCol: -1, onFail: 'enter-tabbar',
+      type: 'grid-move', dRow: 0, dCol: -1, onFail: 'enter-sidebar',
     });
   });
   it('tabbar: up→search down→grid 左右→tabbar-move', () => {
@@ -128,7 +128,7 @@ describe('isSidebarCategoryActive', () => {
 });
 
 describe('端到端状态机路径(模拟用户)', () => {
-  it('outside→↓search→↓grid→←tabbar→←search→↑outside', () => {
+  it('outside→↓search→↓grid→←sidebar→←tabbar→←search→↑outside', () => {
     let zone = 'outside';
     const step = (action) => {
       const intent = resolveZoneNav(zone, action);
@@ -137,8 +137,8 @@ describe('端到端状态机路径(模拟用户)', () => {
       else if (intent.type === 'enter-sidebar') zone = 'sidebar';
       else if (intent.type === 'enter-tabbar') zone = 'tabbar';
       else if (intent.type === 'deactivate') zone = 'outside';
-      else if (intent.type === 'grid-move' && intent.onFail === 'enter-tabbar') {
-        zone = 'tabbar';
+      else if (intent.type === 'grid-move' && intent.onFail === 'enter-sidebar') {
+        zone = 'sidebar';
       }
       return intent;
     };
@@ -147,7 +147,9 @@ describe('端到端状态机路径(模拟用户)', () => {
     assert.equal(zone, 'search');
     step('navigate-down');
     assert.equal(zone, 'grid');
-    step('tab-left'); // onFail enter-tabbar 路径由组件在 move 失败时触发;这里直接模拟
+    step('tab-left'); // grid 首列 ← 越界进侧栏(onFail enter-sidebar 由组件在 move 失败时触发)
+    assert.equal(zone, 'sidebar');
+    step('tab-left'); // 侧栏再 ← 进 tabbar 模式层
     assert.equal(zone, 'tabbar');
     step('tab-left'); // tabbar 内 ←/→ 是模式/主标签移动,zone 不变
     assert.equal(zone, 'tabbar');
