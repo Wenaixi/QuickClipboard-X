@@ -157,14 +157,14 @@ fn register_navigation_hotkeys_from_settings() -> Result<(), String> {
                     config.id, config.shortcut, error
                 );
                 // 插件可能在 Err 前部分写入 Windows 层，主动探测并注销清理，
-                // 避免残留吞键的"幽灵热键"。与 global.rs register_shortcut_inner 同款。
+                // 避免残留吞键的"幽灵热键"。与 global.rs register_shortcut 同款。
                 if app.global_shortcut().is_registered(shortcut) {
                     let _ = app.global_shortcut().unregister(shortcut);
                 }
                 // F7: 注册失败必须写 SHORTCUT_STATUS 状态表——前端 navigation tab
                 // 的 ShortcutInput 靠 backendId 查 getBackendError 展示冲突/失败，
                 // 不写则用户配置错误时前端静默无提示。key 用导航 config id，
-                // 错误码与 global.rs register_shortcut_inner 同款区分 CONFLICT/REGISTRATION_FAILED。
+                // 错误码与 global.rs register_shortcut 同款区分 CONFLICT/REGISTRATION_FAILED。
                 let error_msg = if error.to_string().contains("already registered") {
                     "CONFLICT".to_string()
                 } else {
@@ -448,7 +448,7 @@ mod tests {
     }
 
     // F3: 注册失败路径必须先 is_registered 探测再 unregister 清理幽灵热键,
-    // 并保留 eprintln 错误日志。与 global.rs register_shortcut_inner 同款。
+    // 并保留 eprintln 错误日志。与 global.rs register_shortcut 同款。
     #[test]
     fn navigation_failure_path_probes_before_unregister() {
         let src = strip_line_comments(&navigation_source());

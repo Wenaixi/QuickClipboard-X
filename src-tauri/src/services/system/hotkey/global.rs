@@ -199,13 +199,6 @@ where
     F: Fn(&AppHandle) + Send + Sync + 'static,
 {
     // F1: 假设调用方已持 GLOBAL_HOTKEY_SYNC_LOCK；同线程再 lock 会自死锁。
-    register_shortcut_inner(id, shortcut_str, handler)
-}
-
-fn register_shortcut_inner<F>(id: &str, shortcut_str: &str, handler: F) -> Result<(), String>
-where
-    F: Fn(&AppHandle) + Send + Sync + 'static,
-{
     let app = get_app()?;
 
     unregister_shortcut(id);
@@ -1137,7 +1130,7 @@ mod tests {
 
     // 三个直连 on_shortcut 的注册函数失败路径必须清理幽灵热键：
     // 插件可能在 Err 前部分写入 Windows 层，若不探测注销会残留吞键。
-    // 与 register_shortcut_inner 的 Err 分支同款清理。
+    // 与 register_shortcut 的 Err 分支同款清理。
     #[test]
     fn direct_registration_fns_cleanup_ghost_hotkey_on_failure() {
         let src = global_source();
