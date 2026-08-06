@@ -5,7 +5,6 @@ import { platform, version as osVersion } from '@tauri-apps/plugin-os';
 import { toast, TOAST_POSITIONS, TOAST_SIZES } from '@shared/store/toastStore';
 import { navigationStore } from '@shared/store/navigationStore';
 import { Virtuoso } from 'react-virtuoso';
-import { useInputFocus } from '@shared/hooks/useInputFocus';
 import { useCustomScrollbar } from '@shared/hooks/useCustomScrollbar';
 import { useSnapshot } from 'valtio';
 import { settingsStore } from '@shared/store/settingsStore';
@@ -223,13 +222,12 @@ function getImageGroupNameFromDragEvent(event) {
   return target?.dataset?.imageGroupName || '';
 }
 
-const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, onEnterTabbar, onTabbarMove, onSwitchTab }, ref) {
+const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, onEnterTabbar, onTabbarMove, onSwitchTab, searchQuery = '' }, ref) {
   const showSymbols = emojiMode === 'symbols';
   const showImages = emojiMode === 'images';
   const { t } = useTranslation();
   const settings = useSnapshot(settingsStore);
   const isChinese = settings.language?.startsWith('zh');
-  const [searchQuery, setSearchQuery] = useState('');
   const [recentEmojis, setRecentEmojis] = useState([]);
   const [imageGroups, setImageGroups] = useState([]);
   const [imageGroupLoading, setImageGroupLoading] = useState(false);
@@ -268,7 +266,6 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
   const virtualDataRef = useRef([]);
   const emojiMetaRef = useRef({});
   const isUserScrollingRef = useRef(false);
-  const searchInputRef = useInputFocus();
   const [scrollerElement, setScrollerElement] = useState(null);
   const scrollerRefCallback = useCallback(element => element && setScrollerElement(element), []);
   useCustomScrollbar(scrollerElement);
@@ -601,7 +598,6 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
   }, []);
 
   useEffect(() => {
-    setSearchQuery('');
     // 切换子模式时重置键盘导航状态:回到 outside(无高亮,←/→ 恢复原功能)
     // emojiKbActive 由下方 useEffect([kbZone]) 单点兜底,这里只改 zone
     setKbZone('outside');
@@ -893,21 +889,6 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
 
   const focusSearchInput = useCallback(() => {
     setKbZone('search');
-    searchInputRef.current?.focus?.();
-  }, []);
-
-  // 鼠标点击搜索框 = 键盘区域导航的 search zone 激活(与 ↓ 键聚焦等价):
-  // 同步 setKbZone + 聚焦,后续 ↓ 进网格 / ← 进侧栏 / ↑ 退出 的路径一致
-  const handleSearchInputMouseDown = useCallback((e) => {
-    // 保留默认聚焦行为,只同步键盘导航 zone
-    setKbZone('search');
-    const zone = kbZoneRef.current;
-    // 从 grid/sidebar 点击搜索框也回到 search(与 blurSearchInput 对称的重新进入)
-    if (zone !== 'search') {
-      setKbRow(-1);
-      setKbCol(0);
-      imageLibraryRef.current?.resetKbIndex?.();
-    }
   }, []);
 
   const blurSearchInput = useCallback(() => {
@@ -915,7 +896,6 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
     setKbRow(-1);
     setKbCol(0);
     imageLibraryRef.current?.resetKbIndex?.();
-    searchInputRef.current?.blur?.();
   }, []);
 
   // G3:过滤热键路径(App handleFilterLeft/Right)切子模式前调用——把 kbZone 置
@@ -1264,26 +1244,6 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
 
       {/* 主内容区 */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* 搜索框 */}
-        <div className="emoji-search-bar flex-shrink-0 p-2 border-b border-qc-border">
-          <div className="relative">
-            <i className="ti ti-search absolute left-2.5 top-1/2 -translate-y-1/2 text-qc-fg-subtle text-sm"></i>
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              onMouseDown={handleSearchInputMouseDown}
-              placeholder={showImages ? (t('emoji.searchImagePlaceholder') || '搜索文件名...') : t('emoji.searchPlaceholder')}
-              className="w-full h-8 pl-8 pr-8 text-sm bg-qc-panel border border-qc-border rounded-lg outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-qc-fg placeholder:text-qc-fg-subtle"
-            />
-            {searchQuery && (
-              <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-qc-fg-subtle hover:text-qc-fg-muted">
-                <i className="ti ti-x text-sm"></i>
-              </button>
-            )}
-          </div>
-        </div>
 
         {/* 内容滚动区 */}
         {showImages ? (
