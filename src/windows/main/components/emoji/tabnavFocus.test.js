@@ -56,6 +56,40 @@ test('TabNavigation 切走主标签/子模式时清 tabbarFocusId', async () => 
   );
 });
 
+// G5: handleKbNav 硬编码 items=['emoji','symbols','images','favorites','clipboard']
+// 与 :116 tabs 过滤(visibleOptionalTabs)脱钩:隐藏 favorites 后循环到它 →
+// focus no-op + onTabChange('favorites') 被 App.jsx:88-93 守卫弹回 clipboard,瞬闪。
+// 修复:items 从可见 tabs 派生(emoji 子模式 3 项在前 + 可见主标签在后)。
+test('G5 handleKbNav items 从可见 tabs 派生,不再硬编码隐藏 tab', async () => {
+  const fs = await import('node:fs/promises');
+  const path = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const src = await fs.readFile(path.join(here, '../TabNavigation.jsx'), 'utf8');
+  const body = src
+    .split('\n')
+    .filter((l) => !l.trimStart().startsWith('//'))
+    .join('\n');
+  const fnStart = body.indexOf('const handleKbNav');
+  const fnEnd = body.indexOf('useImperativeHandle', fnStart);
+  const fnBody = body.slice(fnStart, fnEnd);
+  // 不再有硬编码的 favorites/clipboard 字面 items 数组
+  assert.equal(
+    /const items = \['emoji', 'symbols', 'images', 'favorites', 'clipboard'\]/.test(fnBody),
+    false,
+    'handleKbNav 不应再硬编码 5 项 items 数组'
+  );
+  // items 必须从 tabs 派生
+  assert.ok(
+    /tabs\.map\(tab => tab\.id\)/.test(fnBody),
+    'items 必须从可见 tabs 派生(tabs.map)'
+  );
+  assert.ok(
+    /\[\.\.\.emojiModeItems, \.\.\.visibleMainTabs\]/.test(fnBody),
+    'items 应为 emoji 子模式 3 项在前 + 可见主标签在后'
+  );
+});
+
 // F6: handleEmojiTabbarEnter / TabNavigation.kbEnter 死代码
 // 实证:handleKbNav 每次方向键都先 setTabbarFocusId(null) + 立即调 onTabChange/onEmojiModeChange,
 // handleKbEnter 再读 tabbarFocusId 永远 null,fallback 到 emojiMode,但 emojiMode 已被 handleKbNav
