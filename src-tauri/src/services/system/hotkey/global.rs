@@ -854,6 +854,11 @@ pub fn is_hotkeys_enabled() -> bool {
 
 // 更新快捷键状态
 fn update_shortcut_status(id: &str, shortcut: &str, success: bool, error: Option<String>) {
+    set_shortcut_status(id, shortcut, success, error);
+}
+
+// 更新快捷键状态（pub: navigation.rs 注册失败时写导航键状态表）
+pub fn set_shortcut_status(id: &str, shortcut: &str, success: bool, error: Option<String>) {
     let mut status_map = SHORTCUT_STATUS.lock();
     status_map.insert(
         id.to_string(),
