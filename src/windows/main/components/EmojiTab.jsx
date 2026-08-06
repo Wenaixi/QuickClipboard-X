@@ -1006,12 +1006,6 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
       case 'enter-sidebar':
         enterSidebar();
         break;
-      case 'enter-tabbar':
-        // 进 tabbar 同步写 kbZone,否则 resolveZoneNav('tabbar', ...) 死码
-        setKbZone('tabbar');
-        // 交给 TabNavigation 聚焦模式层
-        onEnterTabbar?.();
-        break;
       case 'prev-mode':
         // 侧栏再 ← 切上一个子模式:图片→符号→表情;表情(最左)再 ← 切收藏主标签。
         // 子模式 effect 会重置到该模式起点(第一个表情),键盘导航态自然衔接。
@@ -1023,6 +1017,12 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
         } else {
           onEmojiModeChange?.(cycleValue(['emoji', 'symbols', 'images'], emojiMode, -1));
         }
+        break;
+      case 'enter-tabbar':
+        // 进 tabbar 同步写 kbZone,否则 resolveZoneNav('tabbar', ...) 死码
+        setKbZone('tabbar');
+        // 交给 TabNavigation 聚焦模式层
+        onEnterTabbar?.();
         break;
       case 'tabbar-move':
         onTabbarMove?.(intent.delta);
