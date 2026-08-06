@@ -759,9 +759,6 @@ pub fn unregister_number_shortcuts() {
                 // F5: 与 unregister_shortcut 同款——先 is_registered 探测再
                 // 注销，避免对未注册的裸键 UnregisterHotKey 空跑后内部表
                 // 与 Windows 层脱节，残留吞键的"幽灵热键"。
-                // F5: 与 unregister_shortcut 同款——先 is_registered 探测再
-                // 注销，避免对未注册的裸键 UnregisterHotKey 空跑后内部表
-                // 与 Windows 层脱节，残留吞键的"幽灵热键"。
                 if app.global_shortcut().is_registered(shortcut) {
                     let _ = app.global_shortcut().unregister(shortcut);
                     println!("已注销数字快捷键: {}", shortcut_str);
