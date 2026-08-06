@@ -7,7 +7,9 @@
 export function resolveActivateKb(currentIndex, total) {
   if (total <= 0) return { ok: false, index: -1 };
   if (currentIndex < 0) return { ok: true, index: 0 };
-  return { ok: true, index: currentIndex };
+  // 越界 clamp 到最后一个合法槽位:搜索缩小结果集后旧 index 可能 >= total,
+  // 不 clamp 会把越界 index 写进 kbImageIndexRef → 高亮消失 + Enter 失效
+  return { ok: true, index: Math.min(currentIndex, total - 1) };
 }
 
 /** 进侧栏时保留当前分类,没有则用第一个 */
@@ -107,8 +109,9 @@ export function isSidebarCategoryActive(catId, activeCategoryId, fallbackFirstId
 //   return items[next];
 // }
 
-/** 循环切换数组元素:prev 不在数组中时从头开始,越界回绕 */
+/** 循环切换数组元素:prev 不在数组中时从头开始,越界回绕;空数组返回 undefined(调用方 self-guard) */
 export function cycleValue(arr, prev, delta) {
+  if (arr.length === 0) return undefined;
   const currentIndex = arr.indexOf(prev);
   if (currentIndex === -1) return arr[delta > 0 ? 0 : arr.length - 1];
   const next = (currentIndex + delta + arr.length) % arr.length;

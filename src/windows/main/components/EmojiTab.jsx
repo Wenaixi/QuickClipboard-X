@@ -169,16 +169,18 @@ const PreviewTooltipCard = ({ char, title, subtitle, codeLabel, sizeClass = 'tex
   );
 };
 
-const ImageGroupSidebarButton = ({
+const ImageGroupSidebarButton = forwardRef(function ImageGroupSidebarButton({
   group,
   isActive,
   onSelect,
   onEdit,
   isDropOver,
-  t
-}) => {
+  t,
+  buttonRef
+}, ref) {
   return (
     <div
+      ref={ref}
       data-image-group-name={group.name}
       className="group relative w-8 h-8 mx-auto mb-0.5"
     >
@@ -1143,6 +1145,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
                 onEdit={handleEditImageGroup}
                 isDropOver={imageDragOverGroup === group.name}
                 t={t}
+                ref={el => { sidebarButtonsRef.current[group.name] = el; }}
               />
             ))}
             {imageGroupLoading && imageGroups.length === 0 && (
