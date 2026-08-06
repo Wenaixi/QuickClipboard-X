@@ -76,8 +76,9 @@ export function resolveZoneNav(kbZone, action) {
     if (action === 'navigate-down') return { type: 'sidebar-move', delta: 1 };
     if (action === 'navigate-up') return { type: 'sidebar-move', delta: -1, onFail: 'enter-search' };
     if (action === 'tab-right') return { type: 'enter-grid' };
-    // 侧栏再 ← 直接切到收藏主标签(跳过 tabbar 模式层)
-    if (action === 'tab-left') return { type: 'switch-tab', tab: 'favorites' };
+    // 侧栏再 ← 切上一个子模式(图片→符号→表情),表情(最左)再 ← 切收藏主标签。
+    // 目标由组件按当前 emojiMode 决定(prev-mode 意图)。
+    if (action === 'tab-left') return { type: 'prev-mode' };
     return { type: 'none' };
   }
 

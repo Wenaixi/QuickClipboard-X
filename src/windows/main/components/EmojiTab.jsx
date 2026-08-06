@@ -1012,10 +1012,17 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
         // 交给 TabNavigation 聚焦模式层
         onEnterTabbar?.();
         break;
-      case 'switch-tab':
-        // 侧栏 ← 直接切主标签(收藏),不走 tabbar 模式层
-        setKbZone('outside');
-        onSwitchTab?.(intent.tab);
+      case 'prev-mode':
+        // 侧栏再 ← 切上一个子模式:图片→符号→表情;表情(最左)再 ← 切收藏主标签。
+        // 子模式 effect 会重置到该模式起点(第一个表情),键盘导航态自然衔接。
+        resetKbNav();
+        if (emojiMode === 'emoji') {
+          // 表情是最左子模式,再往左切收藏主标签
+          setKbZone('outside');
+          onSwitchTab?.('favorites');
+        } else {
+          onEmojiModeChange?.(cycleValue(['emoji', 'symbols', 'images'], emojiMode, -1));
+        }
         break;
       case 'tabbar-move':
         onTabbarMove?.(intent.delta);

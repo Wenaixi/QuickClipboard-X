@@ -101,7 +101,7 @@ describe('resolveZoneNav', () => {
       type: 'sidebar-move', delta: -1, onFail: 'enter-search',
     });
     assert.deepEqual(resolveZoneNav('sidebar', 'tab-right'), { type: 'enter-grid' });
-    assert.deepEqual(resolveZoneNav('sidebar', 'tab-left'), { type: 'switch-tab', tab: 'favorites' });
+    assert.deepEqual(resolveZoneNav('sidebar', 'tab-left'), { type: 'prev-mode' });
   });
   it('grid 首列 ← 越界进侧栏(不再是 tabbar)', () => {
     assert.deepEqual(resolveZoneNav('grid', 'tab-left'), {
@@ -137,7 +137,7 @@ describe('isSidebarCategoryActive', () => {
 });
 
 describe('端到端状态机路径(模拟用户)', () => {
-  it('outside→↓search→↓grid→←sidebar→←switch-tab(favorites)', () => {
+  it('outside→↓search→↓grid→←sidebar→←prev-mode(组件按 emojiMode 决定目标)', () => {
     let zone = 'outside';
     const step = (action) => {
       const intent = resolveZoneNav(zone, action);
@@ -146,7 +146,7 @@ describe('端到端状态机路径(模拟用户)', () => {
       else if (intent.type === 'enter-sidebar') zone = 'sidebar';
       else if (intent.type === 'enter-tabbar') zone = 'tabbar';
       else if (intent.type === 'deactivate') zone = 'outside';
-      else if (intent.type === 'switch-tab') zone = 'outside'; // 切走主标签,键盘导航退出
+      else if (intent.type === 'prev-mode') zone = 'outside'; // 切子模式/主标签由组件执行,键盘导航退出
       else if (intent.type === 'grid-move' && intent.onFail === 'enter-sidebar') {
         zone = 'sidebar';
       }
@@ -159,9 +159,9 @@ describe('端到端状态机路径(模拟用户)', () => {
     assert.equal(zone, 'grid');
     step('tab-left'); // grid 首列 ← 越界进侧栏(onFail enter-sidebar 由组件在 move 失败时触发)
     assert.equal(zone, 'sidebar');
-    const last = step('tab-left'); // 侧栏再 ← 直接切到收藏主标签
+    const last = step('tab-left'); // 侧栏再 ← 交给组件切上一个子模式/收藏
     assert.equal(zone, 'outside');
-    assert.deepEqual(last, { type: 'switch-tab', tab: 'favorites' });
+    assert.deepEqual(last, { type: 'prev-mode' });
     assert.equal(shouldForwardNavToEmoji(false, 'tab-left'), false);
     assert.equal(resolveOutsideAppAction('tab-left'), 'passthrough');
   });
