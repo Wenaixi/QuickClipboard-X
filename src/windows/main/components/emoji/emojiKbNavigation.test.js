@@ -97,7 +97,7 @@ describe('resolveZoneNav', () => {
       type: 'sidebar-move', delta: -1, onFail: 'enter-search',
     });
     assert.deepEqual(resolveZoneNav('sidebar', 'tab-right'), { type: 'enter-grid' });
-    assert.deepEqual(resolveZoneNav('sidebar', 'tab-left'), { type: 'enter-tabbar' });
+    assert.deepEqual(resolveZoneNav('sidebar', 'tab-left'), { type: 'switch-tab', tab: 'favorites' });
   });
   it('grid 首列 ← 越界进侧栏(不再是 tabbar)', () => {
     assert.deepEqual(resolveZoneNav('grid', 'tab-left'), {
@@ -128,7 +128,7 @@ describe('isSidebarCategoryActive', () => {
 });
 
 describe('端到端状态机路径(模拟用户)', () => {
-  it('outside→↓search→↓grid→←sidebar→←tabbar→←search→↑outside', () => {
+  it('outside→↓search→↓grid→←sidebar→←switch-tab(favorites)', () => {
     let zone = 'outside';
     const step = (action) => {
       const intent = resolveZoneNav(zone, action);
@@ -137,6 +137,7 @@ describe('端到端状态机路径(模拟用户)', () => {
       else if (intent.type === 'enter-sidebar') zone = 'sidebar';
       else if (intent.type === 'enter-tabbar') zone = 'tabbar';
       else if (intent.type === 'deactivate') zone = 'outside';
+      else if (intent.type === 'switch-tab') zone = 'outside'; // 切走主标签,键盘导航退出
       else if (intent.type === 'grid-move' && intent.onFail === 'enter-sidebar') {
         zone = 'sidebar';
       }
@@ -149,14 +150,9 @@ describe('端到端状态机路径(模拟用户)', () => {
     assert.equal(zone, 'grid');
     step('tab-left'); // grid 首列 ← 越界进侧栏(onFail enter-sidebar 由组件在 move 失败时触发)
     assert.equal(zone, 'sidebar');
-    step('tab-left'); // 侧栏再 ← 进 tabbar 模式层
-    assert.equal(zone, 'tabbar');
-    step('tab-left'); // tabbar 内 ←/→ 是模式/主标签移动,zone 不变
-    assert.equal(zone, 'tabbar');
-    step('navigate-up'); // tabbar ↑ 回搜索
-    assert.equal(zone, 'search');
-    step('navigate-up');
+    const last = step('tab-left'); // 侧栏再 ← 直接切到收藏主标签
     assert.equal(zone, 'outside');
+    assert.deepEqual(last, { type: 'switch-tab', tab: 'favorites' });
     assert.equal(shouldForwardNavToEmoji(false, 'tab-left'), false);
     assert.equal(resolveOutsideAppAction('tab-left'), 'passthrough');
   });

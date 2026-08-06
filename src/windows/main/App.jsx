@@ -404,6 +404,12 @@ function App() {
   const handleEmojiTabbarMove = (delta) => {
     tabNavigationRef.current?.kbNav?.(delta);
   };
+  // EmojiTab 侧栏 ← 请求切主标签(收藏)
+  const handleEmojiSwitchTab = (tab) => {
+    if (isMainTabVisible(tab, settings.visibleOptionalTabs)) {
+      setActiveTab(tab);
+    }
+  };
 
   // 表情页已激活时,←/→ 交给 dispatchEmojiNav 转发;outside 态 passthrough 切主标签
   const handleTabLeft = () => {
@@ -568,7 +574,7 @@ function App() {
   const ContentComponent = <div ref={contentDragRef} className="main-content-area flex-1 min-h-0 overflow-hidden relative pb-[8px] bg-qc-surface transition-colors duration-500">
       {activeTab === 'clipboard' && <ClipboardTab ref={clipboardTabRef} contentFilter={contentFilter} searchQuery={searchQuery} />}
       {activeTab === 'favorites' && <FavoritesTab ref={favoritesTabRef} contentFilter={contentFilter} searchQuery={searchQuery} />}
-      {activeTab === 'emoji' && <Suspense fallback={null}><EmojiTab ref={emojiTabRef} emojiMode={emojiMode} onEmojiModeChange={setEmojiMode} onEnterTabbar={handleEmojiEnterTabbar} onTabbarMove={handleEmojiTabbarMove} /></Suspense>}
+      {activeTab === 'emoji' && <Suspense fallback={null}><EmojiTab ref={emojiTabRef} emojiMode={emojiMode} onEmojiModeChange={setEmojiMode} onEnterTabbar={handleEmojiEnterTabbar} onTabbarMove={handleEmojiTabbarMove} onSwitchTab={handleEmojiSwitchTab} /></Suspense>}
     </div>;
   const ActionBarComponent = <MultiSelectActionBar activeTab={activeTab} />;
   const renderWorkspace = () => {
