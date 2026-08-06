@@ -225,7 +225,11 @@ where
         }
         Err(e) => {
             // 注册失败：插件可能在 Err 前部分写入 Windows 层，主动探测并
-            // 注销清理，避免残留吞键的"幽灵热键"。
+            // 注销清理，避免残留吞键的"幽灵热键"。探测按组合键而非 id：
+            // 若用户把两个快捷键配成相同组合键（配置错误），可能误摘
+            // 同组合键的其他 id 条目——属配置错误可接受，UI 侧已有
+            // duplicate 检测提示，不按 id 探测是刻意取舍（插件 API 只
+            // 提供按 Shortcut 的 is_registered/unregister）。
             if app.global_shortcut().is_registered(shortcut) {
                 let _ = app.global_shortcut().unregister(shortcut);
             }
