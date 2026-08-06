@@ -28,13 +28,14 @@ function getCollapsedFilterWidth(filterCount, groupButtonWidth) {
 }
 
 function getVisibleFilterCountByWidth(width, groupButtonWidth) {
-  for (let count = FILTER_IDS.length; count >= 1; count -= 1) {
+  // 最小显示 4 个:全部/文本/图片/链接 默认常驻,第 5 个(文件)折叠
+  for (let count = FILTER_IDS.length; count >= 4; count -= 1) {
     if (width >= getCollapsedFilterWidth(count, groupButtonWidth)) {
       return count;
     }
   }
 
-  return 1;
+  return 4;
 }
 
 function measureIndicator(activeElement, containerElement) {
@@ -99,7 +100,7 @@ function TabNavigation({
   const [filterAnimationKey, setFilterAnimationKey] = useState(0);
   const [emojiModeAnimationKey, setEmojiModeAnimationKey] = useState(0);
   const [isFilterExpanded, setIsFilterExpanded] = useState(false);
-  const [collapsedVisibleFilterCount, setCollapsedVisibleFilterCount] = useState(3);
+  const [collapsedVisibleFilterCount, setCollapsedVisibleFilterCount] = useState(4);
   const [sidebarFixedWidth, setSidebarFixedWidth] = useState(null);
   const sidebarTabsMainRef = useRef(null);
   const filterCollapseTimerRef = useRef(null);
@@ -331,7 +332,7 @@ function TabNavigation({
     }
 
     if (activeTab === 'emoji') {
-      setCollapsedVisibleFilterCount(3);
+      setCollapsedVisibleFilterCount(4);
       return undefined;
     }
 
