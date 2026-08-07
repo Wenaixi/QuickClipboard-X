@@ -1,88 +1,25 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readSource } from './readSource.js';
 
 // TabNavigation 死 props 与 stale tabbarFocusId 源码护栏测试
 // 背景：spec #3 审查发现 handleKbNav 切走主标签后 tabbarFocusId 不清,
 // 再次 ← 从 stale ID 起算漂移;standards #2 发现 onKbNav/onKbEnter 死 props。
+// F4 删除整个 tabbar 键盘死码链(enter-tabbar 意图无处产生)后,handleKbNav 系列
+// 已整体移除,以下 G2/G5 护栏断言改为"整链不存在"的否定形式。
 test('TabNavigation 不声明 onKbNav/onKbEnter 死 props', async () => {
-  const fs = await import('node:fs/promises');
-  const path = await import('node:path');
-  const { fileURLToPath } = await import('node:url');
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const src = await fs.readFile(path.join(here, '../TabNavigation.jsx'), 'utf8');
-  const body = src
-    .split('\n')
-    .filter((l) => !l.trimStart().startsWith('//'))
-    .join('\n');
+  const body = await readSource('../TabNavigation.jsx');
   assert.equal(body.includes('onKbNav'), false, '不应再声明 onKbNav prop');
   assert.equal(body.includes('onKbEnter'), false, '不应再声明 onKbEnter prop');
 });
 
-test('TabNavigation handleKbNav 保留 tabbarFocusId 不清 null(批处理吞高亮)', async () => {
-  const fs = await import('node:fs/promises');
-  const path = await import('node:path');
-  const { fileURLToPath } = await import('node:url');
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const src = await fs.readFile(path.join(here, '../TabNavigation.jsx'), 'utf8');
-  const body = src
-    .split('\n')
-    .filter((l) => !l.trimStart().startsWith('//'))
-    .join('\n');
-  const fnStart = body.indexOf('const handleKbNav');
-  const fnEnd = body.indexOf('useImperativeHandle', fnStart);
-  const fnBody = body.slice(fnStart, fnEnd);
-  assert.ok(fnBody.includes('focusTabbarButton'), 'handleKbNav 应调用 focusTabbarButton');
-  assert.ok(
-    /onTabChange\(/.test(fnBody),
-    'handleKbNav 应调 onTabChange'
-  );
-  assert.ok(
-    /onEmojiModeChange\(/.test(fnBody),
-    'handleKbNav 应调 onEmojiModeChange'
-  );
-  // F2 修:React 19 自动批处理把同 handler 内两次 setState 合并为最后一次,
-  // focusTabbarButton(nextId) 写 + 尾部 null 写 → 渲染值恒 null,
-  // isTabbarActive(id) 恒 false,tabbar 键盘遍历高亮永不渲染。
-  // 修复:null 写全部删除,tabbarFocusId 常驻当前焦点(再次 ← 正好从原位起算)。
-  assert.equal(
-    (fnBody.match(/setTabbarFocusId\(null\)/g) || []).length,
-    0,
-    'handleKbNav 内不得再有 setTabbarFocusId(null),React 19 批处理会把同帧 nextId 写覆盖为 null'
-  );
-});
-
-// G5: handleKbNav 硬编码 items=['emoji','symbols','images','favorites','clipboard']
-// 与 :116 tabs 过滤(visibleOptionalTabs)脱钩:隐藏 favorites 后循环到它 →
-// focus no-op + onTabChange('favorites') 被 App.jsx:88-93 守卫弹回 clipboard,瞬闪。
-// 修复:items 从可见 tabs 派生(emoji 子模式 3 项在前 + 可见主标签在后)。
-test('G5 handleKbNav items 从可见 tabs 派生,不再硬编码隐藏 tab', async () => {
-  const fs = await import('node:fs/promises');
-  const path = await import('node:path');
-  const { fileURLToPath } = await import('node:url');
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const src = await fs.readFile(path.join(here, '../TabNavigation.jsx'), 'utf8');
-  const body = src
-    .split('\n')
-    .filter((l) => !l.trimStart().startsWith('//'))
-    .join('\n');
-  const fnStart = body.indexOf('const handleKbNav');
-  const fnEnd = body.indexOf('useImperativeHandle', fnStart);
-  const fnBody = body.slice(fnStart, fnEnd);
-  // 不再有硬编码的 favorites/clipboard 字面 items 数组
-  assert.equal(
-    /const items = \['emoji', 'symbols', 'images', 'favorites', 'clipboard'\]/.test(fnBody),
-    false,
-    'handleKbNav 不应再硬编码 5 项 items 数组'
-  );
-  // items 必须从 tabs 派生
-  assert.ok(
-    /tabs\.map\(tab => tab\.id\)/.test(fnBody),
-    'items 必须从可见 tabs 派生(tabs.map)'
-  );
-  assert.ok(
-    /\[\.\.\.emojiModeItems, \.\.\.visibleMainTabs\]/.test(fnBody),
-    'items 应为 emoji 子模式 3 项在前 + 可见主标签在后'
-  );
+test('TabNavigation 整条 tabbar 键盘死码链已删(handleKbNav/tabbarFocusId/focusTabbar)', async () => {
+  const body = await readSource('../TabNavigation.jsx');
+  assert.equal(body.includes('handleKbNav'), false, '不应再有 handleKbNav');
+  assert.equal(body.includes('tabbarFocusId'), false, '不应再有 tabbarFocusId state');
+  assert.equal(body.includes('focusTabbarButton'), false, '不应再有 focusTabbarButton');
+  assert.equal(body.includes('focusTabbar'), false, '不应再有 focusTabbar');
+  assert.equal(body.includes('tabbarRefs'), false, '不应再有 tabbarRefs 收集');
 });
 
 // F6: handleEmojiTabbarEnter / TabNavigation.kbEnter 死代码
@@ -91,29 +28,13 @@ test('G5 handleKbNav items 从可见 tabs 派生,不再硬编码隐藏 tab', asy
 // 改到目标态,Enter 等价 no-op。TabNavigation useImperativeHandle 暴露的 kbEnter 也无 caller
 // (App.jsx handleEmojiTabbarEnter 无引用,EmojiTab 不知 onTabbarEnter prop)。
 test('F6 TabNavigation 不暴露 kbEnter 给外部', async () => {
-  const fs = await import('node:fs/promises');
-  const path = await import('node:path');
-  const { fileURLToPath } = await import('node:url');
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const src = await fs.readFile(path.join(here, '../TabNavigation.jsx'), 'utf8');
-  const body = src
-    .split('\n')
-    .filter((l) => !l.trimStart().startsWith('//'))
-    .join('\n');
+  const body = await readSource('../TabNavigation.jsx');
   assert.equal(body.includes('handleKbEnter'), false, 'TabNavigation 不应有 handleKbEnter 函数');
   assert.equal(/kbEnter:\s*handleKbEnter/.test(body), false, 'useImperativeHandle 不应暴露 kbEnter');
 });
 
 test('F6 App.jsx 不再有 handleEmojiTabbarEnter', async () => {
-  const fs = await import('node:fs/promises');
-  const path = await import('node:path');
-  const { fileURLToPath } = await import('node:url');
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const src = await fs.readFile(path.join(here, '../../App.jsx'), 'utf8');
-  const body = src
-    .split('\n')
-    .filter((l) => !l.trimStart().startsWith('//'))
-    .join('\n');
+  const body = await readSource('../../App.jsx');
   assert.equal(body.includes('handleEmojiTabbarEnter'), false, 'App 不应有 handleEmojiTabbarEnter');
   assert.equal(body.includes('kbEnter'), false, 'App 不应再调 kbEnter');
 });
@@ -121,23 +42,16 @@ test('F6 App.jsx 不再有 handleEmojiTabbarEnter', async () => {
 // F7: focusTabbarButton 对主标签调 el.focus?.(),但 TabButton 把 buttonRef 挂外层 div
 // 无 tabIndex → .focus() no-op;emoji 模式 tabbarRefs.current[id] = el.querySelector?.('button')
 // 拿到内层真 button。两路径不一致 → 主标签 tabbar 焦点无视觉/JS 生效。
-// 修复:TabButton.jsx outer div 加 tabIndex={-1} 让 div 编程可达,el.focus?.() 真正生效。
-test('F7 TabButton outer div 可编程 focus(tabIndex=-1)', async () => {
-  const fs = await import('node:fs/promises');
-  const path = await import('node:path');
-  const { fileURLToPath } = await import('node:url');
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const src = await fs.readFile(path.join(here, '../TabButton.jsx'), 'utf8');
-  const body = src
-    .split('\n')
-    .filter((l) => !l.trimStart().startsWith('//'))
-    .join('\n');
+// F4 已删整条 tabbar 键盘死码链(tabbarRefs/focusTabbarButton 均不存在),
+// 护栏改为否定形式:TabButton 不再需要可编程 focus 的 tabIndex。
+test('F7 TabButton 不再有 tabbar 编程焦点用 tabIndex=-1', async () => {
+  const body = await readSource('../TabButton.jsx');
   assert.ok(/ref=\{buttonRef\}/.test(body), 'TabButton 外层 div 应仍挂 buttonRef');
-  const outerDivMatch = body.match(/<div\s+ref=\{buttonRef\}[\s\S]{0,200}>/);
-  assert.ok(outerDivMatch, '应找到外层 div 标签块');
-  assert.ok(
-    outerDivMatch[0].includes('tabIndex={-1}'),
-    '外层 div 必须 tabIndex={-1},否则 focus no-op'
+  // F4 删死码链后,外层 div 的 tabIndex={-1} 不再有任何调用方(focusTabbarButton 已删)
+  assert.equal(
+    body.includes('tabIndex={-1}'),
+    false,
+    '外层 div 不应再有 tabIndex={-1}(唯一调用方 focusTabbarButton 已随死码链删除)'
   );
 });
 

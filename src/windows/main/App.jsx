@@ -399,13 +399,6 @@ function App() {
     if (outside === 'ignore') return true;
     return false;
   };
-  // EmojiTab 请求进入 tabbar(模式层)时,交给 TabNavigation 聚焦
-  const handleEmojiEnterTabbar = () => {
-    tabNavigationRef.current?.focusTabbar?.();
-  };
-  const handleEmojiTabbarMove = (delta) => {
-    tabNavigationRef.current?.kbNav?.(delta);
-  };
   // EmojiTab 侧栏 ← 请求切主标签(收藏)
   const handleEmojiSwitchTab = (tab) => {
     if (isMainTabVisible(tab, settings.visibleOptionalTabs)) {
@@ -595,7 +588,7 @@ function App() {
   const ContentComponent = <div ref={contentDragRef} className="main-content-area flex-1 min-h-0 overflow-hidden relative pb-[8px] bg-qc-surface transition-colors duration-500">
       {activeTab === 'clipboard' && <ClipboardTab ref={clipboardTabRef} contentFilter={contentFilter} searchQuery={searchQuery} />}
       {activeTab === 'favorites' && <FavoritesTab ref={favoritesTabRef} contentFilter={contentFilter} searchQuery={searchQuery} />}
-      {activeTab === 'emoji' && <Suspense fallback={null}><EmojiTab ref={emojiTabRef} emojiMode={emojiMode} onEmojiModeChange={handleEmojiModeChange} onEnterTabbar={handleEmojiEnterTabbar} onTabbarMove={handleEmojiTabbarMove} onSwitchTab={handleEmojiSwitchTab} searchQuery={searchQuery} /></Suspense>}
+      {activeTab === 'emoji' && <Suspense fallback={null}><EmojiTab ref={emojiTabRef} emojiMode={emojiMode} onEmojiModeChange={handleEmojiModeChange} onSwitchTab={handleEmojiSwitchTab} searchQuery={searchQuery} /></Suspense>}
     </div>;
   const ActionBarComponent = <MultiSelectActionBar activeTab={activeTab} />;
   const renderWorkspace = () => {

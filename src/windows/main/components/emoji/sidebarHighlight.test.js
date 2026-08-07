@@ -1,20 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readSource } from './readSource.js';
 
 // EmojiTab 侧栏高亮双状态收敛护栏
 // background: standards #1 发现 activeCategory useState 与 activeCategoryRef
 // 双状态来源,ref 是决策真值(enterSidebar/moveSidebarBy),state 仅高亮渲染用。
 
 test('EmojiTab 侧栏高亮只用 ref 单一真值', async () => {
-  const fs = await import('node:fs/promises');
-  const path = await import('node:path');
-  const { fileURLToPath } = await import('node:url');
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const src = await fs.readFile(path.join(here, '../EmojiTab.jsx'), 'utf8');
-  const body = src
-    .split('\n')
-    .filter((l) => !l.trimStart().startsWith('//'))
-    .join('\n');
+  const body = await readSource('../EmojiTab.jsx');
   // 删 useState 双状态:activeCategory state 不得再出现
   assert.equal(
     /const \[activeCategory, setActiveCategory\] = useState/.test(body),
@@ -38,15 +31,7 @@ test('EmojiTab 侧栏高亮只用 ref 单一真值', async () => {
 });
 
 test('updateSidebarHighlight 必须 setSidebarHighlightTick 递增(tick 信号)', async () => {
-  const fs = await import('node:fs/promises');
-  const path = await import('node:path');
-  const { fileURLToPath } = await import('node:url');
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const src = await fs.readFile(path.join(here, '../EmojiTab.jsx'), 'utf8');
-  const body = src
-    .split('\n')
-    .filter((l) => !l.trimStart().startsWith('//'))
-    .join('\n');
+  const body = await readSource('../EmojiTab.jsx');
   const start = body.indexOf('const updateSidebarHighlight');
   assert.notEqual(start, -1, '缺 updateSidebarHighlight 定义');
   const next = body.indexOf('useEffect', start);
