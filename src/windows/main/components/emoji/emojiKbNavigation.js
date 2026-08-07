@@ -92,19 +92,6 @@ export function isSidebarCategoryActive(catId, activeCategoryId, fallbackFirstId
   return catId === fallbackFirstId;
 }
 
-/**
- * tabbar 焦点序列:模式(emoji/symbols/images) + 主标签(收藏/剪贴板)。
- * 返回移动 delta 后的目标 id;越界循环。
- */
-// F9 删除:resolveTabbarMove 生产 0 调用,TabNavigation handleKbNav 自管内联循环公式
-//  export function resolveTabbarMove(items, currentId, delta) {
-//   if (!items || items.length === 0) return null;
-//   let idx = items.findIndex((item) => item === currentId);
-//   if (idx < 0) idx = 0;
-//   const next = (idx + delta + items.length) % items.length;
-//   return items[next];
-// }
-
 /** 循环切换数组元素:prev 不在数组中时从头开始,越界回绕;空数组返回 undefined(调用方 self-guard) */
 export function cycleValue(arr, prev, delta) {
   if (arr.length === 0) return undefined;
