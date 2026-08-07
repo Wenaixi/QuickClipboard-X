@@ -74,7 +74,7 @@ test('G3 EmojiTab 暴露 resetKbNav/getKbZone 供 App 过滤热键路径使用',
   );
 });
 
-test('G3 App handleFilterLeft/Right 在 setEmojiMode 前调 resetKbNav(过滤热键不踢出键盘导航态)', async () => {
+test('G3 App handleFilterLeft/Right 在 setEmojiMode 前调 restoreKbNav(过滤热键不踢出键盘导航态)', async () => {
   const fs = await import('node:fs/promises');
   const path = await import('node:path');
   const { fileURLToPath } = await import('node:url');
@@ -86,14 +86,15 @@ test('G3 App handleFilterLeft/Right 在 setEmojiMode 前调 resetKbNav(过滤热
     .join('\n');
   const filterLeft = body.slice(body.indexOf('const handleFilterLeft'), body.indexOf('const handleFilterRight'));
   const filterRight = body.slice(body.indexOf('const handleFilterRight'), body.indexOf('const handleToggleSearch'));
-  // 两个 handler 都必须在 setEmojiMode 前调用 resetKbNav
+  // F1-2:F1-3 后 handler 经 handleEmojiModeChange 切模式(清搜索+setEmojiMode),
+  // 恢复意图仍在 setEmojiMode 前挂起。两个 handler 都必须在模式切换前调用 restoreKbNav
   assert.ok(
-    /resetKbNav[\s\S]*?setEmojiMode/.test(filterLeft),
-    'handleFilterLeft 必须在 setEmojiMode 前调 resetKbNav'
+    /restoreKbNav[\s\S]*?handleEmojiModeChange/.test(filterLeft),
+    'handleFilterLeft 必须在切模式前调 restoreKbNav'
   );
   assert.ok(
-    /resetKbNav[\s\S]*?setEmojiMode/.test(filterRight),
-    'handleFilterRight 必须在 setEmojiMode 前调 resetKbNav'
+    /restoreKbNav[\s\S]*?handleEmojiModeChange/.test(filterRight),
+    'handleFilterRight 必须在切模式前调 restoreKbNav'
   );
 });
 

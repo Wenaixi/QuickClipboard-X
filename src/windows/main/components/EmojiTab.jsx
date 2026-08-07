@@ -255,6 +255,8 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
   kbZoneRef.current = kbZone;
   const imageLibraryRef = useRef(null);
   const prevEmojiModeRef = useRef(emojiMode);
+  // F1-2:过滤热键切子模式的挂起恢复意图(zone),由 emojiMode effect 消费
+  const pendingRestoreZoneRef = useRef(null);
   const activeImageDragItemsRef = useRef([]);
   const imagePluginDragClearTimerRef = useRef(null);
   const scrollContainerRef = useRef(null);
@@ -600,6 +602,29 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
   useEffect(() => {
     // 切换子模式时重置键盘导航状态:回到 outside(无高亮,←/→ 恢复原功能)
     // emojiKbActive 由下方 useEffect([kbZone]) 单点兜底,这里只改 zone
+    // F1-2:过滤热键(⌘+←/→)切子模式前 App 已经 restoreKbNav 挂起恢复意图,
+    // 在数据重建后按意图恢复 grid(search),而不是一律重置回 outside。
+    const pendingZone = pendingRestoreZoneRef.current;
+    pendingRestoreZoneRef.current = null;
+    if (pendingZone) {
+      setKbZone(pendingZone);
+      if (pendingZone === 'grid') {
+        if (showImages) {
+          if (imageLibraryRef.current?.activateKb?.()) {
+            return;
+          }
+        } else {
+          const data = virtualDataRef.current;
+          const firstRowIndex = data.findIndex(section => section.type === 'row');
+          if (firstRowIndex !== -1) {
+            setKbRow(firstRowIndex);
+            setKbCol(0);
+            return;
+          }
+        }
+      }
+      return;
+    }
     setKbZone('outside');
     setKbRow(-1);
     setKbCol(0);
@@ -909,6 +934,14 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
   }, []);
   const getKbZone = useCallback(() => kbZoneRef.current, []);
 
+  // F1-2:过滤热键(App handleFilterLeft/Right)切子模式前调用——保存当前 zone
+  // 到挂起恢复意图,emojiMode effect 在数据重建后恢复,保住键盘导航态
+  // (grid 高亮/搜索激活),取代旧 G3 resetKbNav no-op(同值短路不生效,
+  // effect 仍无条件重置)。
+  const restoreKbNav = useCallback((zone) => {
+    pendingRestoreZoneRef.current = zone || null;
+  }, []);
+
   const moveSidebarBy = useCallback((delta) => {
     const cats = currentCategories;
     if (cats.length === 0) return false;
@@ -1121,8 +1154,9 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
     executeCurrentItem,
     handleNavAction,
     resetKbNav,
-    getKbZone
-  }), [executeCurrentItem, handleNavAction, resetKbNav, getKbZone]);
+    getKbZone,
+    restoreKbNav
+  }), [executeCurrentItem, handleNavAction, resetKbNav, getKbZone, restoreKbNav]);
 
   const moveActiveImageToGroup = useCallback(async (targetGroup) => {
     const items = activeImageDragItemsRef.current || [];

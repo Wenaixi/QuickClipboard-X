@@ -14,7 +14,10 @@ const FILTER_BUTTON_GAP = 4;
 const GROUP_BUTTON_WIDTH = 60;
 const GROUP_REVEAL_EDGE_ZONE = 24;
 const GROUP_REVEAL_HIDE_DELAY = 300;
-const FILTER_IDS = ['all', 'text', 'image', 'file', 'link'];
+// 过滤器选项常量:App.jsx 过滤热键(⌘+←/→)也复用,避免硬编码数组漂移
+export const FILTER_IDS = ['all', 'text', 'image', 'file', 'link'];
+// emoji 子模式顺序常量:App.jsx 过滤热键与 handleKbNav 共用
+export const EMOJI_MODE_IDS = ['emoji', 'symbols', 'images'];
 
 function getCollapsedFilterWidth(filterCount, groupButtonWidth) {
   if (filterCount <= 0) {
@@ -205,7 +208,7 @@ function TabNavigation({
     // favorites 后循环到它 → focus no-op + onTabChange('favorites') 被
     // App.jsx:88-93 守卫弹回 clipboard,瞬闪。顺序:emoji 子模式 3 项在前 +
     // 可见主标签在后。
-    const emojiModeItems = ['emoji', 'symbols', 'images'];
+    const emojiModeItems = EMOJI_MODE_IDS;
     // 主标签顺序:clipboard 恒可见 + favorites 按可见性(tabs 已过滤)
     const visibleMainTabs = tabs.map(tab => tab.id);
     const items = [...emojiModeItems, ...visibleMainTabs];
