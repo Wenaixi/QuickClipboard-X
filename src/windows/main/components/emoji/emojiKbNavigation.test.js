@@ -113,11 +113,12 @@ describe('resolveZoneNav', () => {
       type: 'grid-move', dRow: 0, dCol: 1, onFail: 'grid-home',
     });
   });
-  it('tabbar: up→search down→grid 左右→tabbar-move', () => {
-    assert.deepEqual(resolveZoneNav('tabbar', 'navigate-up'), { type: 'enter-search' });
-    assert.deepEqual(resolveZoneNav('tabbar', 'navigate-down'), { type: 'enter-grid' });
-    assert.deepEqual(resolveZoneNav('tabbar', 'tab-left'), { type: 'tabbar-move', delta: -1 });
-    assert.deepEqual(resolveZoneNav('tabbar', 'tab-right'), { type: 'tabbar-move', delta: 1 });
+  // F4: 5 个 zone 分支无一产出 enter-tabbar 意图(grid ← 是 enter-sidebar、→ 是 grid-home),
+  // kbZone='tabbar' 永远不可达,tabbar 分支本身是死码 → 删除后任何 action 都 none
+  it('tabbar zone 不可达:任何 action 返回 none(防死码复活)', () => {
+    for (const a of ['navigate-up', 'navigate-down', 'tab-left', 'tab-right']) {
+      assert.deepEqual(resolveZoneNav('tabbar', a), { type: 'none' });
+    }
   });
 });
 
@@ -144,7 +145,6 @@ describe('端到端状态机路径(模拟用户)', () => {
       if (intent.type === 'activate-search' || intent.type === 'enter-search') zone = 'search';
       else if (intent.type === 'enter-grid') zone = 'grid';
       else if (intent.type === 'enter-sidebar') zone = 'sidebar';
-      else if (intent.type === 'enter-tabbar') zone = 'tabbar';
       else if (intent.type === 'deactivate') zone = 'outside';
       else if (intent.type === 'prev-mode') zone = 'outside'; // 切子模式/主标签由组件执行,键盘导航退出
       else if (intent.type === 'grid-move' && intent.onFail === 'enter-sidebar') {
@@ -167,10 +167,13 @@ describe('端到端状态机路径(模拟用户)', () => {
   });
 });
 
-describe('F5 applyNavIntent 进 tabbar 必须 setKbZone(tabbar)', () => {
-  // 回归护栏:旧实现 enter-tabbar 分支只调 onEnterTabbar?.(),kbZone 永远到不了 'tabbar',
-  // resolveZoneNav('tabbar', ...) 死代码,tabbar 内 ←/→ 失能
-  it('case enter-tabbar 分支体内必须 setKbZone("tabbar")', async () => {
+// F3 resetKbToOutside 收敛(去重置四连重复):blurSearchInput/resetKbNav/emojiMode
+// effect/越界 effect 四处内联同一重置四连,收敛为共享 resetKbToOutside
+describe('F3 resetKbToOutside 收敛(去重置四连重复)', () => {
+  // 回归护栏:blurSearchInput/resetKbNav/emojiMode effect/越界 effect 四处内联同一
+  // 重置四连(setKbZone outside + kbRow -1 + kbCol 0 + resetKbIndex)。收敛为共享
+  // resetKbToOutside 后,四连只应出现在定义处,其余调用点一律复用。
+  it('重置四连只出现一次,且 blurSearchInput/resetKbNav 为共享函数别名', async () => {
     const fs = await import('node:fs/promises');
     const path = await import('node:path');
     const { fileURLToPath } = await import('node:url');
@@ -180,32 +183,66 @@ describe('F5 applyNavIntent 进 tabbar 必须 setKbZone(tabbar)', () => {
       .split('\n')
       .filter((l) => !l.trimStart().startsWith('//'))
       .join('\n');
-    const start = body.indexOf("case 'enter-tabbar':");
-    assert.notEqual(start, -1, 'applyNavIntent 缺 enter-tabbar 分支');
-    const nextCase = body.indexOf('case ', start + 1);
-    const branch = body.slice(start, nextCase === -1 ? body.length : nextCase);
-    assert.ok(
-      branch.includes("setKbZone('tabbar')"),
-      'enter-tabbar 分支必须 setKbZone("tabbar"),否则 kbZone 死码'
-    );
+
+    const resetBody = /setKbZone\('outside'\)[\s\S]{0,80}?setKbRow\(-1\)[\s\S]{0,80}?setKbCol\(0\)[\s\S]{0,80}?imageLibraryRef\.current\?\.resetKbIndex\?\.\(\)/g;
+    const count = (body.match(resetBody) || []).length;
+    assert.equal(count, 1, '重置四连应只存在于 resetKbToOutside 定义处,其余调用点必须复用');
+    assert.ok(body.includes('const resetKbToOutside = useCallback('), '缺共享重置函数 resetKbToOutside');
+    assert.ok(body.includes('const blurSearchInput = resetKbToOutside'), 'blurSearchInput 应复用共享函数,不再内联重复体');
+    assert.ok(body.includes('const resetKbNav = resetKbToOutside'), 'resetKbNav 应复用共享函数,不再内联重复体');
+  });
+});
+
+// F4: tabbar zone 死码已删(enter-tabbar 意图无处产生),护栏改为否定形式
+describe('F4 tabbar 死码已删(enter-tabbar 意图无处产生)', () => {
+  it('EmojiTab applyNavIntent 不再有 enter-tabbar/tabbar-move 分支', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const src = await fs.readFile(path.join(here, '../EmojiTab.jsx'), 'utf8');
+    const body = src
+      .split('\n')
+      .filter((l) => !l.trimStart().startsWith('//'))
+      .join('\n');
+    assert.equal(body.includes("case 'enter-tabbar':"), false, 'applyNavIntent 不应再有 enter-tabbar 分支');
+    assert.equal(body.includes("case 'tabbar-move':"), false, 'applyNavIntent 不应再有 tabbar-move 分支');
+    assert.equal(body.includes("intent.onFail === 'enter-tabbar'"), false, 'grid-move 不应再有 onFail enter-tabbar');
+    assert.equal(body.includes('onEnterTabbar'), false, 'EmojiTab 不应再引用 onEnterTabbar prop');
+    assert.equal(body.includes('onTabbarMove'), false, 'EmojiTab 不应再引用 onTabbarMove prop');
   });
 
-  it('grid-move onFail enter-tabbar 分支体内也必须 setKbZone("tabbar")', async () => {
+  it('App.jsx 不再有 handleEmojiEnterTabbar/handleEmojiTabbarMove 与 props 转发', async () => {
     const fs = await import('node:fs/promises');
     const path = await import('node:path');
     const { fileURLToPath } = await import('node:url');
     const here = path.dirname(fileURLToPath(import.meta.url));
-    const src = await fs.readFile(path.join(here, '../EmojiTab.jsx'), 'utf8');
+    const src = await fs.readFile(path.join(here, '../../App.jsx'), 'utf8');
     const body = src
       .split('\n')
       .filter((l) => !l.trimStart().startsWith('//'))
       .join('\n');
-    const match = body.match(/if \(!ok && intent\.onFail === 'enter-tabbar'\)[\s\S]{0,200}/);
-    assert.ok(match, 'applyNavIntent 缺 grid-move onFail enter-tabbar 分支');
-    assert.ok(
-      match[0].includes("setKbZone('tabbar')"),
-      'onFail enter-tabbar 分支必须 setKbZone("tabbar"),否则网格 ← 越界后 kbZone 仍为 grid'
-    );
+    assert.equal(body.includes('handleEmojiEnterTabbar'), false, 'App 不应再有 handleEmojiEnterTabbar');
+    assert.equal(body.includes('handleEmojiTabbarMove'), false, 'App 不应再有 handleEmojiTabbarMove');
+    assert.equal(body.includes('onEnterTabbar='), false, 'App 不应再传 onEnterTabbar prop');
+    assert.equal(body.includes('onTabbarMove='), false, 'App 不应再传 onTabbarMove prop');
+    assert.equal(body.includes('focusTabbar'), false, 'App 不应再调 focusTabbar');
+    assert.equal(body.includes('kbNav'), false, 'App 不应再调 kbNav');
+  });
+
+  it('TabNavigation 不再暴露 focusTabbar/kbNav 死接口', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const src = await fs.readFile(path.join(here, '../TabNavigation.jsx'), 'utf8');
+    const body = src
+      .split('\n')
+      .filter((l) => !l.trimStart().startsWith('//'))
+      .join('\n');
+    assert.equal(body.includes('focusTabbar'), false, 'TabNavigation 不应再有 focusTabbar');
+    assert.equal(body.includes('handleKbNav'), false, 'TabNavigation 不应再有 handleKbNav');
+    assert.equal(body.includes('kbNav'), false, 'useImperativeHandle 不应再暴露 kbNav');
   });
 });
 
@@ -265,10 +302,78 @@ describe('App 转发契约源码护栏', () => {
   });
 });
 
+// F5 gridHome 图片分支源码护栏
+describe('F5 gridHome 图片分支源码护栏', () => {
+  const readSrc = async (rel) => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    return fs.readFile(path.join(here, rel), 'utf8');
+  };
+
+  it('EmojiTab gridHome 不再引用未声明的 kbImageIndexRef', async () => {
+    // 回归:gridHome 图片分支读 kbImageIndexRef(仅 ImageLibraryTab 声明),
+    // → 后 navigateRight 越界 onFail grid-home 时直接 ReferenceError 崩溃
+    const src = await readSrc('../EmojiTab.jsx');
+    const body = src
+      .split('\n')
+      .filter((l) => !l.trimStart().startsWith('//'))
+      .join('\n');
+    const start = body.indexOf('const gridHome = useCallback');
+    assert.notEqual(start, -1, '缺 gridHome 函数');
+    const end = body.indexOf('}, [', start);
+    const fn = body.slice(start, end === -1 ? body.length : end);
+    assert.equal(fn.includes('kbImageIndexRef'), false, 'gridHome 不应引用未声明的 kbImageIndexRef');
+  });
+
+  it('ImageLibraryTab useImperativeHandle 暴露 getKbIndex', async () => {
+    // 契约:gridHome 图片分支经 api.getKbIndex 读当前 index,不依赖 EmojiTab 侧变量
+    const src = await readSrc('ImageLibraryTab.jsx');
+    const body = src
+      .split('\n')
+      .filter((l) => !l.trimStart().startsWith('//'))
+      .join('\n');
+    const start = body.indexOf('useImperativeHandle');
+    assert.notEqual(start, -1, '缺 useImperativeHandle');
+    assert.ok(body.includes('getKbIndex:'), 'useImperativeHandle 必须暴露 getKbIndex');
+    assert.ok(body.includes('kbImageIndexRef.current'), 'getKbIndex 应返回 kbImageIndexRef.current');
+  });
+
+  it('ImageLibraryTab goHome 用自身 imageCols 回到行首,EmojiTab 不再 navigateUp({rows})', async () => {
+    // 回归:navigateUp({rows}) 参数被忽略只上移 1 行;且行数用 EmojiTab 的 gridCols(表情列数)
+    // 计算与图片网格列数不符。goHome 用图片自身 imageCols 求行首,真正回当前分类第一格
+    const libSrc = await readSrc('ImageLibraryTab.jsx');
+    const libBody = libSrc
+      .split('\n')
+      .filter((l) => !l.trimStart().startsWith('//'))
+      .join('\n');
+    const start = libBody.indexOf('goHome:');
+    assert.notEqual(start, -1, 'useImperativeHandle 必须暴露 goHome');
+    assert.ok(
+      libBody.slice(start, start + 300).includes('Math.floor(current / imageCols) * imageCols'),
+      'goHome 必须用自身 imageCols 计算行首,不能靠调用方传行数'
+    );
+
+    const emojiSrc = await readSrc('../EmojiTab.jsx');
+    const emojiBody = emojiSrc
+      .split('\n')
+      .filter((l) => !l.trimStart().startsWith('//'))
+      .join('\n');
+    const ghStart = emojiBody.indexOf('const gridHome = useCallback');
+    assert.notEqual(ghStart, -1, '缺 gridHome 函数');
+    const ghEnd = emojiBody.indexOf('}, [', ghStart);
+    const ghFn = emojiBody.slice(ghStart, ghEnd === -1 ? emojiBody.length : ghEnd);
+    assert.ok(ghFn.includes('goHome'), 'gridHome 图片分支应调 api.goHome()');
+    assert.equal(ghFn.includes('navigateUp({ rows'), false, 'gridHome 不应再调 navigateUp({rows})');
+  });
+});
+
 // F9: resolveTabbarMove 生产 0 调用(仅测试用),TabNavigation handleKbNav 已内联
 // (idx + delta + items.length) % items.length。未知 current 时 resolveTabbarMove 未知
 // fallback idx=0(恒从 emoji 开始),与 cycleValue delta-aware fallback 分叉。删死代码
 // 函数 + 测试 describe 块 + 文件 import 一行。
+// F4 后续:handleKbNav 整链已随 tabbar 死码删除,内联公式断言一并移除(无对象可断言)。
 describe('F9 resolveTabbarMove 已删(死导出清理)', () => {
   it('emojiKbNavigation.js 不导出 resolveTabbarMove', async () => {
     const fs = await import('node:fs/promises');
@@ -305,23 +410,6 @@ describe('F9 resolveTabbarMove 已删(死导出清理)', () => {
       /describe\(\s*['"`]resolveTabbarMove['"`]\s*,/.test(src),
       false,
       '不应再 describe("resolveTabbarMove"),description 文本除外'
-    );
-  });
-
-  it('TabNavigation handleKbNav 内联 (idx+delta+len)%len', async () => {
-    // 反向证据:内联公式必须存在
-    const fs = await import('node:fs/promises');
-    const path = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const here = path.dirname(fileURLToPath(import.meta.url));
-    const src = await fs.readFile(path.join(here, '../TabNavigation.jsx'), 'utf8');
-    const body = src
-      .split('\n')
-      .filter((l) => !l.trimStart().startsWith('//'))
-      .join('\n');
-    assert.ok(
-      /\(idx\s*\+\s*delta\s*\+\s*items\.length\)\s*%\s*items\.length/.test(body),
-      'handleKbNav 应内联循环公式'
     );
   });
 });
