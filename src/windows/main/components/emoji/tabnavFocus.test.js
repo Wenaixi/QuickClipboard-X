@@ -18,7 +18,7 @@ test('TabNavigation 不声明 onKbNav/onKbEnter 死 props', async () => {
   assert.equal(body.includes('onKbEnter'), false, '不应再声明 onKbEnter prop');
 });
 
-test('TabNavigation 切走主标签/子模式时清 tabbarFocusId', async () => {
+test('TabNavigation handleKbNav 保留 tabbarFocusId 不清 null(批处理吞高亮)', async () => {
   const fs = await import('node:fs/promises');
   const path = await import('node:path');
   const { fileURLToPath } = await import('node:url');
@@ -28,11 +28,9 @@ test('TabNavigation 切走主标签/子模式时清 tabbarFocusId', async () => 
     .split('\n')
     .filter((l) => !l.trimStart().startsWith('//'))
     .join('\n');
-  // 清 stale 焦点语义改为"切换生效后统一清",不再在每个分支内重复写
   const fnStart = body.indexOf('const handleKbNav');
   const fnEnd = body.indexOf('useImperativeHandle', fnStart);
   const fnBody = body.slice(fnStart, fnEnd);
-  // onTabChange 调用前不再要求 setTabbarFocusId(null)(G2 修后焦点先写后清,批处理只留最后一次)
   assert.ok(fnBody.includes('focusTabbarButton'), 'handleKbNav 应调用 focusTabbarButton');
   assert.ok(
     /onTabChange\(/.test(fnBody),
@@ -42,17 +40,14 @@ test('TabNavigation 切走主标签/子模式时清 tabbarFocusId', async () => 
     /onEmojiModeChange\(/.test(fnBody),
     'handleKbNav 应调 onEmojiModeChange'
   );
-  // G2: 5 个分支内的 null 写全部收敛为"切换生效后统一清"
+  // F2 修:React 19 自动批处理把同 handler 内两次 setState 合并为最后一次,
+  // focusTabbarButton(nextId) 写 + 尾部 null 写 → 渲染值恒 null,
+  // isTabbarActive(id) 恒 false,tabbar 键盘遍历高亮永不渲染。
+  // 修复:null 写全部删除,tabbarFocusId 常驻当前焦点(再次 ← 正好从原位起算)。
   assert.equal(
     (fnBody.match(/setTabbarFocusId\(null\)/g) || []).length,
-    1,
-    'handleKbNav 内 setTabbarFocusId(null) 只能有 1 处(统一清),否则 React 批处理吞掉 focus 高亮'
-  );
-  // 统一清必须位于分支 if/else 链之后(以最后一个分支调用 onEmojiModeChange('images') 为锚)
-  const lastImagesCallIdx = fnBody.indexOf("onEmojiModeChange('images')");
-  assert.ok(
-    lastImagesCallIdx >= 0 && fnBody.lastIndexOf('setTabbarFocusId(null)') > lastImagesCallIdx,
-    '统一清 null 必须在分支链之后,否则高亮仍被吞'
+    0,
+    'handleKbNav 内不得再有 setTabbarFocusId(null),React 19 批处理会把同帧 nextId 写覆盖为 null'
   );
 });
 
@@ -143,5 +138,55 @@ test('F7 TabButton outer div 可编程 focus(tabIndex=-1)', async () => {
   assert.ok(
     outerDivMatch[0].includes('tabIndex={-1}'),
     '外层 div 必须 tabIndex={-1},否则 focus no-op'
+  );
+});
+
+// F2-3: collapsedVisibleFilterCount 最小 4 后(commit 6af73f0f 产品决策:
+// 全部/文本/图片/链接常驻,文件折叠),useFloatingExpandedFilters =
+// !isFilterAutoExpanded && count<=2 && ... 恒 false,浮动展开过滤分支
+// (absolute 浮层)成为死代码。保留 4 个设计,删除死分支与恒 false 派生。
+test('TabNavigation 无 useFloatingExpandedFilters 恒 false 死逻辑与浮动展开分支', async () => {
+  const fs = await import('node:fs/promises');
+  const path = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const src = await fs.readFile(path.join(here, '../TabNavigation.jsx'), 'utf8');
+  const body = src
+    .split('\n')
+    .filter((l) => !l.trimStart().startsWith('//'))
+    .join('\n');
+  // 恒 false 派生已删
+  assert.equal(body.includes('useFloatingExpandedFilters'), false, '不应再有 useFloatingExpandedFilters(最小过滤数 4 后恒 false)');
+  // 浮动展开浮层(absolute 弹出)已删,只保留内联展开
+  assert.equal(
+    /top-\[calc\(100%\+6px\)\]/.test(body),
+    false,
+    '浮动展开浮层 div 已删除(死代码)'
+  );
+  // 最小 4 个的常驻设计保留
+  assert.ok(body.includes("count >= 4"), 'getVisibleFilterCountByWidth 最小 4 应保留(产品决策)');
+  assert.ok(body.includes('return 4;'), 'fallback 4 应保留');
+});
+// F2-2: handleGroupRevealMouseMove 提前 return 分支(按钮已滑出/面板打开时)
+// 必须清除挂起的 300ms 隐藏定时器,否则按钮滑出→鼠标移出→300ms 内移回
+// (命中提前 return)→定时器到期→按钮在悬停中收起。对称语义:边缘命中分支
+// (502-505)移回即取消隐藏,提前 return 分支同样应取消。
+test('TabNavigation 分组按钮悬停中移回不清除隐藏定时器', async () => {
+  const fs = await import('node:fs/promises');
+  const path = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const src = await fs.readFile(path.join(here, '../TabNavigation.jsx'), 'utf8');
+  const body = src
+    .split('\n')
+    .filter((l) => !l.trimStart().startsWith('//'))
+    .join('\n');
+  const fnStart = body.indexOf('const handleGroupRevealMouseMove');
+  const fnEnd = body.indexOf('const handleGroupRevealMouseLeave', fnStart);
+  const fnBody = body.slice(fnStart, fnEnd);
+  // 提前 return 分支(isGroupButtonRevealed 为 true 时)必须先清定时器再 return
+  assert.ok(
+    /if \(isSidebarLayout \|\| isGroupsPanelOpen \|\| isGroupButtonRevealed\) \{[\s\S]{0,300}clearTimeout\(groupRevealTimerRef\.current\)[\s\S]{0,300}return;/.test(fnBody),
+    '悬停中(已 reveal)移回时,提前 return 分支必须先 clearTimeout 隐藏定时器,否则悬停中按钮收起'
   );
 });
