@@ -1,5 +1,7 @@
 mod global;
 mod navigation;
+#[cfg(test)]
+pub mod test_utils;
 
 pub use global::{
     get_shortcut_status,
@@ -50,21 +52,10 @@ pub fn disable_navigation_hotkeys() {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use super::test_utils::{fn_body, strip_line_comments};
 
     fn hotkey_source() -> String {
-        fs::read_to_string(format!(
-            "{}/src/services/system/hotkey.rs",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .expect("读取 hotkey.rs 失败")
-    }
-
-    fn strip_line_comments(src: &str) -> String {
-        src.lines()
-            .filter(|l| !l.trim_start().starts_with("//"))
-            .collect::<Vec<_>>()
-            .join("\n")
+        super::test_utils::source_file("src/services/system/hotkey.rs")
     }
 
     // F1: 托盘菜单 toggle 关闭热键调用 crate::hotkey::unregister_all()

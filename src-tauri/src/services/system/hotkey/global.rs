@@ -1033,44 +1033,10 @@ fn reload_from_settings_inner() -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use super::super::test_utils::{fn_body, strip_line_comments};
 
     fn global_source() -> String {
-        fs::read_to_string(format!(
-            "{}/src/services/system/hotkey/global.rs",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .expect("读取 global.rs 失败")
-    }
-
-    fn strip_line_comments(src: &str) -> String {
-        src.lines()
-            .filter(|l| !l.trim_start().starts_with("//"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-
-    fn fn_body<'a>(src: &'a str, name: &str) -> &'a str {
-        // 兼容 pub fn / fn / 带泛型 <F> 三种签名。
-        let markers = [
-            format!("pub fn {name}("),
-            format!("pub fn {name}<"),
-            format!("fn {name}("),
-            format!("fn {name}<"),
-        ];
-        let start = markers
-            .iter()
-            .filter_map(|m| src.find(m))
-            .min()
-            .unwrap_or_else(|| panic!("缺 {name}"));
-        let rest = &src[start..];
-        // 取函数体的闭合 `}` 之后，跳过 `\n}` 两字符的尾巴。
-        // fallback 罕见（如找遍到 EOF），直接到 src 末尾。
-        let end = rest
-            .find("\n}")
-            .map(|i| start + i + 2)
-            .unwrap_or(src.len());
-        &src[start..end]
+        super::super::test_utils::source_file("src/services/system/hotkey/global.rs")
     }
 
     // F5: unregister_number_shortcuts 必须先 is_registered 探测再注销,

@@ -418,38 +418,10 @@ fn get_repeat_interval(action: &str) -> Option<Duration> {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use super::super::test_utils::{fn_body, strip_line_comments};
 
     fn navigation_source() -> String {
-        fs::read_to_string(format!(
-            "{}/src/services/system/hotkey/navigation.rs",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .expect("读取 navigation.rs 失败")
-    }
-
-    fn strip_line_comments(src: &str) -> String {
-        src.lines()
-            .filter(|l| !l.trim_start().starts_with("//"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-
-    fn fn_body<'a>(src: &'a str, name: &str) -> &'a str {
-        let markers = [
-            format!("fn {name}("),
-            format!("fn {name}<"),
-            format!("pub fn {name}("),
-            format!("pub fn {name}<"),
-        ];
-        let start = markers
-            .iter()
-            .filter_map(|m| src.find(m))
-            .min()
-            .unwrap_or_else(|| panic!("缺 {name}"));
-        let rest = &src[start..];
-        let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(src.len());
-        &src[start..end]
+        super::super::test_utils::source_file("src/services/system/hotkey/navigation.rs")
     }
 
     // F3: 注册失败路径必须调 safe_unregister 清理幽灵热键（内部先
