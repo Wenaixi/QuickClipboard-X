@@ -175,8 +175,7 @@ const ImageGroupSidebarButton = forwardRef(function ImageGroupSidebarButton({
   onSelect,
   onEdit,
   isDropOver,
-  t,
-  buttonRef
+  t
 }, ref) {
   return (
     <div
@@ -625,10 +624,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
       }
       return;
     }
-    setKbZone('outside');
-    setKbRow(-1);
-    setKbCol(0);
-    imageLibraryRef.current?.resetKbIndex?.();
+    resetKbToOutside();
 
     if (showImages) {
       loadImageGroups(currentImageGroup);
@@ -783,6 +779,11 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
       );
     }
     return null;
+    // ponytail: kbZone/kbRow/kbCol 保留在 deps 里——高亮格判定需要它们,每次
+    // 方向键移动都会重建可见行 JSX。抽 memo 子组件只传 isHighlighted 可行,但
+    // 每格还依赖 handlePaste/name 派生/肤色变体等 7 个引用,拆分后收益有限、
+    // 复杂度上升,故保持全量重建(可见行数约 20 行 × 8 格,量级可接受)。
+    // 若未来 grid 大列表卡顿,优先方向:EmojiGridCell memo 组件 + isHighlighted prop。
   }, [handlePaste, isChinese, skinTone, applySkintone, getSkinVariants, handleSkinPickerOpen, emojiGlyphClassName, kbZone, kbRow, kbCol]);
 
   const currentCategories = useMemo(() => {
@@ -916,22 +917,20 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
     setKbZone('search');
   }, []);
 
-  const blurSearchInput = useCallback(() => {
+  // 键盘导航重置到 outside:任何"退出激活态"路径的唯一出口(deactivate 意图、
+  // 过滤热键、emojiMode 切换、越界兜底)。blurSearchInput/resetKbNav 语义名不同
+  // (前者是 deactivate 出口,后者是过滤热键路径),但重置动作同一,均收敛于此。
+  const resetKbToOutside = useCallback(() => {
     setKbZone('outside');
     setKbRow(-1);
     setKbCol(0);
     imageLibraryRef.current?.resetKbIndex?.();
   }, []);
-
+  const blurSearchInput = resetKbToOutside;
   // G3:过滤热键路径(App handleFilterLeft/Right)切子模式前调用——把 kbZone 置
   // outside,让 emojiMode effect 的 setKbZone('outside') 同值短路,effect 不跑,
   // 键盘导航态(如 grid 高亮)得以保留
-  const resetKbNav = useCallback(() => {
-    setKbZone('outside');
-    setKbRow(-1);
-    setKbCol(0);
-    imageLibraryRef.current?.resetKbIndex?.();
-  }, []);
+  const resetKbNav = resetKbToOutside;
   const getKbZone = useCallback(() => kbZoneRef.current, []);
 
   // F1-2:过滤热键(App handleFilterLeft/Right)切子模式前调用——保存当前 zone
@@ -976,20 +975,20 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
     if (rowIndexes.length === 0) return false;
 
     let currentPos = rowIndexes.indexOf(kbRowRef.current);
-    let targetRowPos;
     let targetCol = kbColRef.current;
 
     if (currentPos === -1) {
-      targetRowPos = dRow >= 0 ? 0 : rowIndexes.length - 1;
-      targetCol = 0;
-    } else {
-      targetRowPos = currentPos + dRow;
-      if (dCol !== 0) targetCol = kbColRef.current + dCol;
+      // kbRow 不在 rowIndexes(stale 态,越界 effect 会夹回 rowIndexes[0],罕见):
+      // 统一 return false 走 onFail,与 dCol 分支对 -1 的处理对齐,不再回绕。
+      // 回绕到 rowIndexes.length-1 会让 ↑ 键"跳底",与导航直觉不符。
+      return false;
     }
+    const targetRowPos = currentPos + dRow;
+    if (dCol !== 0) targetCol = kbColRef.current + dCol;
 
     // 行内左右移动:列夹到当前行边界,越界返回 false(让 caller 切 zone)
+    // currentPos 已保证非 -1(上方统一 return)
     if (dCol !== 0) {
-      if (currentPos === -1) return false;
       const curRow = data[rowIndexes[currentPos]];
       if (targetCol < 0 || targetCol >= curRow.items.length) return false;
     }
@@ -1118,12 +1117,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
       if (section.type === 'row') rowIndexes.push(index);
     });
     if (rowIndexes.length === 0) {
-      if (kbZone === 'grid') {
-        setKbZone('outside');
-        setKbRow(-1);
-        setKbCol(0);
-        imageLibraryRef.current?.resetKbIndex?.();
-      }
+      if (kbZone === 'grid') resetKbToOutside();
       return;
     }
     if (kbRowRef.current >= 0 && !rowIndexes.includes(kbRowRef.current)) {
@@ -1309,6 +1303,9 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
               rangeChanged={handleRangeChanged}
               scrollerRef={scrollerRefCallback}
               overscan={10}
+              data-kbZone={kbZone}
+              data-kbRow={kbRow}
+              data-kbCol={kbCol}
               className="h-full"
               style={{ height: '100%' }}
             />
