@@ -196,9 +196,11 @@ function TabNavigation({
 
   // ←/→ 遍历模式层:emoji/symbols/images/favorites/clipboard(循环)
   // 主标签切换会让 EmojiTab unmount(emojiKbActive 由 setActiveTab 清 false)
-  // G2 修:null 写只保留分支链后一处——分支内每处 null 写 + focus 写被 React 18
-  // 批处理合并成最后一次 null,focus 高亮永不显示。分支链后的统一清在切换生效
-  // 后执行,同批次内高亮先显示、随后整批提交时焦点已清,行为正确。
+  // F2 修:不再写 setTabbarFocusId(null)——React 19 自动批处理把同 handler 内
+  // 两次 setState 合并为最后一次,nextId 写被 null 覆盖,isTabbarActive 恒 false,
+  // tabbar 键盘遍历高亮永不渲染。tabbarFocusId 常驻当前焦点(高亮跟随移动),
+  // EmojiTab 切换回搜索/网格时由 EmojiTab 侧清焦点,主标签 unmount 时
+  // EmojiTab 重挂载自然重置。
   const handleKbNav = useCallback((delta) => {
     // G5 修:items 从可见 tabs 派生(过滤掉不可见 tab),与 :116 tabs 过滤脱钩
     // 问题:硬编码 ['emoji','symbols','images','favorites','clipboard'] 在隐藏
@@ -227,8 +229,6 @@ function TabNavigation({
     } else if (nextId === 'images') {
       onEmojiModeChange('images');
     }
-    // 切换生效后统一清 stale 焦点,防再次 ← 从旧 ID 起算漂移
-    setTabbarFocusId(null);
   }, [tabbarFocusId, emojiMode, focusTabbarButton, onTabChange, onEmojiModeChange, tabs]);
 
   useImperativeHandle(ref, () => ({

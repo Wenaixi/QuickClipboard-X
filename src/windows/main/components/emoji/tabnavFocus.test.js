@@ -18,7 +18,7 @@ test('TabNavigation 不声明 onKbNav/onKbEnter 死 props', async () => {
   assert.equal(body.includes('onKbEnter'), false, '不应再声明 onKbEnter prop');
 });
 
-test('TabNavigation 切走主标签/子模式时清 tabbarFocusId', async () => {
+test('TabNavigation handleKbNav 保留 tabbarFocusId 不清 null(批处理吞高亮)', async () => {
   const fs = await import('node:fs/promises');
   const path = await import('node:path');
   const { fileURLToPath } = await import('node:url');
@@ -28,11 +28,9 @@ test('TabNavigation 切走主标签/子模式时清 tabbarFocusId', async () => 
     .split('\n')
     .filter((l) => !l.trimStart().startsWith('//'))
     .join('\n');
-  // 清 stale 焦点语义改为"切换生效后统一清",不再在每个分支内重复写
   const fnStart = body.indexOf('const handleKbNav');
   const fnEnd = body.indexOf('useImperativeHandle', fnStart);
   const fnBody = body.slice(fnStart, fnEnd);
-  // onTabChange 调用前不再要求 setTabbarFocusId(null)(G2 修后焦点先写后清,批处理只留最后一次)
   assert.ok(fnBody.includes('focusTabbarButton'), 'handleKbNav 应调用 focusTabbarButton');
   assert.ok(
     /onTabChange\(/.test(fnBody),
@@ -42,17 +40,14 @@ test('TabNavigation 切走主标签/子模式时清 tabbarFocusId', async () => 
     /onEmojiModeChange\(/.test(fnBody),
     'handleKbNav 应调 onEmojiModeChange'
   );
-  // G2: 5 个分支内的 null 写全部收敛为"切换生效后统一清"
+  // F2 修:React 19 自动批处理把同 handler 内两次 setState 合并为最后一次,
+  // focusTabbarButton(nextId) 写 + 尾部 null 写 → 渲染值恒 null,
+  // isTabbarActive(id) 恒 false,tabbar 键盘遍历高亮永不渲染。
+  // 修复:null 写全部删除,tabbarFocusId 常驻当前焦点(再次 ← 正好从原位起算)。
   assert.equal(
     (fnBody.match(/setTabbarFocusId\(null\)/g) || []).length,
-    1,
-    'handleKbNav 内 setTabbarFocusId(null) 只能有 1 处(统一清),否则 React 批处理吞掉 focus 高亮'
-  );
-  // 统一清必须位于分支 if/else 链之后(以最后一个分支调用 onEmojiModeChange('images') 为锚)
-  const lastImagesCallIdx = fnBody.indexOf("onEmojiModeChange('images')");
-  assert.ok(
-    lastImagesCallIdx >= 0 && fnBody.lastIndexOf('setTabbarFocusId(null)') > lastImagesCallIdx,
-    '统一清 null 必须在分支链之后,否则高亮仍被吞'
+    0,
+    'handleKbNav 内不得再有 setTabbarFocusId(null),React 19 批处理会把同帧 nextId 写覆盖为 null'
   );
 });
 
