@@ -175,8 +175,7 @@ const ImageGroupSidebarButton = forwardRef(function ImageGroupSidebarButton({
   onSelect,
   onEdit,
   isDropOver,
-  t,
-  buttonRef
+  t
 }, ref) {
   return (
     <div
