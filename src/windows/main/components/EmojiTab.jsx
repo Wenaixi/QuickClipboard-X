@@ -937,20 +937,20 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
     if (rowIndexes.length === 0) return false;
 
     let currentPos = rowIndexes.indexOf(kbRowRef.current);
-    let targetRowPos;
     let targetCol = kbColRef.current;
 
     if (currentPos === -1) {
-      targetRowPos = dRow >= 0 ? 0 : rowIndexes.length - 1;
-      targetCol = 0;
-    } else {
-      targetRowPos = currentPos + dRow;
-      if (dCol !== 0) targetCol = kbColRef.current + dCol;
+      // kbRow 不在 rowIndexes(stale 态,越界 effect 会夹回 rowIndexes[0],罕见):
+      // 统一 return false 走 onFail,与 dCol 分支对 -1 的处理对齐,不再回绕。
+      // 回绕到 rowIndexes.length-1 会让 ↑ 键"跳底",与导航直觉不符。
+      return false;
     }
+    const targetRowPos = currentPos + dRow;
+    if (dCol !== 0) targetCol = kbColRef.current + dCol;
 
     // 行内左右移动:列夹到当前行边界,越界返回 false(让 caller 切 zone)
+    // currentPos 已保证非 -1(上方统一 return)
     if (dCol !== 0) {
-      if (currentPos === -1) return false;
       const curRow = data[rowIndexes[currentPos]];
       if (targetCol < 0 || targetCol >= curRow.items.length) return false;
     }
