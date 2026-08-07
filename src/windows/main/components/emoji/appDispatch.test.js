@@ -36,11 +36,12 @@ test('App dispatchEmojiNav 内保留 emojiKbActive 门控决策', async () => {
     .filter((l) => !l.trimStart().startsWith('//'))
     .join('\n');
   // 边界锚点改用函数名 + 下一个 const 声明:注释锚点 '// EmojiTab 请求' 会被剥行注释
-  // 提前去掉,indexOf 恒 -1,slice 会一直切到 EOF,断言作用域漂移有假绿窗口
+  // 提前去掉,indexOf 恒 -1,slice 会一直切到 EOF,断言作用域漂移有假绿窗口。
+  // F4 删 tabbar 死码后 handleEmojiEnterTabbar 已不存在,改用下一个 const 声明锚点。
   const dispatchStart = body.indexOf('const dispatchEmojiNav');
-  const dispatchEnd = body.indexOf('const handleEmojiEnterTabbar', dispatchStart);
+  const dispatchEnd = body.indexOf('const handleEmojiSwitchTab', dispatchStart);
   assert.notEqual(dispatchStart, -1, '缺 const dispatchEmojiNav 声明');
-  assert.notEqual(dispatchEnd, -1, '缺 const handleEmojiEnterTabbar 锚点');
+  assert.notEqual(dispatchEnd, -1, '缺 const handleEmojiSwitchTab 锚点');
   const dispatch = body.slice(dispatchStart, dispatchEnd);
   assert.ok(dispatch.includes('shouldForwardNavToEmoji'), 'dispatchEmojiNav 应保留转发决策');
   assert.ok(dispatch.includes('resolveOutsideAppAction'), 'dispatchEmojiNav 应保留 outside 决策');

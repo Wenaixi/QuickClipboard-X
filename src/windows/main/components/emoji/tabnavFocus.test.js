@@ -4,6 +4,8 @@ import assert from 'node:assert/strict';
 // TabNavigation 死 props 与 stale tabbarFocusId 源码护栏测试
 // 背景：spec #3 审查发现 handleKbNav 切走主标签后 tabbarFocusId 不清,
 // 再次 ← 从 stale ID 起算漂移;standards #2 发现 onKbNav/onKbEnter 死 props。
+// F4 删除整个 tabbar 键盘死码链(enter-tabbar 意图无处产生)后,handleKbNav 系列
+// 已整体移除,以下 G2/G5 护栏断言改为"整链不存在"的否定形式。
 test('TabNavigation 不声明 onKbNav/onKbEnter 死 props', async () => {
   const fs = await import('node:fs/promises');
   const path = await import('node:path');
@@ -18,7 +20,7 @@ test('TabNavigation 不声明 onKbNav/onKbEnter 死 props', async () => {
   assert.equal(body.includes('onKbEnter'), false, '不应再声明 onKbEnter prop');
 });
 
-test('TabNavigation 切走主标签/子模式时清 tabbarFocusId', async () => {
+test('TabNavigation 整条 tabbar 键盘死码链已删(handleKbNav/tabbarFocusId/focusTabbar)', async () => {
   const fs = await import('node:fs/promises');
   const path = await import('node:path');
   const { fileURLToPath } = await import('node:url');
@@ -28,66 +30,11 @@ test('TabNavigation 切走主标签/子模式时清 tabbarFocusId', async () => 
     .split('\n')
     .filter((l) => !l.trimStart().startsWith('//'))
     .join('\n');
-  // 清 stale 焦点语义改为"切换生效后统一清",不再在每个分支内重复写
-  const fnStart = body.indexOf('const handleKbNav');
-  const fnEnd = body.indexOf('useImperativeHandle', fnStart);
-  const fnBody = body.slice(fnStart, fnEnd);
-  // onTabChange 调用前不再要求 setTabbarFocusId(null)(G2 修后焦点先写后清,批处理只留最后一次)
-  assert.ok(fnBody.includes('focusTabbarButton'), 'handleKbNav 应调用 focusTabbarButton');
-  assert.ok(
-    /onTabChange\(/.test(fnBody),
-    'handleKbNav 应调 onTabChange'
-  );
-  assert.ok(
-    /onEmojiModeChange\(/.test(fnBody),
-    'handleKbNav 应调 onEmojiModeChange'
-  );
-  // G2: 5 个分支内的 null 写全部收敛为"切换生效后统一清"
-  assert.equal(
-    (fnBody.match(/setTabbarFocusId\(null\)/g) || []).length,
-    1,
-    'handleKbNav 内 setTabbarFocusId(null) 只能有 1 处(统一清),否则 React 批处理吞掉 focus 高亮'
-  );
-  // 统一清必须位于分支 if/else 链之后(以最后一个分支调用 onEmojiModeChange('images') 为锚)
-  const lastImagesCallIdx = fnBody.indexOf("onEmojiModeChange('images')");
-  assert.ok(
-    lastImagesCallIdx >= 0 && fnBody.lastIndexOf('setTabbarFocusId(null)') > lastImagesCallIdx,
-    '统一清 null 必须在分支链之后,否则高亮仍被吞'
-  );
-});
-
-// G5: handleKbNav 硬编码 items=['emoji','symbols','images','favorites','clipboard']
-// 与 :116 tabs 过滤(visibleOptionalTabs)脱钩:隐藏 favorites 后循环到它 →
-// focus no-op + onTabChange('favorites') 被 App.jsx:88-93 守卫弹回 clipboard,瞬闪。
-// 修复:items 从可见 tabs 派生(emoji 子模式 3 项在前 + 可见主标签在后)。
-test('G5 handleKbNav items 从可见 tabs 派生,不再硬编码隐藏 tab', async () => {
-  const fs = await import('node:fs/promises');
-  const path = await import('node:path');
-  const { fileURLToPath } = await import('node:url');
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const src = await fs.readFile(path.join(here, '../TabNavigation.jsx'), 'utf8');
-  const body = src
-    .split('\n')
-    .filter((l) => !l.trimStart().startsWith('//'))
-    .join('\n');
-  const fnStart = body.indexOf('const handleKbNav');
-  const fnEnd = body.indexOf('useImperativeHandle', fnStart);
-  const fnBody = body.slice(fnStart, fnEnd);
-  // 不再有硬编码的 favorites/clipboard 字面 items 数组
-  assert.equal(
-    /const items = \['emoji', 'symbols', 'images', 'favorites', 'clipboard'\]/.test(fnBody),
-    false,
-    'handleKbNav 不应再硬编码 5 项 items 数组'
-  );
-  // items 必须从 tabs 派生
-  assert.ok(
-    /tabs\.map\(tab => tab\.id\)/.test(fnBody),
-    'items 必须从可见 tabs 派生(tabs.map)'
-  );
-  assert.ok(
-    /\[\.\.\.emojiModeItems, \.\.\.visibleMainTabs\]/.test(fnBody),
-    'items 应为 emoji 子模式 3 项在前 + 可见主标签在后'
-  );
+  assert.equal(body.includes('handleKbNav'), false, '不应再有 handleKbNav');
+  assert.equal(body.includes('tabbarFocusId'), false, '不应再有 tabbarFocusId state');
+  assert.equal(body.includes('focusTabbarButton'), false, '不应再有 focusTabbarButton');
+  assert.equal(body.includes('focusTabbar'), false, '不应再有 focusTabbar');
+  assert.equal(body.includes('tabbarRefs'), false, '不应再有 tabbarRefs 收集');
 });
 
 // F6: handleEmojiTabbarEnter / TabNavigation.kbEnter 死代码

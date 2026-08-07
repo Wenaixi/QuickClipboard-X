@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 // EmojiTab lazy 挂载后 App 无重渲触发,onEnterTabbarRef 永远 null,
 // grid ← 越界进 tabbar 静默失败。改 props 直传根治。
 
-test('EmojiTab 用 onEnterTabbar/onTabbarMove props 而非 setter 注入', async () => {
+test('EmojiTab 不再有 onEnterTabbar/onTabbarMove props 与 setter 注入', async () => {
   const fs = await import('node:fs/promises');
   const path = await import('node:path');
   const { fileURLToPath } = await import('node:url');
@@ -16,14 +16,12 @@ test('EmojiTab 用 onEnterTabbar/onTabbarMove props 而非 setter 注入', async
     .split('\n')
     .filter((l) => !l.trimStart().startsWith('//'))
     .join('\n');
-  // 声明新 props
-  assert.ok(/function EmojiTab\(\{ emojiMode, onEmojiModeChange, onEnterTabbar, onTabbarMove, onSwitchTab, searchQuery = '' \}/.test(body), '应声明 onEnterTabbar/onTabbarMove/searchQuery props');
+  // 死 props 应整体移除(F4 删死码链)
+  assert.equal(body.includes('onEnterTabbar'), false, '不应再声明/使用 onEnterTabbar');
+  assert.equal(body.includes('onTabbarMove'), false, '不应再声明/使用 onTabbarMove');
   // 删 setter 注入
   assert.equal(body.includes('setEnterTabbarHandler'), false, '不应再有 setEnterTabbarHandler');
   assert.equal(body.includes('setTabbarMoveHandler'), false, '不应再有 setTabbarMoveHandler');
-  // 意图分发直接调 props
-  assert.ok(body.includes('onEnterTabbar?.()'), 'enter-tabbar 应直接调 onEnterTabbar prop');
-  assert.ok(body.includes('onTabbarMove?.(intent.delta)'), 'tabbar-move 应直接调 onTabbarMove prop');
 });
 
 // G1: executeCurrentItem 必须加 kbZone==='grid' 守卫,否则 tabbar/search 态按 Enter
@@ -146,7 +144,7 @@ test('G6 enterGrid 图片分支 activateKb 失败时降级 focusSearchInput', as
   );
 });
 
-test('App.jsx 直传 onEnterTabbar/onTabbarMove props 且删注入 useEffect', async () => {
+test('App.jsx 不再直传 onEnterTabbar/onTabbarMove props,无注入 useEffect', async () => {
   const fs = await import('node:fs/promises');
   const path = await import('node:path');
   const { fileURLToPath } = await import('node:url');
@@ -156,8 +154,9 @@ test('App.jsx 直传 onEnterTabbar/onTabbarMove props 且删注入 useEffect', a
     .split('\n')
     .filter((l) => !l.trimStart().startsWith('//'))
     .join('\n');
-  assert.ok(body.includes('onEnterTabbar={handleEmojiEnterTabbar}'), 'EmojiTab 应直传 onEnterTabbar');
-  assert.ok(body.includes('onTabbarMove={handleEmojiTabbarMove}'), 'EmojiTab 应直传 onTabbarMove');
+  // F4 删死码链后 App 不应再传这两个死 props
+  assert.equal(body.includes('onEnterTabbar'), false, 'App 不应再传 onEnterTabbar');
+  assert.equal(body.includes('onTabbarMove'), false, 'App 不应再传 onTabbarMove');
   assert.equal(body.includes('setEnterTabbarHandler'), false, 'App 不应再调 setter 注入');
   assert.equal(body.includes('setTabbarMoveHandler'), false, 'App 不应再调 setter 注入');
 });
