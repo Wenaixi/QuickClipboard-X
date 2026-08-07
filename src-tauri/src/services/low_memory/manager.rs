@@ -335,21 +335,10 @@ fn recreate_main_window(app: &AppHandle) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use crate::services::system::hotkey::test_utils::strip_line_comments;
 
     fn manager_source() -> String {
-        fs::read_to_string(format!(
-            "{}/src/services/low_memory/manager.rs",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .expect("读取 manager.rs 失败")
-    }
-
-    fn strip_line_comments(src: &str) -> String {
-        src.lines()
-            .filter(|l| !l.trim_start().starts_with("//"))
-            .collect::<Vec<_>>()
-            .join("\n")
+        crate::services::system::hotkey::test_utils::source_file("src/services/low_memory/manager.rs")
     }
 
     // F3: 退出低占用模式重建主窗口必须恢复导航键——进入时
