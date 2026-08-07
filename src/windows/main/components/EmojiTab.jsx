@@ -600,10 +600,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
   useEffect(() => {
     // 切换子模式时重置键盘导航状态:回到 outside(无高亮,←/→ 恢复原功能)
     // emojiKbActive 由下方 useEffect([kbZone]) 单点兜底,这里只改 zone
-    setKbZone('outside');
-    setKbRow(-1);
-    setKbCol(0);
-    imageLibraryRef.current?.resetKbIndex?.();
+    resetKbToOutside();
 
     if (showImages) {
       loadImageGroups(currentImageGroup);
@@ -891,22 +888,20 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
     setKbZone('search');
   }, []);
 
-  const blurSearchInput = useCallback(() => {
+  // 键盘导航重置到 outside:任何"退出激活态"路径的唯一出口(deactivate 意图、
+  // 过滤热键、emojiMode 切换、越界兜底)。blurSearchInput/resetKbNav 语义名不同
+  // (前者是 deactivate 出口,后者是过滤热键路径),但重置动作同一,均收敛于此。
+  const resetKbToOutside = useCallback(() => {
     setKbZone('outside');
     setKbRow(-1);
     setKbCol(0);
     imageLibraryRef.current?.resetKbIndex?.();
   }, []);
-
+  const blurSearchInput = resetKbToOutside;
   // G3:过滤热键路径(App handleFilterLeft/Right)切子模式前调用——把 kbZone 置
   // outside,让 emojiMode effect 的 setKbZone('outside') 同值短路,effect 不跑,
   // 键盘导航态(如 grid 高亮)得以保留
-  const resetKbNav = useCallback(() => {
-    setKbZone('outside');
-    setKbRow(-1);
-    setKbCol(0);
-    imageLibraryRef.current?.resetKbIndex?.();
-  }, []);
+  const resetKbNav = resetKbToOutside;
   const getKbZone = useCallback(() => kbZoneRef.current, []);
 
   const moveSidebarBy = useCallback((delta) => {
@@ -1085,12 +1080,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
       if (section.type === 'row') rowIndexes.push(index);
     });
     if (rowIndexes.length === 0) {
-      if (kbZone === 'grid') {
-        setKbZone('outside');
-        setKbRow(-1);
-        setKbCol(0);
-        imageLibraryRef.current?.resetKbIndex?.();
-      }
+      if (kbZone === 'grid') resetKbToOutside();
       return;
     }
     if (kbRowRef.current >= 0 && !rowIndexes.includes(kbRowRef.current)) {
