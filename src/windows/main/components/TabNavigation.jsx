@@ -176,6 +176,8 @@ function TabNavigation({
     : 0;
   const groupButtonWidth = isSidebarLayout ? 92 : GROUP_BUTTON_WIDTH;
   const groupButtonVisible = isSidebarLayout || isGroupButtonRevealed || isGroupsPanelOpen;
+  // F2 修:三连重复三元提取单变量(行为不变)
+  const hideGroup = shouldHideGroupButton || !groupButtonVisible;
   const sidebarShowLabel = isSidebarLayout ? !isSidebarCollapsed : true;
 
   // 键盘 tabbar 焦点:模式(emoji/symbols/images) + 主标签(favorites/clipboard)
@@ -912,9 +914,9 @@ function TabNavigation({
                   <div
                     className={`overflow-visible shrink-0 ${uiAnimationEnabled ? 'transition-all duration-300 ease-out' : ''}`}
                     style={{
-                      width: shouldHideGroupButton || !groupButtonVisible ? '0px' : `${groupButtonWidth}px`,
-                      opacity: shouldHideGroupButton || !groupButtonVisible ? 0 : 1,
-                      pointerEvents: shouldHideGroupButton || !groupButtonVisible ? 'none' : 'auto'
+                      width: hideGroup ? '0px' : `${groupButtonWidth}px`,
+                      opacity: hideGroup ? 0 : 1,
+                      pointerEvents: hideGroup ? 'none' : 'auto'
                     }}
                   >
                     <GroupsPopup
