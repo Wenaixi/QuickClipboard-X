@@ -51,8 +51,11 @@ pub fn enable_navigation_hotkeys() {
 }
 
 pub fn disable_navigation_hotkeys() {
-    NAVIGATION_HOTKEYS_DESIRED.store(false, Ordering::SeqCst);
+    // F4: 与 enable 对称——先持 NAVIGATION_SYNC_LOCK 再 store+unregister，
+    // 消除锁外 store 的 lost wakeup：并发 enable 在 store 与锁内 unregister
+    // 之间抢锁时,enable 的 sync 可能看到 desired=true 跳过注册。
     let _guard = NAVIGATION_SYNC_LOCK.lock();
+    NAVIGATION_HOTKEYS_DESIRED.store(false, Ordering::SeqCst);
     unregister_navigation_hotkeys();
 }
 
@@ -146,6 +149,9 @@ fn register_navigation_hotkeys_from_settings() -> Result<(), String> {
         }) {
             Ok(_) => {
                 println!("已注册导航快捷键 [{}]: {}", config.id, config.shortcut);
+                // F2: 成功注册必须写 success 状态,覆盖同 id 的旧失败状态——
+                // 用户改回合法键并保存后立即清除设置页红错。
+                super::global::set_shortcut_status(&config.id, &config.shortcut, true, None);
                 registrations.push(NavigationShortcutRegistration {
                     id: config.id.to_string(),
                     shortcut: shortcut_for_log,
@@ -158,9 +164,7 @@ fn register_navigation_hotkeys_from_settings() -> Result<(), String> {
                 );
                 // 插件可能在 Err 前部分写入 Windows 层，主动探测并注销清理，
                 // 避免残留吞键的"幽灵热键"。与 global.rs register_shortcut 同款。
-                if app.global_shortcut().is_registered(shortcut) {
-                    let _ = app.global_shortcut().unregister(shortcut);
-                }
+                super::global::safe_unregister(&app, shortcut);
                 // F7: 注册失败必须写 SHORTCUT_STATUS 状态表——前端 navigation tab
                 // 的 ShortcutInput 靠 backendId 查 getBackendError 展示冲突/失败，
                 // 不写则用户配置错误时前端静默无提示。key 用导航 config id，
@@ -171,13 +175,10 @@ fn register_navigation_hotkeys_from_settings() -> Result<(), String> {
                     "REGISTRATION_FAILED".to_string()
                 };
                 super::global::set_shortcut_status(&config.id, &config.shortcut, false, Some(error_msg));
-                has_failure = true;
-                // F7(连带雪崩治理):单键失败不整体置 REGISTERED=false,
+                // F7(单键失败治理):仅记录该键失败状态,不整体置 REGISTERED=false——
                 // 避免一个键配错让全部导航键失效并清空其余成功注册;
-                // has_failure 语义保留——仅用于本键失败状态记录,
-                // 下方 store(has_registration && !has_failure) 依赖它。
-                // 保持 NAVIGATION_HOTKEYS_REGISTERED=false（has_failure 让下方 store(false)），
-                // 让下次前台切换/显隐时能重新走完整注销+注册。
+                // 失败键由下次 reload 重试,其余成功键保持可用。
+                has_failure = true;
             }
         }
     }
@@ -185,8 +186,8 @@ fn register_navigation_hotkeys_from_settings() -> Result<(), String> {
     let has_registration = !registrations.is_empty();
     *NAVIGATION_SHORTCUTS.lock() = registrations;
 
-    // 有失败则整体保持"未注册"状态，等待自愈重试；避免半注册状态被当作已就绪。
-    NAVIGATION_HOTKEYS_REGISTERED.store(has_registration && !has_failure, Ordering::SeqCst);
+    // 有成功注册即视为已就绪；单键失败不影响其余成功键,避免雪崩。
+    NAVIGATION_HOTKEYS_REGISTERED.store(has_registration, Ordering::SeqCst);
     Ok(())
 }
 
@@ -202,13 +203,17 @@ fn unregister_navigation_hotkeys() {
     for registration in registrations {
         if let Ok(shortcut) = parse_shortcut(&registration.shortcut) {
             if app.global_shortcut().is_registered(shortcut) {
-                let _ = app.global_shortcut().unregister(shortcut);
+                super::global::safe_unregister(&app, shortcut);
                 println!(
                     "已注销导航快捷键 [{}]: {}",
                     registration.id, registration.shortcut
                 );
             }
         }
+        // F2: 注销即清除该 id 的 SHORTCUT_STATUS——导航 id 不在
+        // REGISTERED_SHORTCUTS,global 的 unregister_all 清理覆盖不到;
+        // 不清除则用户改回合法键后设置页持续显示红错直到全局 reload/重启。
+        super::global::clear_shortcut_status(&registration.id);
     }
 
     NAVIGATION_HOTKEYS_REGISTERED.store(false, Ordering::SeqCst);
@@ -413,51 +418,22 @@ fn get_repeat_interval(action: &str) -> Option<Duration> {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use super::super::test_utils::{fn_body, strip_line_comments};
 
     fn navigation_source() -> String {
-        fs::read_to_string(format!(
-            "{}/src/services/system/hotkey/navigation.rs",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .expect("读取 navigation.rs 失败")
+        super::super::test_utils::source_file("src/services/system/hotkey/navigation.rs")
     }
 
-    fn strip_line_comments(src: &str) -> String {
-        src.lines()
-            .filter(|l| !l.trim_start().starts_with("//"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-
-    fn fn_body<'a>(src: &'a str, name: &str) -> &'a str {
-        let markers = [
-            format!("fn {name}("),
-            format!("fn {name}<"),
-            format!("pub fn {name}("),
-            format!("pub fn {name}<"),
-        ];
-        let start = markers
-            .iter()
-            .filter_map(|m| src.find(m))
-            .min()
-            .unwrap_or_else(|| panic!("缺 {name}"));
-        let rest = &src[start..];
-        let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(src.len());
-        &src[start..end]
-    }
-
-    // F3: 注册失败路径必须先 is_registered 探测再 unregister 清理幽灵热键,
-    // 并保留 eprintln 错误日志。与 global.rs register_shortcut 同款。
+    // F3: 注册失败路径必须调 safe_unregister 清理幽灵热键（内部先
+    // is_registered 探测再 unregister,与 global.rs register_shortcut 同款），
+    // 并保留 eprintln 错误日志。
     #[test]
     fn navigation_failure_path_probes_before_unregister() {
         let src = strip_line_comments(&navigation_source());
         let b = fn_body(&src, "register_navigation_hotkeys_from_settings");
-        let probe_pos = b.find("is_registered(shortcut)");
-        let cleanup_pos = b.find("unregister(shortcut)");
         assert!(
-            probe_pos.is_some() && cleanup_pos.is_some() && probe_pos < cleanup_pos,
-            "注册失败路径必须先 is_registered 探测再 unregister 清理幽灵热键"
+            b.find("safe_unregister(&app, shortcut)").is_some(),
+            "注册失败路径必须调 safe_unregister 清理幽灵热键"
         );
         assert!(
             b.contains("eprintln!"),
@@ -500,6 +476,67 @@ mod tests {
         assert!(
             b.find("sync_navigation_hotkeys_for_foreground()").is_none(),
             "enable_navigation_hotkeys 持锁内必须调 inner,禁止顶层 sync 再 lock"
+        );
+    }
+
+    // F4(对称性护栏):disable_navigation_hotkeys 必须与 enable 对称——
+    // 先持 NAVIGATION_SYNC_LOCK 再 store(false)，锁外 store 与并发
+    // enable/sync 存在 lost wakeup 竞态（store 与锁内 unregister 之间
+    // 被并发 enable 抢锁时,enable 的 sync 可能看到 desired=true 跳过注册）。
+    #[test]
+    fn disable_navigation_hotkeys_holds_lock_before_store() {
+        let src = strip_line_comments(&navigation_source());
+        let b = fn_body(&src, "disable_navigation_hotkeys");
+        let lock_pos = b.find("NAVIGATION_SYNC_LOCK.lock()");
+        let store_pos = b.find("NAVIGATION_HOTKEYS_DESIRED.store(false");
+        assert!(
+            lock_pos.is_some() && store_pos.is_some() && lock_pos < store_pos,
+            "disable_navigation_hotkeys 必须持锁后 store(false)"
+        );
+        assert!(
+            b.find("unregister_navigation_hotkeys()").is_some(),
+            "disable_navigation_hotkeys 持锁内必须调 unregister_navigation_hotkeys"
+        );
+    }
+
+    // F7(连带雪崩治理):单键注册失败不得整体置 NAVIGATION_HOTKEYS_REGISTERED=false,
+    // 否则一个键配错会让全部导航键失效——下次前台切换/显隐触发 reload 时
+    // unregister 会摘除全部已成功注册的键,用户配错的键连同其余正常键一起
+    // 全部失灵。失败键自身已写 SHORTCUT_STATUS 错误状态,由下次 reload 重试。
+    #[test]
+    fn navigation_single_key_failure_does_not_poison_global_state() {
+        let src = strip_line_comments(&navigation_source());
+        let b = fn_body(&src, "register_navigation_hotkeys_from_settings");
+        let store_pos = b.find("NAVIGATION_HOTKEYS_REGISTERED.store(");
+        assert!(
+            store_pos.is_some(),
+            "register_navigation_hotkeys_from_settings 必须 store REGISTERED 状态"
+        );
+        let segment = &b[store_pos.unwrap()..b[store_pos.unwrap()..].find(';').unwrap() + store_pos.unwrap()];
+        assert!(
+            !segment.contains("has_failure"),
+            "store 表达式不得依赖 has_failure,单键失败不能整体置 REGISTERED=false"
+        );
+    }
+
+    // F2: 导航注册失败路径写入 global::SHORTCUT_STATUS 状态表后,成功/重试路径
+    // 必须清除该 id 的失败状态——否则用户改回合法键并保存后,设置页持续显示
+    // 红错直到全局 reload/重启。清除逻辑须同时覆盖 unregister 路径。
+    #[test]
+    fn navigation_success_path_clears_stale_failure_status() {
+        let src = strip_line_comments(&navigation_source());
+        let b = fn_body(&src, "register_navigation_hotkeys_from_settings");
+        let ok_pos = b.find("Ok(_)");
+        assert!(
+            ok_pos.is_some() && b[ok_pos.unwrap()..].find("set_shortcut_status").is_some(),
+            "成功注册分支必须写 set_shortcut_status(success) 清除旧失败状态"
+        );
+        let ub = fn_body(&src, "unregister_navigation_hotkeys");
+        let status_pos = ub.find("set_shortcut_status");
+        let clear_pos = ub.find("clear_shortcut_status");
+        assert!(
+            status_pos.is_some() || clear_pos.is_some(),
+            "unregister_navigation_hotkeys 必须清除对应 id 的 SHORTCUT_STATUS 状态"
         );
     }
 }
