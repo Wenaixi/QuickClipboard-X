@@ -891,8 +891,9 @@ pub fn get_shortcut_status(id: &str) -> Option<ShortcutStatus> {
     status_map.get(id).cloned()
 }
 
-// 清除快捷键状态
-fn clear_shortcut_status(id: &str) {
+// 清除快捷键状态（pub: navigation.rs 注销导航键时清除对应 id 状态，
+// 导航 id 不在 REGISTERED_SHORTCUTS，unregister_all 的清理覆盖不到）
+pub fn clear_shortcut_status(id: &str) {
     let mut status_map = SHORTCUT_STATUS.lock();
     status_map.remove(id);
 }
