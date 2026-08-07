@@ -531,8 +531,9 @@ function TabNavigation({
   };
 
   // controlsContainer 的 onMouseLeave 会同时被 filter 折叠与分组按钮收回使用。
-  // filter 分支保留原 onMouseLeave 语义(仅非 emoji 时);分组收回挂在额外
-  // onMouseLeave 上,两者独立互不覆盖。
+  // 两个 handler 均无条件执行(无 activeTab 守卫):emoji 模式下 filter leave
+  // 也会挂折叠定时器,但 emoji 模式无 filter onMouseEnter,isFilterExpanded
+  // 恒 false,定时器到期同值短路,无害;分组收回独立挂在 onMouseLeave 上。
   const handleControlsContainerMouseLeave = (event) => {
     handleFilterAreaMouseLeave(event);
     handleGroupRevealMouseLeave();
