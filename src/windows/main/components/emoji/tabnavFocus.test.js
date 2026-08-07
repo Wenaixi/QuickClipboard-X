@@ -140,3 +140,27 @@ test('F7 TabButton outer div 可编程 focus(tabIndex=-1)', async () => {
     '外层 div 必须 tabIndex={-1},否则 focus no-op'
   );
 });
+
+// F2-2: handleGroupRevealMouseMove 提前 return 分支(按钮已滑出/面板打开时)
+// 必须清除挂起的 300ms 隐藏定时器,否则按钮滑出→鼠标移出→300ms 内移回
+// (命中提前 return)→定时器到期→按钮在悬停中收起。对称语义:边缘命中分支
+// (502-505)移回即取消隐藏,提前 return 分支同样应取消。
+test('TabNavigation 分组按钮悬停中移回不清除隐藏定时器', async () => {
+  const fs = await import('node:fs/promises');
+  const path = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const src = await fs.readFile(path.join(here, '../TabNavigation.jsx'), 'utf8');
+  const body = src
+    .split('\n')
+    .filter((l) => !l.trimStart().startsWith('//'))
+    .join('\n');
+  const fnStart = body.indexOf('const handleGroupRevealMouseMove');
+  const fnEnd = body.indexOf('const handleGroupRevealMouseLeave', fnStart);
+  const fnBody = body.slice(fnStart, fnEnd);
+  // 提前 return 分支(isGroupButtonRevealed 为 true 时)必须先清定时器再 return
+  assert.ok(
+    /if \(isSidebarLayout \|\| isGroupsPanelOpen \|\| isGroupButtonRevealed\) \{[\s\S]{0,300}clearTimeout\(groupRevealTimerRef\.current\)[\s\S]{0,300}return;/.test(fnBody),
+    '悬停中(已 reveal)移回时,提前 return 分支必须先 clearTimeout 隐藏定时器,否则悬停中按钮收起'
+  );
+});

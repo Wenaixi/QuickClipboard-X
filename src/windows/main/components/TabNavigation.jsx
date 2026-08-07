@@ -488,6 +488,12 @@ function TabNavigation({
   // 按钮本身悬停(或面板打开)时保持显示,避免闪烁。
   const handleGroupRevealMouseMove = (event) => {
     if (isSidebarLayout || isGroupsPanelOpen || isGroupButtonRevealed) {
+      // F2 修:悬停中(已 reveal)移回也必须取消挂起的隐藏定时器,
+      // 否则按钮滑出→鼠标移出挂 300ms 定时器→定时器内移回→定时器到期按钮收起。
+      if (groupRevealTimerRef.current) {
+        clearTimeout(groupRevealTimerRef.current);
+        groupRevealTimerRef.current = null;
+      }
       return;
     }
     const rightArea = rightAreaRef.current;
