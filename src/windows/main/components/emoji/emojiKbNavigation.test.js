@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { readSource, readSourceRaw } from './readSource.js';
 import {
   resolveActivateKb,
   resolveSidebarCategoryId,
@@ -174,15 +175,7 @@ describe('F3 resetKbToOutside 收敛(去重置四连重复)', () => {
   // 重置四连(setKbZone outside + kbRow -1 + kbCol 0 + resetKbIndex)。收敛为共享
   // resetKbToOutside 后,四连只应出现在定义处,其余调用点一律复用。
   it('重置四连只出现一次,且 blurSearchInput/resetKbNav 为共享函数别名', async () => {
-    const fs = await import('node:fs/promises');
-    const path = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const here = path.dirname(fileURLToPath(import.meta.url));
-    const src = await fs.readFile(path.join(here, '../EmojiTab.jsx'), 'utf8');
-    const body = src
-      .split('\n')
-      .filter((l) => !l.trimStart().startsWith('//'))
-      .join('\n');
+    const body = await readSource('../EmojiTab.jsx');
 
     const resetBody = /setKbZone\('outside'\)[\s\S]{0,80}?setKbRow\(-1\)[\s\S]{0,80}?setKbCol\(0\)[\s\S]{0,80}?imageLibraryRef\.current\?\.resetKbIndex\?\.\(\)/g;
     const count = (body.match(resetBody) || []).length;
@@ -196,15 +189,7 @@ describe('F3 resetKbToOutside 收敛(去重置四连重复)', () => {
 // F4: tabbar zone 死码已删(enter-tabbar 意图无处产生),护栏改为否定形式
 describe('F4 tabbar 死码已删(enter-tabbar 意图无处产生)', () => {
   it('EmojiTab applyNavIntent 不再有 enter-tabbar/tabbar-move 分支', async () => {
-    const fs = await import('node:fs/promises');
-    const path = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const here = path.dirname(fileURLToPath(import.meta.url));
-    const src = await fs.readFile(path.join(here, '../EmojiTab.jsx'), 'utf8');
-    const body = src
-      .split('\n')
-      .filter((l) => !l.trimStart().startsWith('//'))
-      .join('\n');
+    const body = await readSource('../EmojiTab.jsx');
     assert.equal(body.includes("case 'enter-tabbar':"), false, 'applyNavIntent 不应再有 enter-tabbar 分支');
     assert.equal(body.includes("case 'tabbar-move':"), false, 'applyNavIntent 不应再有 tabbar-move 分支');
     assert.equal(body.includes("intent.onFail === 'enter-tabbar'"), false, 'grid-move 不应再有 onFail enter-tabbar');
@@ -213,15 +198,7 @@ describe('F4 tabbar 死码已删(enter-tabbar 意图无处产生)', () => {
   });
 
   it('App.jsx 不再有 handleEmojiEnterTabbar/handleEmojiTabbarMove 与 props 转发', async () => {
-    const fs = await import('node:fs/promises');
-    const path = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const here = path.dirname(fileURLToPath(import.meta.url));
-    const src = await fs.readFile(path.join(here, '../../App.jsx'), 'utf8');
-    const body = src
-      .split('\n')
-      .filter((l) => !l.trimStart().startsWith('//'))
-      .join('\n');
+    const body = await readSource('../../App.jsx');
     assert.equal(body.includes('handleEmojiEnterTabbar'), false, 'App 不应再有 handleEmojiEnterTabbar');
     assert.equal(body.includes('handleEmojiTabbarMove'), false, 'App 不应再有 handleEmojiTabbarMove');
     assert.equal(body.includes('onEnterTabbar='), false, 'App 不应再传 onEnterTabbar prop');
@@ -231,15 +208,7 @@ describe('F4 tabbar 死码已删(enter-tabbar 意图无处产生)', () => {
   });
 
   it('TabNavigation 不再暴露 focusTabbar/kbNav 死接口', async () => {
-    const fs = await import('node:fs/promises');
-    const path = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const here = path.dirname(fileURLToPath(import.meta.url));
-    const src = await fs.readFile(path.join(here, '../TabNavigation.jsx'), 'utf8');
-    const body = src
-      .split('\n')
-      .filter((l) => !l.trimStart().startsWith('//'))
-      .join('\n');
+    const body = await readSource('../TabNavigation.jsx');
     assert.equal(body.includes('focusTabbar'), false, 'TabNavigation 不应再有 focusTabbar');
     assert.equal(body.includes('handleKbNav'), false, 'TabNavigation 不应再有 handleKbNav');
     assert.equal(body.includes('kbNav'), false, 'useImperativeHandle 不应再暴露 kbNav');
@@ -248,16 +217,7 @@ describe('F4 tabbar 死码已删(enter-tabbar 意图无处产生)', () => {
 
 describe('App 转发契约源码护栏', () => {
   it('App.jsx 含 dispatchEmojiNav 与四向 action', async () => {
-    const fs = await import('node:fs/promises');
-    const path = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const here = path.dirname(fileURLToPath(import.meta.url));
-    const appSrc = await fs.readFile(path.join(here, '../../App.jsx'), 'utf8');
-    // 剥行注释再匹配
-    const body = appSrc
-      .split('\n')
-      .filter((l) => !l.trimStart().startsWith('//'))
-      .join('\n');
+    const body = await readSource('../../App.jsx');
     assert.ok(body.includes('dispatchEmojiNav'), '缺 dispatchEmojiNav');
     assert.ok(body.includes("dispatchEmojiNav('navigate-down')"), '↓ 未转发');
     assert.ok(body.includes("dispatchEmojiNav('navigate-up')"), '↑ 未转发');
@@ -269,15 +229,7 @@ describe('App 转发契约源码护栏', () => {
   });
 
   it('EmojiTab 暴露 handleNavAction 且不挂 arrow keydown 主路径', async () => {
-    const fs = await import('node:fs/promises');
-    const path = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const here = path.dirname(fileURLToPath(import.meta.url));
-    const src = await fs.readFile(path.join(here, '../EmojiTab.jsx'), 'utf8');
-    const body = src
-      .split('\n')
-      .filter((l) => !l.trimStart().startsWith('//'))
-      .join('\n');
+    const body = await readSource('../EmojiTab.jsx');
     assert.ok(body.includes('handleNavAction'), '缺 handleNavAction');
     assert.ok(body.includes('resolveZoneNav'), '缺 resolveZoneNav');
     // 禁止再挂裸 Arrow 主路径(会与热键双触发)
@@ -287,15 +239,7 @@ describe('App 转发契约源码护栏', () => {
   });
 
   it('ImageLibraryTab activateKb 走 resolveActivateKb', async () => {
-    const fs = await import('node:fs/promises');
-    const path = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const here = path.dirname(fileURLToPath(import.meta.url));
-    const src = await fs.readFile(path.join(here, 'ImageLibraryTab.jsx'), 'utf8');
-    const body = src
-      .split('\n')
-      .filter((l) => !l.trimStart().startsWith('//'))
-      .join('\n');
+    const body = await readSource('ImageLibraryTab.jsx');
     assert.ok(body.includes('resolveActivateKb'), 'activateKb 必须用 resolveActivateKb');
     assert.ok(body.includes('kbImageIndexRef.current = result.index'), '必须同步写 ref');
     assert.ok(body.includes('kbImageIndexRef.current = -1'), 'resetKbIndex 必须同步清 ref');
@@ -304,22 +248,10 @@ describe('App 转发契约源码护栏', () => {
 
 // F5 gridHome 图片分支源码护栏
 describe('F5 gridHome 图片分支源码护栏', () => {
-  const readSrc = async (rel) => {
-    const fs = await import('node:fs/promises');
-    const path = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const here = path.dirname(fileURLToPath(import.meta.url));
-    return fs.readFile(path.join(here, rel), 'utf8');
-  };
-
   it('EmojiTab gridHome 不再引用未声明的 kbImageIndexRef', async () => {
     // 回归:gridHome 图片分支读 kbImageIndexRef(仅 ImageLibraryTab 声明),
     // → 后 navigateRight 越界 onFail grid-home 时直接 ReferenceError 崩溃
-    const src = await readSrc('../EmojiTab.jsx');
-    const body = src
-      .split('\n')
-      .filter((l) => !l.trimStart().startsWith('//'))
-      .join('\n');
+    const body = await readSource('../EmojiTab.jsx');
     const start = body.indexOf('const gridHome = useCallback');
     assert.notEqual(start, -1, '缺 gridHome 函数');
     const end = body.indexOf('}, [', start);
@@ -329,11 +261,7 @@ describe('F5 gridHome 图片分支源码护栏', () => {
 
   it('ImageLibraryTab useImperativeHandle 暴露 getKbIndex', async () => {
     // 契约:gridHome 图片分支经 api.getKbIndex 读当前 index,不依赖 EmojiTab 侧变量
-    const src = await readSrc('ImageLibraryTab.jsx');
-    const body = src
-      .split('\n')
-      .filter((l) => !l.trimStart().startsWith('//'))
-      .join('\n');
+    const body = await readSource('ImageLibraryTab.jsx');
     const start = body.indexOf('useImperativeHandle');
     assert.notEqual(start, -1, '缺 useImperativeHandle');
     assert.ok(body.includes('getKbIndex:'), 'useImperativeHandle 必须暴露 getKbIndex');
@@ -343,11 +271,7 @@ describe('F5 gridHome 图片分支源码护栏', () => {
   it('ImageLibraryTab goHome 用自身 imageCols 回到行首,EmojiTab 不再 navigateUp({rows})', async () => {
     // 回归:navigateUp({rows}) 参数被忽略只上移 1 行;且行数用 EmojiTab 的 gridCols(表情列数)
     // 计算与图片网格列数不符。goHome 用图片自身 imageCols 求行首,真正回当前分类第一格
-    const libSrc = await readSrc('ImageLibraryTab.jsx');
-    const libBody = libSrc
-      .split('\n')
-      .filter((l) => !l.trimStart().startsWith('//'))
-      .join('\n');
+    const libBody = await readSource('ImageLibraryTab.jsx');
     const start = libBody.indexOf('goHome:');
     assert.notEqual(start, -1, 'useImperativeHandle 必须暴露 goHome');
     assert.ok(
@@ -355,11 +279,7 @@ describe('F5 gridHome 图片分支源码护栏', () => {
       'goHome 必须用自身 imageCols 计算行首,不能靠调用方传行数'
     );
 
-    const emojiSrc = await readSrc('../EmojiTab.jsx');
-    const emojiBody = emojiSrc
-      .split('\n')
-      .filter((l) => !l.trimStart().startsWith('//'))
-      .join('\n');
+    const emojiBody = await readSource('../EmojiTab.jsx');
     const ghStart = emojiBody.indexOf('const gridHome = useCallback');
     assert.notEqual(ghStart, -1, '缺 gridHome 函数');
     const ghEnd = emojiBody.indexOf('}, [', ghStart);
@@ -376,15 +296,7 @@ describe('F5 gridHome 图片分支源码护栏', () => {
 // F4 后续:handleKbNav 整链已随 tabbar 死码删除,内联公式断言一并移除(无对象可断言)。
 describe('F9 resolveTabbarMove 已删(死导出清理)', () => {
   it('emojiKbNavigation.js 不导出 resolveTabbarMove', async () => {
-    const fs = await import('node:fs/promises');
-    const path = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const here = path.dirname(fileURLToPath(import.meta.url));
-    const src = await fs.readFile(path.join(here, 'emojiKbNavigation.js'), 'utf8');
-    const body = src
-      .split('\n')
-      .filter((l) => !l.trimStart().startsWith('//'))
-      .join('\n');
+    const body = await readSource('emojiKbNavigation.js');
     assert.equal(
       body.includes('resolveTabbarMove'),
       false,
@@ -393,11 +305,7 @@ describe('F9 resolveTabbarMove 已删(死导出清理)', () => {
   });
 
   it('emojiKbNavigation.test.js 不再 import/describe resolveTabbarMove', async () => {
-    const fs = await import('node:fs/promises');
-    const path = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const here = path.dirname(fileURLToPath(import.meta.url));
-    const src = await fs.readFile(path.join(here, 'emojiKbNavigation.test.js'), 'utf8');
+    const src = await readSourceRaw('emojiKbNavigation.test.js');
     // 只看静态 import 语句行(浅扫 import { ... } from 'emojiKbNavigation.js')
     const importLineMatch = src.match(/import\s*\{[\s\S]*?\}\s*from\s*['"`]\.\/emojiKbNavigation/);
     assert.ok(importLineMatch, '应能找到 import { ... } from emojiKbNavigation 行');
