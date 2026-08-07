@@ -164,9 +164,7 @@ fn register_navigation_hotkeys_from_settings() -> Result<(), String> {
                 );
                 // 插件可能在 Err 前部分写入 Windows 层，主动探测并注销清理，
                 // 避免残留吞键的"幽灵热键"。与 global.rs register_shortcut 同款。
-                if app.global_shortcut().is_registered(shortcut) {
-                    let _ = app.global_shortcut().unregister(shortcut);
-                }
+                super::global::safe_unregister(&app, shortcut);
                 // F7: 注册失败必须写 SHORTCUT_STATUS 状态表——前端 navigation tab
                 // 的 ShortcutInput 靠 backendId 查 getBackendError 展示冲突/失败，
                 // 不写则用户配置错误时前端静默无提示。key 用导航 config id，
@@ -205,7 +203,7 @@ fn unregister_navigation_hotkeys() {
     for registration in registrations {
         if let Ok(shortcut) = parse_shortcut(&registration.shortcut) {
             if app.global_shortcut().is_registered(shortcut) {
-                let _ = app.global_shortcut().unregister(shortcut);
+                super::global::safe_unregister(&app, shortcut);
                 println!(
                     "已注销导航快捷键 [{}]: {}",
                     registration.id, registration.shortcut
@@ -454,17 +452,16 @@ mod tests {
         &src[start..end]
     }
 
-    // F3: 注册失败路径必须先 is_registered 探测再 unregister 清理幽灵热键,
-    // 并保留 eprintln 错误日志。与 global.rs register_shortcut 同款。
+    // F3: 注册失败路径必须调 safe_unregister 清理幽灵热键（内部先
+    // is_registered 探测再 unregister,与 global.rs register_shortcut 同款），
+    // 并保留 eprintln 错误日志。
     #[test]
     fn navigation_failure_path_probes_before_unregister() {
         let src = strip_line_comments(&navigation_source());
         let b = fn_body(&src, "register_navigation_hotkeys_from_settings");
-        let probe_pos = b.find("is_registered(shortcut)");
-        let cleanup_pos = b.find("unregister(shortcut)");
         assert!(
-            probe_pos.is_some() && cleanup_pos.is_some() && probe_pos < cleanup_pos,
-            "注册失败路径必须先 is_registered 探测再 unregister 清理幽灵热键"
+            b.find("safe_unregister(&app, shortcut)").is_some(),
+            "注册失败路径必须调 safe_unregister 清理幽灵热键"
         );
         assert!(
             b.contains("eprintln!"),
