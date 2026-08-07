@@ -13,6 +13,7 @@ import { useWindowDrag } from '@shared/hooks/useWindowDrag';
 import { useTheme, applyThemeToBody } from '@shared/hooks/useTheme';
 import { useSettingsSync } from '@shared/hooks/useSettingsSync';
 import { useNavigationKeyboard } from '@shared/hooks/useNavigationKeyboard';
+import { hideMainWindow } from '@shared/api';
 import { useWindowAnimation } from '@shared/hooks/useWindowAnimation';
 import {
   resolveOutsideAppAction,
@@ -503,6 +504,7 @@ function App() {
 
   // 固定/取消固定窗口
   const handleTogglePin = async () => {
+    if (isSearchFocused) return;
     try {
       await toggleWindowPin();
     } catch (error) {
@@ -512,6 +514,7 @@ function App() {
 
   // 切换到上一个分组
   const handlePreviousGroup = () => {
+    if (isSearchFocused) return;
     if (!isMainTabVisible('favorites', settings.visibleOptionalTabs)) {
       return;
     }
@@ -532,6 +535,7 @@ function App() {
 
   // 切换到下一个分组
   const handleNextGroup = () => {
+    if (isSearchFocused) return;
     if (!isMainTabVisible('favorites', settings.visibleOptionalTabs)) {
       return;
     }
@@ -563,6 +567,13 @@ function App() {
     onNextGroup: handleNextGroup,
     onFilterLeft: handleFilterLeft,
     onFilterRight: handleFilterRight,
+    // 搜索框聚焦时 Esc 隐藏窗口会打断输入,与方向键守卫同策略:回退给 App 处理
+    onHideWindow: () => {
+      if (isSearchFocused) return;
+      hideMainWindow().catch(error => {
+        console.error('隐藏窗口失败:', error);
+      });
+    },
     enabled: true
   });
   const outerContainerClasses = `
