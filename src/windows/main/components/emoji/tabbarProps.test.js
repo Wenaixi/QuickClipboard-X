@@ -86,16 +86,15 @@ test('G3 App handleFilterLeft/Right 在 setEmojiMode 前调 restoreKbNav(过滤�
     .join('\n');
   const filterLeft = body.slice(body.indexOf('const handleFilterLeft'), body.indexOf('const handleFilterRight'));
   const filterRight = body.slice(body.indexOf('const handleFilterRight'), body.indexOf('const handleToggleSearch'));
-  // F1-2:G3 旧方案 resetKbNav 是 no-op(emojiMode effect 仍无条件重置 zone),
-  // 改为 restoreKbNav 挂起恢复意图,effect 在新数据上恢复 grid/search。
-  // 两个 handler 都必须在 setEmojiMode 前调用 restoreKbNav
+  // F1-2:F1-3 后 handler 经 handleEmojiModeChange 切模式(清搜索+setEmojiMode),
+  // 恢复意图仍在 setEmojiMode 前挂起。两个 handler 都必须在模式切换前调用 restoreKbNav
   assert.ok(
-    /restoreKbNav[\s\S]*?setEmojiMode/.test(filterLeft),
-    'handleFilterLeft 必须在 setEmojiMode 前调 restoreKbNav'
+    /restoreKbNav[\s\S]*?handleEmojiModeChange/.test(filterLeft),
+    'handleFilterLeft 必须在切模式前调 restoreKbNav'
   );
   assert.ok(
-    /restoreKbNav[\s\S]*?setEmojiMode/.test(filterRight),
-    'handleFilterRight 必须在 setEmojiMode 前调 restoreKbNav'
+    /restoreKbNav[\s\S]*?handleEmojiModeChange/.test(filterRight),
+    'handleFilterRight 必须在切模式前调 restoreKbNav'
   );
 });
 
