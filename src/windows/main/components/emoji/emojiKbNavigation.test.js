@@ -167,6 +167,51 @@ describe('端到端状态机路径(模拟用户)', () => {
   });
 });
 
+describe('F3 resetKbToOutside 收敛(去重置四连重复)', () => {
+  // 回归护栏:blurSearchInput/resetKbNav/emojiMode effect/越界 effect 四处内联同一
+  // 重置四连(setKbZone outside + kbRow -1 + kbCol 0 + resetKbIndex)。收敛为共享
+  // resetKbToOutside 后,四连只应出现在定义处,其余调用点一律复用。
+  it('重置四连只出现一次,且 blurSearchInput/resetKbNav 为共享函数别名', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const src = await fs.readFile(path.join(here, '../EmojiTab.jsx'), 'utf8');
+    const body = src
+      .split('\n')
+      .filter((l) => !l.trimStart().startsWith('//'))
+      .join('\n');
+
+    const resetBody = /setKbZone\('outside'\)[\s\S]{0,80}?setKbRow\(-1\)[\s\S]{0,80}?setKbCol\(0\)[\s\S]{0,80}?imageLibraryRef\.current\?\.resetKbIndex\?\.\(\)/g;
+    const count = (body.match(resetBody) || []).length;
+    assert.equal(count, 1, '重置四连应只存在于 resetKbToOutside 定义处,其余调用点必须复用');
+    assert.ok(body.includes('const resetKbToOutside = useCallback('), '缺共享重置函数 resetKbToOutside');
+    assert.ok(body.includes('const blurSearchInput = resetKbToOutside'), 'blurSearchInput 应复用共享函数,不再内联重复体');
+    assert.ok(body.includes('const resetKbNav = resetKbToOutside'), 'resetKbNav 应复用共享函数,不再内联重复体');
+  });
+
+  // ponytail: 高亮格判定依赖 kbZone/kbRow/kbCol,它们在 renderVirtualItem deps
+  // 中随方向键移动重建可见行。保留该取舍并加护栏:移动键不改变 deps 结构时
+  // 不得擅自移除这些依赖(否则高亮失能)。
+  it('renderVirtualItem deps 保留 kbZone/kbRow/kbCol(高亮格判定依赖)', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const src = await fs.readFile(path.join(here, '../EmojiTab.jsx'), 'utf8');
+    const body = src
+      .split('\n')
+      .filter((l) => !l.trimStart().startsWith('//'))
+      .join('\n');
+    const depsMatch = body.match(/renderVirtualItem = useCallback\([\s\S]*?\}, \[([\s\S]*?)\]\);/);
+    assert.ok(depsMatch, '应能找到 renderVirtualItem deps 数组');
+    const deps = depsMatch[1];
+    assert.ok(deps.includes('kbZone'), 'deps 必须保留 kbZone');
+    assert.ok(deps.includes('kbRow'), 'deps 必须保留 kbRow');
+    assert.ok(deps.includes('kbCol'), 'deps 必须保留 kbCol');
+  });
+});
+
 describe('F5 applyNavIntent 进 tabbar 必须 setKbZone(tabbar)', () => {
   // 回归护栏:旧实现 enter-tabbar 分支只调 onEnterTabbar?.(),kbZone 永远到不了 'tabbar',
   // resolveZoneNav('tabbar', ...) 死代码,tabbar 内 ←/→ 失能
