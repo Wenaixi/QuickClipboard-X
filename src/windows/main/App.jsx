@@ -28,7 +28,7 @@ import { getVisibleMainTabs, isMainTabVisible } from '@shared/constants/tabVisib
 import { toast, TOAST_POSITIONS, TOAST_SIZES } from '@shared/store/toastStore';
 import { formatUserMessage } from '@shared/utils/userMessages';
 import TitleBar from './components/TitleBar';
-import TabNavigation from './components/TabNavigation';
+import TabNavigation, { FILTER_IDS, EMOJI_MODE_IDS } from './components/TabNavigation';
 import ClipboardTab from './components/ClipboardTab';
 import FavoritesTab from './components/FavoritesTab';
 const EmojiTab = lazy(() => import('./components/EmojiTab'));
@@ -473,9 +473,9 @@ function App() {
       // emojiMode effect 会重置 kbZone——保存切换前 zone,setEmojiMode 后经
       // restoreKbNav 挂起恢复意图,effect 在新子模式数据上恢复 grid/search。
       emojiTabRef.current?.restoreKbNav?.(emojiTabRef.current?.getKbZone?.());
-      handleEmojiModeChange(cycleValue(['emoji', 'symbols', 'images'], emojiMode, -1));
+      handleEmojiModeChange(cycleValue(EMOJI_MODE_IDS, emojiMode, -1));
     } else {
-      setContentFilter(prev => cycleValue(['all', 'text', 'image', 'file', 'link'], prev, -1));
+      setContentFilter(prev => cycleValue(FILTER_IDS, prev, -1));
     }
   };
   const handleFilterRight = () => {
@@ -483,9 +483,9 @@ function App() {
     blurSearchInput();
     if (activeTab === 'emoji') {
       emojiTabRef.current?.restoreKbNav?.(emojiTabRef.current?.getKbZone?.());
-      handleEmojiModeChange(cycleValue(['emoji', 'symbols', 'images'], emojiMode, 1));
+      handleEmojiModeChange(cycleValue(EMOJI_MODE_IDS, emojiMode, 1));
     } else {
-      setContentFilter(prev => cycleValue(['all', 'text', 'image', 'file', 'link'], prev, 1));
+      setContentFilter(prev => cycleValue(FILTER_IDS, prev, 1));
     }
   };
   const handleToggleSearch = () => {
