@@ -189,6 +189,27 @@ describe('F3 resetKbToOutside 收敛(去重置四连重复)', () => {
     assert.ok(body.includes('const blurSearchInput = resetKbToOutside'), 'blurSearchInput 应复用共享函数,不再内联重复体');
     assert.ok(body.includes('const resetKbNav = resetKbToOutside'), 'resetKbNav 应复用共享函数,不再内联重复体');
   });
+
+  // ponytail: 高亮格判定依赖 kbZone/kbRow/kbCol,它们在 renderVirtualItem deps
+  // 中随方向键移动重建可见行。保留该取舍并加护栏:移动键不改变 deps 结构时
+  // 不得擅自移除这些依赖(否则高亮失能)。
+  it('renderVirtualItem deps 保留 kbZone/kbRow/kbCol(高亮格判定依赖)', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const src = await fs.readFile(path.join(here, '../EmojiTab.jsx'), 'utf8');
+    const body = src
+      .split('\n')
+      .filter((l) => !l.trimStart().startsWith('//'))
+      .join('\n');
+    const depsMatch = body.match(/renderVirtualItem = useCallback\([\s\S]*?\}, \[([\s\S]*?)\]\);/);
+    assert.ok(depsMatch, '应能找到 renderVirtualItem deps 数组');
+    const deps = depsMatch[1];
+    assert.ok(deps.includes('kbZone'), 'deps 必须保留 kbZone');
+    assert.ok(deps.includes('kbRow'), 'deps 必须保留 kbRow');
+    assert.ok(deps.includes('kbCol'), 'deps 必须保留 kbCol');
+  });
 });
 
 describe('F5 applyNavIntent 进 tabbar 必须 setKbZone(tabbar)', () => {

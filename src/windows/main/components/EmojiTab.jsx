@@ -754,6 +754,11 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
       );
     }
     return null;
+    // ponytail: kbZone/kbRow/kbCol 保留在 deps 里——高亮格判定需要它们,每次
+    // 方向键移动都会重建可见行 JSX。抽 memo 子组件只传 isHighlighted 可行,但
+    // 每格还依赖 handlePaste/name 派生/肤色变体等 7 个引用,拆分后收益有限、
+    // 复杂度上升,故保持全量重建(可见行数约 20 行 × 8 格,量级可接受)。
+    // 若未来 grid 大列表卡顿,优先方向:EmojiGridCell memo 组件 + isHighlighted prop。
   }, [handlePaste, isChinese, skinTone, applySkintone, getSkinVariants, handleSkinPickerOpen, emojiGlyphClassName, kbZone, kbRow, kbCol]);
 
   const currentCategories = useMemo(() => {
@@ -1264,6 +1269,9 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
               rangeChanged={handleRangeChanged}
               scrollerRef={scrollerRefCallback}
               overscan={10}
+              data-kbZone={kbZone}
+              data-kbRow={kbRow}
+              data-kbCol={kbCol}
               className="h-full"
               style={{ height: '100%' }}
             />
