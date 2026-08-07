@@ -168,15 +168,19 @@ function TabNavigation({
 
   const isFilterAutoExpanded = collapsedVisibleFilterCount >= 5;
   const expandableFilters = filters.slice(collapsedVisibleFilterCount);
-  const useFloatingExpandedFilters = !isFilterAutoExpanded && collapsedVisibleFilterCount <= 2 && expandableFilters.length > 0;
-  const shouldStretchHorizontalFilters = !isSidebarLayout && !useFloatingExpandedFilters;
+  const shouldStretchHorizontalFilters = !isSidebarLayout;
   const shouldExpandFilters = isFilterAutoExpanded || isFilterExpanded;
-  const shouldHideGroupButton = !useFloatingExpandedFilters && !isFilterAutoExpanded && shouldExpandFilters;
+  // F2 修:useFloatingExpandedFilters(!isFilterAutoExpanded && count<=2 && ...)在
+  // collapsedVisibleFilterCount 最小 4 后(commit 6af73f0f 产品决策:全部/文本/
+  // 图片/链接常驻,文件折叠)恒 false,浮动展开分支(878-903 死代码)已删。
+  const shouldHideGroupButton = !isFilterAutoExpanded && shouldExpandFilters;
   const expandedExtraWidth = expandableFilters.length > 0
     ? expandableFilters.length * FILTER_BUTTON_SIZE + (expandableFilters.length - 1) * FILTER_BUTTON_GAP
     : 0;
   const groupButtonWidth = isSidebarLayout ? 92 : GROUP_BUTTON_WIDTH;
   const groupButtonVisible = isSidebarLayout || isGroupButtonRevealed || isGroupsPanelOpen;
+  // F2 修:三连重复三元提取单变量(行为不变)
+  const hideGroup = shouldHideGroupButton || !groupButtonVisible;
   const sidebarShowLabel = isSidebarLayout ? !isSidebarCollapsed : true;
 
   // 键盘 tabbar 焦点:模式(emoji/symbols/images) + 主标签(favorites/clipboard)
@@ -199,9 +203,11 @@ function TabNavigation({
 
   // ←/→ 遍历模式层:emoji/symbols/images/favorites/clipboard(循环)
   // 主标签切换会让 EmojiTab unmount(emojiKbActive 由 setActiveTab 清 false)
-  // G2 修:null 写只保留分支链后一处——分支内每处 null 写 + focus 写被 React 18
-  // 批处理合并成最后一次 null,focus 高亮永不显示。分支链后的统一清在切换生效
-  // 后执行,同批次内高亮先显示、随后整批提交时焦点已清,行为正确。
+  // F2 修:不再写 setTabbarFocusId(null)——React 19 自动批处理把同 handler 内
+  // 两次 setState 合并为最后一次,nextId 写被 null 覆盖,isTabbarActive 恒 false,
+  // tabbar 键盘遍历高亮永不渲染。tabbarFocusId 常驻当前焦点(高亮跟随移动),
+  // EmojiTab 切换回搜索/网格时由 EmojiTab 侧清焦点,主标签 unmount 时
+  // EmojiTab 重挂载自然重置。
   const handleKbNav = useCallback((delta) => {
     // G5 修:items 从可见 tabs 派生(过滤掉不可见 tab),与 :116 tabs 过滤脱钩
     // 问题:硬编码 ['emoji','symbols','images','favorites','clipboard'] 在隐藏
@@ -230,8 +236,6 @@ function TabNavigation({
     } else if (nextId === 'images') {
       onEmojiModeChange('images');
     }
-    // 切换生效后统一清 stale 焦点,防再次 ← 从旧 ID 起算漂移
-    setTabbarFocusId(null);
   }, [tabbarFocusId, emojiMode, focusTabbarButton, onTabChange, onEmojiModeChange, tabs]);
 
   useImperativeHandle(ref, () => ({
@@ -491,6 +495,12 @@ function TabNavigation({
   // 按钮本身悬停(或面板打开)时保持显示,避免闪烁。
   const handleGroupRevealMouseMove = (event) => {
     if (isSidebarLayout || isGroupsPanelOpen || isGroupButtonRevealed) {
+      // F2 修:悬停中(已 reveal)移回也必须取消挂起的隐藏定时器,
+      // 否则按钮滑出→鼠标移出挂 300ms 定时器→定时器内移回→定时器到期按钮收起。
+      if (groupRevealTimerRef.current) {
+        clearTimeout(groupRevealTimerRef.current);
+        groupRevealTimerRef.current = null;
+      }
       return;
     }
     const rightArea = rightAreaRef.current;
@@ -524,8 +534,9 @@ function TabNavigation({
   };
 
   // controlsContainer 的 onMouseLeave 会同时被 filter 折叠与分组按钮收回使用。
-  // filter 分支保留原 onMouseLeave 语义(仅非 emoji 时);分组收回挂在额外
-  // onMouseLeave 上,两者独立互不覆盖。
+  // 两个 handler 均无条件执行(无 activeTab 守卫):emoji 模式下 filter leave
+  // 也会挂折叠定时器,但 emoji 模式无 filter onMouseEnter,isFilterExpanded
+  // 恒 false,定时器到期同值短路,无害;分组收回独立挂在 onMouseLeave 上。
   const handleControlsContainerMouseLeave = (event) => {
     handleFilterAreaMouseLeave(event);
     handleGroupRevealMouseLeave();
@@ -878,33 +889,6 @@ function TabNavigation({
                         />
                       ))}
 
-                      {useFloatingExpandedFilters ? (
-                        <div
-                          className={`absolute right-0 top-[calc(100%+6px)] z-[75] box-content flex w-7 flex-col items-center gap-1 rounded-lg border border-qc-border bg-qc-panel py-1 shadow-lg ${
-                            uiAnimationEnabled ? 'transition-all duration-200 ease-out' : ''
-                          }`}
-                          style={{
-                            opacity: shouldExpandFilters ? 1 : 0,
-                            transform: shouldExpandFilters ? 'translateY(0)' : 'translateY(-4px)',
-                            pointerEvents: shouldExpandFilters ? 'auto' : 'none'
-                          }}
-                        >
-                          {expandableFilters.map(filter => (
-                            <FilterButton
-                              key={filter.id}
-                              id={filter.id}
-                              label={filter.label}
-                              icon={filter.icon}
-                              isActive={contentFilter === filter.id}
-                              onClick={onFilterChange}
-                              tooltipPlacement="left"
-                              buttonRef={el => {
-                                filtersRef.current[filter.id] = el;
-                              }}
-                            />
-                          ))}
-                        </div>
-                      ) : (
                         <div
                           className={`flex items-center gap-1 overflow-hidden shrink-0 min-w-0 ${uiAnimationEnabled ? 'transition-all duration-300 ease-out' : ''}`}
                           style={{
@@ -928,16 +912,15 @@ function TabNavigation({
                             />
                           ))}
                         </div>
-                      )}
                     </div>
                   )}
 
                   <div
                     className={`overflow-visible shrink-0 ${uiAnimationEnabled ? 'transition-all duration-300 ease-out' : ''}`}
                     style={{
-                      width: shouldHideGroupButton || !groupButtonVisible ? '0px' : `${groupButtonWidth}px`,
-                      opacity: shouldHideGroupButton || !groupButtonVisible ? 0 : 1,
-                      pointerEvents: shouldHideGroupButton || !groupButtonVisible ? 'none' : 'auto'
+                      width: hideGroup ? '0px' : `${groupButtonWidth}px`,
+                      opacity: hideGroup ? 0 : 1,
+                      pointerEvents: hideGroup ? 'none' : 'auto'
                     }}
                   >
                     <GroupsPopup
