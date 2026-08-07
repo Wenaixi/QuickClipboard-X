@@ -658,16 +658,16 @@ pub fn register_number_shortcuts(modifier: &str) -> Result<(), String> {
         let mut status_map = SHORTCUT_STATUS.lock();
         status_map.remove("number_shortcuts");
     }
-    
+
     let is_f_key = modifier.ends_with("F");
     let prefix = if is_f_key {
         modifier.strip_suffix("F").unwrap_or("").trim_end_matches('+')
     } else {
         modifier
     };
-    
+
     let mut failed_shortcuts: Vec<String> = Vec::new();
-    
+
     for num in 1..=9 {
         let id = format!("number_{}", num);
         let shortcut_str = if is_f_key {
@@ -679,7 +679,7 @@ pub fn register_number_shortcuts(modifier: &str) -> Result<(), String> {
         } else {
             format!("{}+{}", modifier, num)
         };
-        
+
         if let Ok(shortcut) = parse_shortcut(&shortcut_str) {
             let key_id = format!("number_{}", num);
             let index = (num - 1) as usize;
@@ -722,9 +722,15 @@ pub fn register_number_shortcuts(modifier: &str) -> Result<(), String> {
                         "注册数字快捷键 {} 失败: {}，继续注册其他快捷键",
                         shortcut_str, e
                     );
-                    // 注册失败：插件可能在 Err 前部分写入 Windows 层，主动探测并
-                    // 注销清理，避免残留吞键的"幽灵热键"。
-                    safe_unregister(&app, shortcut);
+                    // F6: 注册失败：插件可能在 Err 前部分写入 Windows 层，主动探测并
+                    // 注销清理，避免残留吞键的"幽灵热键"。但清理前必须检查命中的
+                    // 组合键是否属于其他条目——reload 顺序是用户自定义条目先注册
+                    // 成功、数字快捷键后注册失败,失败清理探测到 Ctrl+1 已注册
+                    // （用户条目的）即注销它→用户热键静默失效但状态表仍显示成功。
+                    // 属于其他条目则跳过清理,仅记录失败状态。
+                    if !belongs_to_other_shortcut(&shortcut) {
+                        safe_unregister(&app, shortcut);
+                    }
                     failed_shortcuts.push(shortcut_str);
                 }
             }
@@ -743,6 +749,21 @@ pub fn register_number_shortcuts(modifier: &str) -> Result<(), String> {
     
     Ok(())
 }
+
+// 判断组合键是否已属于"本次 reload 的其他条目"——数字快捷键注册失败时,
+// 命中的组合键可能是刚注册成功的用户自定义热键(RELOAD 顺序用户条目在前),
+// 若直接探测注销会误杀用户热键。是则跳过清理,仅记录失败状态。
+fn belongs_to_other_shortcut(shortcut: &Shortcut) -> bool {
+    let registered = REGISTERED_SHORTCUTS.lock();
+    registered.iter().any(|(_, s)| {
+        parse_shortcut(s).map(|registered_shortcut| registered_shortcut == *shortcut).unwrap_or(false)
+    })
+}
+// ponytail: unregister_number_shortcuts 保留独立实现,不循环调
+// unregister_shortcut——它 get_app 失败时提前 return 会漏掉 shortcuts.retain
+// 的状态清理;且本函数先持 REGISTERED_SHORTCUTS 锁,循环调用会再拿同一把锁
+// 自死锁。unregister_shortcut 按 position 移除+clear_shortcut_status 的
+// 语义与数字键批量注销不同,保持现状。
 
 pub fn unregister_number_shortcuts() {
     let mut shortcuts = REGISTERED_SHORTCUTS.lock();
@@ -766,9 +787,6 @@ pub fn unregister_number_shortcuts() {
         }
         shortcuts.retain(|(sid, _)| sid != &id);
     }
-    // ponytail: 不循环调 unregister_shortcut——它 get_app 失败时提前 return,
-    // 会漏掉 shortcuts.retain 的状态清理;且本函数先持 REGISTERED_SHORTCUTS
-    // 锁,循环调用会再拿同一把锁自死锁。保持现状。
 }
 
 // 首次按下
@@ -1072,6 +1090,27 @@ mod tests {
         assert!(
             probe_pos.is_some() && unregister_pos.is_some() && probe_pos < unregister_pos,
             "unregister_number_shortcuts 必须先 is_registered 探测再 unregister"
+        );
+    }
+
+    // F6: register_number_shortcuts 失败清理不得误杀同组合键的其他条目——
+    // 用户把自定义热键设为 Ctrl+1 时,reload 顺序是用户条目先注册成功,
+    // 数字快捷键后注册失败,失败清理探测到 Ctrl+1 已注册(用户条目的)
+    // 即注销它→用户热键静默失效但状态表仍显示成功。清理前必须先检查
+    // 该组合键是否属于其他条目,属于则跳过清理。
+    #[test]
+    fn number_shortcut_failure_cleanup_does_not_kill_same_combo_other_id() {
+        let src = strip_line_comments(&global_source());
+        let b = fn_body(&src, "register_number_shortcuts");
+        let guard_pos = b.find("belongs_to_other");
+        let unregister_pos = b.find("safe_unregister(&app, shortcut)");
+        assert!(
+            guard_pos.is_some() && unregister_pos.is_some() && guard_pos < unregister_pos,
+            "失败清理前必须检查同组合键是否属于其他条目(belongs_to_other),避免误杀用户热键"
+        );
+        assert!(
+            b.find("failed_shortcuts.push").is_some(),
+            "失败清理后必须记录 failed_shortcuts"
         );
     }
 
