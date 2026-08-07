@@ -73,8 +73,9 @@ test('F6 App.jsx 不再有 handleEmojiTabbarEnter', async () => {
 // F7: focusTabbarButton 对主标签调 el.focus?.(),但 TabButton 把 buttonRef 挂外层 div
 // 无 tabIndex → .focus() no-op;emoji 模式 tabbarRefs.current[id] = el.querySelector?.('button')
 // 拿到内层真 button。两路径不一致 → 主标签 tabbar 焦点无视觉/JS 生效。
-// 修复:TabButton.jsx outer div 加 tabIndex={-1} 让 div 编程可达,el.focus?.() 真正生效。
-test('F7 TabButton outer div 可编程 focus(tabIndex=-1)', async () => {
+// F4 已删整条 tabbar 键盘死码链(tabbarRefs/focusTabbarButton 均不存在),
+// 护栏改为否定形式:TabButton 不再需要可编程 focus 的 tabIndex。
+test('F7 TabButton 不再有 tabbar 编程焦点用 tabIndex=-1', async () => {
   const fs = await import('node:fs/promises');
   const path = await import('node:path');
   const { fileURLToPath } = await import('node:url');
@@ -85,10 +86,10 @@ test('F7 TabButton outer div 可编程 focus(tabIndex=-1)', async () => {
     .filter((l) => !l.trimStart().startsWith('//'))
     .join('\n');
   assert.ok(/ref=\{buttonRef\}/.test(body), 'TabButton 外层 div 应仍挂 buttonRef');
-  const outerDivMatch = body.match(/<div\s+ref=\{buttonRef\}[\s\S]{0,200}>/);
-  assert.ok(outerDivMatch, '应找到外层 div 标签块');
-  assert.ok(
-    outerDivMatch[0].includes('tabIndex={-1}'),
-    '外层 div 必须 tabIndex={-1},否则 focus no-op'
+  // F4 删死码链后,外层 div 的 tabIndex={-1} 不再有任何调用方(focusTabbarButton 已删)
+  assert.equal(
+    body.includes('tabIndex={-1}'),
+    false,
+    '外层 div 不应再有 tabIndex={-1}(唯一调用方 focusTabbarButton 已随死码链删除)'
   );
 });
