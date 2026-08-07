@@ -433,11 +433,25 @@ const ImageLibraryTab = forwardRef(function ImageLibraryTab({
     loadedImageIndexesRef.current = new Set();
     loadingImageIndexesRef.current = new Set();
     loadGenerationRef.current += 1;
+    // F1-4:搜索词变化会缩小结果集(displayImageItems 换源),旧 kbImageIndex
+    // 可能越界 → 高亮停在空位、Enter 静默无操作。与 currentGroup 切换同款
+    // 重置:同步清 ref 避免同 tick activateKb 读到旧 index。
+    kbImageIndexRef.current = -1;
+    setKbImageIndex(-1);
   }, []);
   const activeGroupMeta = useMemo(
     () => imageGroups.find(group => group.name === currentGroup) || null,
     [imageGroups, currentGroup]
   );
+  // F1-4:搜索词变化 → displayImageItems 换源(过滤),旧 kbImageIndex 可能越界
+  // (kbMove/executeCurrent 用已加载数组,而 activateKb 曾用全量 clamp,口径
+  // 不一致 → 高亮停空位、Enter 静默)。统一:搜索词变化时重置 index 回 -1。
+  const prevSearchQueryRef = useRef(searchQuery);
+  if (prevSearchQueryRef.current !== searchQuery) {
+    prevSearchQueryRef.current = searchQuery;
+    kbImageIndexRef.current = -1;
+    setKbImageIndex(-1);
+  }
   selectedImageKeysRef.current = selectedImageKeys;
   selectionAnchorKeyRef.current = selectionAnchorKey;
 
@@ -1068,7 +1082,10 @@ const ImageLibraryTab = forwardRef(function ImageLibraryTab({
     },
     activateKb: () => {
       // 同步写 ref 再返回,避免 setState 异步导致首次永远 false
-      const result = resolveActivateKb(kbImageIndexRef.current, displayImageTotal);
+      // F1-4:与 kbMove/executeCurrent 同口径——用已加载数组长度 clamp,
+      // 不用全量 displayImageTotal(懒加载未加载槽位是占位格,index 落在
+      // 占位格上高亮可见但 Enter 静默,口径不一致)
+      const result = resolveActivateKb(kbImageIndexRef.current, displayImageItemsRef.current.length);
       if (!result.ok) return false;
       kbImageIndexRef.current = result.index;
       setKbImageIndex(result.index);
