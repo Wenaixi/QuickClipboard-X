@@ -23,7 +23,6 @@ import {
   resolveSidebarCategoryId,
   resolveZoneNav,
   isSidebarCategoryActive,
-  cycleValue,
 } from './emoji/emojiKbNavigation';
 
 const DEFAULT_GRID_COLS = 8;
@@ -221,7 +220,7 @@ function getImageGroupNameFromDragEvent(event) {
   return target?.dataset?.imageGroupName || '';
 }
 
-const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, onEnterTabbar, onTabbarMove, onSwitchTab, searchQuery = '' }, ref) {
+const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, onSwitchTab, searchQuery = '' }, ref) {
   const showSymbols = emojiMode === 'symbols';
   const showImages = emojiMode === 'images';
   const { t } = useTranslation();
@@ -927,6 +926,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
     imageLibraryRef.current?.resetKbIndex?.();
   }, []);
   const blurSearchInput = resetKbToOutside;
+
   // G3:过滤热键路径(App handleFilterLeft/Right)切子模式前调用——把 kbZone 置
   // outside,让 emojiMode effect 的 setKbZone('outside') 同值短路,effect 不跑,
   // 键盘导航态(如 grid 高亮)得以保留
@@ -1006,14 +1006,8 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
 
   const gridHome = useCallback(() => {
     if (showImages) {
-      const api = imageLibraryRef.current;
-      if (api) {
-        const index = api.getKbIndex?.() ?? kbImageIndexRef.current;
-        const row = Math.floor(index / gridCols);
-        if (index >= 0 && row > 0) {
-          api.navigateUp({ rows: row });
-        }
-      }
+      // 图片网格列数与表情不同,行首计算在 ImageLibraryTab 内(用自身 imageCols)
+      imageLibraryRef.current?.goHome?.();
       return;
     }
     const data = virtualDataRef.current;
@@ -1054,15 +1048,6 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
           onEmojiModeChange?.(cycleValue(['emoji', 'symbols', 'images'], emojiMode, -1));
         }
         break;
-      case 'enter-tabbar':
-        // 进 tabbar 同步写 kbZone,否则 resolveZoneNav('tabbar', ...) 死码
-        setKbZone('tabbar');
-        // 交给 TabNavigation 聚焦模式层
-        onEnterTabbar?.();
-        break;
-      case 'tabbar-move':
-        onTabbarMove?.(intent.delta);
-        break;
       case 'deactivate':
         blurSearchInput();
         break;
@@ -1074,10 +1059,6 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
         if (!ok && intent.onFail === 'grid-home') {
           gridHome();
         }
-        if (!ok && intent.onFail === 'enter-tabbar') {
-          setKbZone('tabbar');
-          onEnterTabbar?.();
-        }
         break;
       }
       case 'sidebar-move': {
@@ -1088,7 +1069,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
       default:
         break;
     }
-  }, [focusSearchInput, enterGrid, enterSidebar, blurSearchInput, moveGridBy, moveSidebarBy, gridHome, onEnterTabbar, onTabbarMove, onSwitchTab]);
+  }, [focusSearchInput, enterGrid, enterSidebar, blurSearchInput, moveGridBy, moveSidebarBy, gridHome, onSwitchTab]);
 
   // 主路径:App 转发后端 navigation-action。不挂 window keydown,
   // 避免与 RegisterHotKey 在搜索框聚焦时双触发(进 grid 两次/跳格)。
