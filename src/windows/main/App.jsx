@@ -469,13 +469,10 @@ function App() {
     if (isSearchFocused) return;
     blurSearchInput();
     if (activeTab === 'emoji') {
-      // G3 修:过滤热键(⌘+←/→)切子模式是"键盘驱动"路径,不应踢出键盘导航态。
-      // emojiMode effect 会 reset kbZone 到 outside——这里先重置 nav 让 effect 短路
-      // (same-value setState 不触发 effect),保住 grid 高亮继续可用。
-      const lastZone = emojiTabRef.current?.getKbZone?.();
-      if (lastZone !== 'outside') {
-        emojiTabRef.current?.resetKbNav?.();
-      }
+      // F1-2 修:过滤热键(⌘+←/→)切子模式是"键盘驱动"路径,不踢出键盘导航态。
+      // emojiMode effect 会重置 kbZone——保存切换前 zone,setEmojiMode 后经
+      // restoreKbNav 挂起恢复意图,effect 在新子模式数据上恢复 grid/search。
+      emojiTabRef.current?.restoreKbNav?.(emojiTabRef.current?.getKbZone?.());
       setEmojiMode(prev => cycleValue(['emoji', 'symbols', 'images'], prev, -1));
     } else {
       setContentFilter(prev => cycleValue(['all', 'text', 'image', 'file', 'link'], prev, -1));
@@ -485,11 +482,7 @@ function App() {
     if (isSearchFocused) return;
     blurSearchInput();
     if (activeTab === 'emoji') {
-      // G3 修:同上,过滤热键切子模式不踢出键盘导航态
-      const lastZone = emojiTabRef.current?.getKbZone?.();
-      if (lastZone !== 'outside') {
-        emojiTabRef.current?.resetKbNav?.();
-      }
+      emojiTabRef.current?.restoreKbNav?.(emojiTabRef.current?.getKbZone?.());
       setEmojiMode(prev => cycleValue(['emoji', 'symbols', 'images'], prev, 1));
     } else {
       setContentFilter(prev => cycleValue(['all', 'text', 'image', 'file', 'link'], prev, 1));
