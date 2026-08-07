@@ -165,10 +165,12 @@ function TabNavigation({
 
   const isFilterAutoExpanded = collapsedVisibleFilterCount >= 5;
   const expandableFilters = filters.slice(collapsedVisibleFilterCount);
-  const useFloatingExpandedFilters = !isFilterAutoExpanded && collapsedVisibleFilterCount <= 2 && expandableFilters.length > 0;
-  const shouldStretchHorizontalFilters = !isSidebarLayout && !useFloatingExpandedFilters;
+  const shouldStretchHorizontalFilters = !isSidebarLayout;
   const shouldExpandFilters = isFilterAutoExpanded || isFilterExpanded;
-  const shouldHideGroupButton = !useFloatingExpandedFilters && !isFilterAutoExpanded && shouldExpandFilters;
+  // F2 修:useFloatingExpandedFilters(!isFilterAutoExpanded && count<=2 && ...)在
+  // collapsedVisibleFilterCount 最小 4 后(commit 6af73f0f 产品决策:全部/文本/
+  // 图片/链接常驻,文件折叠)恒 false,浮动展开分支(878-903 死代码)已删。
+  const shouldHideGroupButton = !isFilterAutoExpanded && shouldExpandFilters;
   const expandedExtraWidth = expandableFilters.length > 0
     ? expandableFilters.length * FILTER_BUTTON_SIZE + (expandableFilters.length - 1) * FILTER_BUTTON_GAP
     : 0;
@@ -881,33 +883,6 @@ function TabNavigation({
                         />
                       ))}
 
-                      {useFloatingExpandedFilters ? (
-                        <div
-                          className={`absolute right-0 top-[calc(100%+6px)] z-[75] box-content flex w-7 flex-col items-center gap-1 rounded-lg border border-qc-border bg-qc-panel py-1 shadow-lg ${
-                            uiAnimationEnabled ? 'transition-all duration-200 ease-out' : ''
-                          }`}
-                          style={{
-                            opacity: shouldExpandFilters ? 1 : 0,
-                            transform: shouldExpandFilters ? 'translateY(0)' : 'translateY(-4px)',
-                            pointerEvents: shouldExpandFilters ? 'auto' : 'none'
-                          }}
-                        >
-                          {expandableFilters.map(filter => (
-                            <FilterButton
-                              key={filter.id}
-                              id={filter.id}
-                              label={filter.label}
-                              icon={filter.icon}
-                              isActive={contentFilter === filter.id}
-                              onClick={onFilterChange}
-                              tooltipPlacement="left"
-                              buttonRef={el => {
-                                filtersRef.current[filter.id] = el;
-                              }}
-                            />
-                          ))}
-                        </div>
-                      ) : (
                         <div
                           className={`flex items-center gap-1 overflow-hidden shrink-0 min-w-0 ${uiAnimationEnabled ? 'transition-all duration-300 ease-out' : ''}`}
                           style={{
@@ -931,7 +906,6 @@ function TabNavigation({
                             />
                           ))}
                         </div>
-                      )}
                     </div>
                   )}
 
