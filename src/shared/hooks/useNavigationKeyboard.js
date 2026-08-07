@@ -1,6 +1,5 @@
 import { useEffect, useRef } from 'react'
 import { listen } from '@tauri-apps/api/event'
-import { hideMainWindow } from '@shared/api'
 
 // 全局键盘导航Hook
 export function useNavigationKeyboard({
@@ -15,6 +14,7 @@ export function useNavigationKeyboard({
   onNextGroup = null,
   onFilterLeft = null,
   onFilterRight = null,
+  onHideWindow = null,
   enabled = true
 }) {
   const handlersRef = useRef({
@@ -28,7 +28,8 @@ export function useNavigationKeyboard({
     onPreviousGroup,
     onNextGroup,
     onFilterLeft,
-    onFilterRight
+    onFilterRight,
+    onHideWindow
   })
 
   useEffect(() => {
@@ -43,7 +44,8 @@ export function useNavigationKeyboard({
       onPreviousGroup,
       onNextGroup,
       onFilterLeft,
-      onFilterRight
+      onFilterRight,
+      onHideWindow
     }
   }, [
     onNavigateUp,
@@ -56,7 +58,8 @@ export function useNavigationKeyboard({
     onPreviousGroup,
     onNextGroup,
     onFilterLeft,
-    onFilterRight
+    onFilterRight,
+    onHideWindow
   ])
 
   useEffect(() => {
@@ -97,9 +100,10 @@ export function useNavigationKeyboard({
               if (handlers.onToggleSearch) handlers.onToggleSearch()
               break
             case 'hide-window':
-              hideMainWindow().catch(err => {
-                console.error('隐藏窗口失败:', err)
-              })
+              // 走回调让 App 侧可加 isSearchFocused 守卫(搜索框聚焦时 Esc 应只动输入框)
+              if (handlers.onHideWindow) {
+                handlers.onHideWindow()
+              }
               break
             case 'toggle-pin':
               if (handlers.onTogglePin) {
