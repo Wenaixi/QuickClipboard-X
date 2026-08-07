@@ -473,7 +473,7 @@ function App() {
       // emojiMode effect 会重置 kbZone——保存切换前 zone,setEmojiMode 后经
       // restoreKbNav 挂起恢复意图,effect 在新子模式数据上恢复 grid/search。
       emojiTabRef.current?.restoreKbNav?.(emojiTabRef.current?.getKbZone?.());
-      setEmojiMode(prev => cycleValue(['emoji', 'symbols', 'images'], prev, -1));
+      handleEmojiModeChange(cycleValue(['emoji', 'symbols', 'images'], emojiMode, -1));
     } else {
       setContentFilter(prev => cycleValue(['all', 'text', 'image', 'file', 'link'], prev, -1));
     }
@@ -483,7 +483,7 @@ function App() {
     blurSearchInput();
     if (activeTab === 'emoji') {
       emojiTabRef.current?.restoreKbNav?.(emojiTabRef.current?.getKbZone?.());
-      setEmojiMode(prev => cycleValue(['emoji', 'symbols', 'images'], prev, 1));
+      handleEmojiModeChange(cycleValue(['emoji', 'symbols', 'images'], emojiMode, 1));
     } else {
       setContentFilter(prev => cycleValue(['all', 'text', 'image', 'file', 'link'], prev, 1));
     }
@@ -493,6 +493,14 @@ function App() {
       searchRef.current.toggleFocus();
     }
     setIsSearchFocused(searchRef.current?.isFocused?.() === true);
+  };
+
+  // F1-3:切子模式统一入口——先清空搜索再切模式。搜索框是 App 顶层 state,
+  // 切子模式后旧关键词仍过滤新模式数据(如 'grin' 切到 symbols 空网格),
+  // 旧版 main 的 effect 内 setSearchQuery('') 在 80acf679 合并搜索框时丢失。
+  const handleEmojiModeChange = (nextMode) => {
+    setSearchQuery('');
+    setEmojiMode(nextMode);
   };
 
   // 固定/取消固定窗口
@@ -583,11 +591,11 @@ function App() {
     bg-qc-surface
   `.trim().replace(/\s+/g, ' ');
   const TitleBarComponent = <TitleBar ref={searchRef} searchQuery={searchQuery} onSearchChange={setSearchQuery} searchPlaceholder={t('search.placeholder')} position={settings.titleBarPosition} activeTab={activeTab} updateBannerState={updateBannerState} onSearchFocusChange={setIsSearchFocused} />;
-  const TabNavigationComponent = <TabNavigation ref={tabNavigationRef} activeTab={activeTab} onTabChange={setActiveTab} contentFilter={contentFilter} onFilterChange={setContentFilter} emojiMode={emojiMode} onEmojiModeChange={setEmojiMode} onGroupChange={handleGroupChange} groupsPopupRef={groupsPopupRef} navigationMode={tabNavigationMode} />;
+  const TabNavigationComponent = <TabNavigation ref={tabNavigationRef} activeTab={activeTab} onTabChange={setActiveTab} contentFilter={contentFilter} onFilterChange={setContentFilter} emojiMode={emojiMode} onEmojiModeChange={handleEmojiModeChange} onGroupChange={handleGroupChange} groupsPopupRef={groupsPopupRef} navigationMode={tabNavigationMode} />;
   const ContentComponent = <div ref={contentDragRef} className="main-content-area flex-1 min-h-0 overflow-hidden relative pb-[8px] bg-qc-surface transition-colors duration-500">
       {activeTab === 'clipboard' && <ClipboardTab ref={clipboardTabRef} contentFilter={contentFilter} searchQuery={searchQuery} />}
       {activeTab === 'favorites' && <FavoritesTab ref={favoritesTabRef} contentFilter={contentFilter} searchQuery={searchQuery} />}
-      {activeTab === 'emoji' && <Suspense fallback={null}><EmojiTab ref={emojiTabRef} emojiMode={emojiMode} onEmojiModeChange={setEmojiMode} onEnterTabbar={handleEmojiEnterTabbar} onTabbarMove={handleEmojiTabbarMove} onSwitchTab={handleEmojiSwitchTab} searchQuery={searchQuery} /></Suspense>}
+      {activeTab === 'emoji' && <Suspense fallback={null}><EmojiTab ref={emojiTabRef} emojiMode={emojiMode} onEmojiModeChange={handleEmojiModeChange} onEnterTabbar={handleEmojiEnterTabbar} onTabbarMove={handleEmojiTabbarMove} onSwitchTab={handleEmojiSwitchTab} searchQuery={searchQuery} /></Suspense>}
     </div>;
   const ActionBarComponent = <MultiSelectActionBar activeTab={activeTab} />;
   const renderWorkspace = () => {
