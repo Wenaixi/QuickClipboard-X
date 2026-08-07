@@ -230,9 +230,7 @@ where
             // 同组合键的其他 id 条目——属配置错误可接受，UI 侧已有
             // duplicate 检测提示，不按 id 探测是刻意取舍（插件 API 只
             // 提供按 Shortcut 的 is_registered/unregister）。
-            if app.global_shortcut().is_registered(shortcut) {
-                let _ = app.global_shortcut().unregister(shortcut);
-            }
+            safe_unregister(&app, shortcut);
             let error_msg = if e.to_string().contains("already registered") {
                 "CONFLICT".to_string()
             } else {
@@ -241,6 +239,15 @@ where
             update_shortcut_status(id, shortcut_str, false, Some(error_msg.clone()));
             Err(format!("注册快捷键失败: {}", e))
         }
+    }
+}
+
+// 探测后再注销：避免对未注册的裸键 UnregisterHotKey 空跑后，内部表与
+// Windows 层脱节，残留吞键的"幽灵热键"。所有失败清理/注销路径共用。
+// Shortcut 是 Copy 类型,值传递避免 &Shortcut 无法满足插件 From 约束。
+pub(super) fn safe_unregister(app: &AppHandle, shortcut: Shortcut) {
+    if app.global_shortcut().is_registered(shortcut) {
+        let _ = app.global_shortcut().unregister(shortcut);
     }
 }
 
@@ -256,9 +263,7 @@ pub fn unregister_shortcut(id: &str) {
         if let Ok(shortcut) = parse_shortcut(&shortcut_str) {
             // 先探测再注销，避免对未注册的裸键 UnregisterHotKey 空跑后，
             // 内部表与 Windows 层脱节，残留吞键的"幽灵热键"。
-            if app.global_shortcut().is_registered(shortcut) {
-                let _ = app.global_shortcut().unregister(shortcut);
-            }
+            safe_unregister(&app, shortcut);
             println!("已注销快捷键 [{}]: {}", id, shortcut_str);
         }
     }
@@ -359,9 +364,7 @@ pub fn register_quickpaste_hotkey(shortcut_str: &str) -> Result<(), String> {
         .map_err(|e| {
             // 注册失败：插件可能在 Err 前部分写入 Windows 层，主动探测并
             // 注销清理，避免残留吞键的"幽灵热键"。
-            if app.global_shortcut().is_registered(shortcut) {
-                let _ = app.global_shortcut().unregister(shortcut);
-            }
+            safe_unregister(&app, shortcut);
             format!("注册便捷粘贴快捷键失败: {}", e)
         })?;
     
@@ -598,9 +601,7 @@ pub fn register_paste_plain_text_hotkey(shortcut_str: &str) -> Result<(), String
         .map_err(|e| {
             // 注册失败：插件可能在 Err 前部分写入 Windows 层，主动探测并
             // 注销清理，避免残留吞键的"幽灵热键"。
-            if app.global_shortcut().is_registered(shortcut) {
-                let _ = app.global_shortcut().unregister(shortcut);
-            }
+            safe_unregister(&app, shortcut);
             format!("注册纯文本粘贴快捷键失败: {}", e)
         })?;
 
@@ -723,9 +724,7 @@ pub fn register_number_shortcuts(modifier: &str) -> Result<(), String> {
                     );
                     // 注册失败：插件可能在 Err 前部分写入 Windows 层，主动探测并
                     // 注销清理，避免残留吞键的"幽灵热键"。
-                    if app.global_shortcut().is_registered(shortcut) {
-                        let _ = app.global_shortcut().unregister(shortcut);
-                    }
+                    safe_unregister(&app, shortcut);
                     failed_shortcuts.push(shortcut_str);
                 }
             }
@@ -760,13 +759,16 @@ pub fn unregister_number_shortcuts() {
                 // 注销，避免对未注册的裸键 UnregisterHotKey 空跑后内部表
                 // 与 Windows 层脱节，残留吞键的"幽灵热键"。
                 if app.global_shortcut().is_registered(shortcut) {
-                    let _ = app.global_shortcut().unregister(shortcut);
+                    safe_unregister(&app, shortcut);
                     println!("已注销数字快捷键: {}", shortcut_str);
                 }
             }
         }
         shortcuts.retain(|(sid, _)| sid != &id);
     }
+    // ponytail: 不循环调 unregister_shortcut——它 get_app 失败时提前 return,
+    // 会漏掉 shortcuts.retain 的状态清理;且本函数先持 REGISTERED_SHORTCUTS
+    // 锁,循环调用会再拿同一把锁自死锁。保持现状。
 }
 
 // 首次按下
@@ -1055,7 +1057,7 @@ mod tests {
 
     // F5: unregister_number_shortcuts 必须先 is_registered 探测再注销,
     // 与 unregister_shortcut 同款——裸 UnregisterHotKey 空跑会让内部表
-    // 与 Windows 层脱节,残留吞键的幽灵热键。
+    // 与 Windows 层脱节,残留吞键的幽灵热键。统一走 safe_unregister。
     #[test]
     fn unregister_number_shortcuts_probes_before_unregister() {
         let src = strip_line_comments(&global_source());
@@ -1066,7 +1068,7 @@ mod tests {
         let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(src.len());
         let b = &src[start..end];
         let probe_pos = b.find("is_registered(shortcut)");
-        let unregister_pos = b.find("unregister(shortcut)");
+        let unregister_pos = b.find("safe_unregister");
         assert!(
             probe_pos.is_some() && unregister_pos.is_some() && probe_pos < unregister_pos,
             "unregister_number_shortcuts 必须先 is_registered 探测再 unregister"
@@ -1167,7 +1169,7 @@ mod tests {
 
     // 三个直连 on_shortcut 的注册函数失败路径必须清理幽灵热键：
     // 插件可能在 Err 前部分写入 Windows 层，若不探测注销会残留吞键。
-    // 与 register_shortcut 的 Err 分支同款清理。
+    // 统一走 safe_unregister 公共函数（内含 is_registered 探测）。
     #[test]
     fn direct_registration_fns_cleanup_ghost_hotkey_on_failure() {
         let src = global_source();
@@ -1184,11 +1186,9 @@ mod tests {
             "register_number_shortcuts",
         ] {
             let b = body(name);
-            let cleanup_pos = b.find("is_registered(shortcut)");
-            let unregister_pos = b.find("unregister(shortcut)");
             assert!(
-                cleanup_pos.is_some() && unregister_pos.is_some() && cleanup_pos < unregister_pos,
-                "{name} 失败路径必须 is_registered 探测后 unregister 清理幽灵热键"
+                b.find("safe_unregister(&app, shortcut)").is_some(),
+                "{name} 失败路径必须调 safe_unregister 清理幽灵热键"
             );
         }
     }
