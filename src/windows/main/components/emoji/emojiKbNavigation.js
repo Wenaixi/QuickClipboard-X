@@ -82,14 +82,6 @@ export function resolveZoneNav(kbZone, action) {
     return { type: 'none' };
   }
 
-  if (kbZone === 'tabbar') {
-    if (action === 'navigate-up') return { type: 'enter-search' };
-    if (action === 'navigate-down') return { type: 'enter-grid' };
-    if (action === 'tab-left') return { type: 'tabbar-move', delta: -1 };
-    if (action === 'tab-right') return { type: 'tabbar-move', delta: 1 };
-    return { type: 'none' };
-  }
-
   return { type: 'none' };
 }
 

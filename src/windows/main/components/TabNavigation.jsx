@@ -176,69 +176,6 @@ function TabNavigation({
   const groupButtonVisible = isSidebarLayout || isGroupButtonRevealed || isGroupsPanelOpen;
   const sidebarShowLabel = isSidebarLayout ? !isSidebarCollapsed : true;
 
-  // 键盘 tabbar 焦点:模式(emoji/symbols/images) + 主标签(favorites/clipboard)
-  // 从 EmojiTab ← 越界进入;←/→ 遍历;Enter 选中;↑/↓ 回搜索/网格
-  const tabbarRefs = useRef({});
-  const [tabbarFocusId, setTabbarFocusId] = useState(null);
-
-  const focusTabbarButton = useCallback((id) => {
-    setTabbarFocusId(id);
-    const el = tabbarRefs.current[id];
-    if (el) {
-      el.focus?.();
-    }
-  }, []);
-
-  const focusTabbar = useCallback(() => {
-    const startId = emojiMode || 'emoji';
-    focusTabbarButton(startId);
-  }, [emojiMode, focusTabbarButton]);
-
-  // ←/→ 遍历模式层:emoji/symbols/images/favorites/clipboard(循环)
-  // 主标签切换会让 EmojiTab unmount(emojiKbActive 由 setActiveTab 清 false)
-  // G2 修:null 写只保留分支链后一处——分支内每处 null 写 + focus 写被 React 18
-  // 批处理合并成最后一次 null,focus 高亮永不显示。分支链后的统一清在切换生效
-  // 后执行,同批次内高亮先显示、随后整批提交时焦点已清,行为正确。
-  const handleKbNav = useCallback((delta) => {
-    // G5 修:items 从可见 tabs 派生(过滤掉不可见 tab),与 :116 tabs 过滤脱钩
-    // 问题:硬编码 ['emoji','symbols','images','favorites','clipboard'] 在隐藏
-    // favorites 后循环到它 → focus no-op + onTabChange('favorites') 被
-    // App.jsx:88-93 守卫弹回 clipboard,瞬闪。顺序:emoji 子模式 3 项在前 +
-    // 可见主标签在后。
-    const emojiModeItems = ['emoji', 'symbols', 'images'];
-    // 主标签顺序:clipboard 恒可见 + favorites 按可见性(tabs 已过滤)
-    const visibleMainTabs = tabs.map(tab => tab.id);
-    const items = [...emojiModeItems, ...visibleMainTabs];
-    // 用局部变量记录本帧焦点起点,不依赖 state 的异步值
-    const current = tabbarFocusId || emojiMode || 'emoji';
-    let idx = items.indexOf(current);
-    if (idx < 0) idx = 0;
-    const next = (idx + delta + items.length) % items.length;
-    const nextId = items[next];
-    focusTabbarButton(nextId);
-    if (nextId === 'favorites') {
-      onTabChange('favorites');
-    } else if (nextId === 'clipboard') {
-      onTabChange('clipboard');
-    } else if (nextId === 'emoji') {
-      onEmojiModeChange('emoji');
-    } else if (nextId === 'symbols') {
-      onEmojiModeChange('symbols');
-    } else if (nextId === 'images') {
-      onEmojiModeChange('images');
-    }
-    // 切换生效后统一清 stale 焦点,防再次 ← 从旧 ID 起算漂移
-    setTabbarFocusId(null);
-  }, [tabbarFocusId, emojiMode, focusTabbarButton, onTabChange, onEmojiModeChange, tabs]);
-
-  useImperativeHandle(ref, () => ({
-    focusTabbar,
-    kbNav: handleKbNav
-  }), [focusTabbar, handleKbNav]);
-
-  // tabbar 键盘焦点时该按钮高亮
-  const isTabbarActive = (id) => tabbarFocusId === id;
-
   const updateTabIndicator = useCallback(() => {
     const activeElement = tabsRef.current[activeTab];
     const nextIndicator = measureIndicator(activeElement, tabsContainerRef.current);
@@ -621,7 +558,6 @@ function TabNavigation({
                 index={index}
                 buttonRef={el => {
                   tabsRef.current[tab.id] = el;
-                  tabbarRefs.current[tab.id] = el;
                 }}
                 navigationMode="sidebar"
                 showLabel={sidebarShowLabel}
@@ -647,7 +583,6 @@ function TabNavigation({
                         showLabel: sidebarShowLabel,
                         buttonRef: el => {
                           emojiModesRef.current[mode.id] = el;
-                          tabbarRefs.current[mode.id] = el?.querySelector?.('button') || el;
                         }
                       }))
                 : filters.map(filter => renderSidebarButton({
@@ -774,7 +709,6 @@ function TabNavigation({
               index={index}
               buttonRef={el => {
                 tabsRef.current[tab.id] = el;
-                tabbarRefs.current[tab.id] = el;
               }}
               navigationMode={isSidebarLayout ? 'sidebar' : 'horizontal'}
             />
@@ -819,13 +753,12 @@ function TabNavigation({
             ? emojiModes.map(mode => (
                 <div key={mode.id} ref={el => {
                   emojiModesRef.current[mode.id] = el;
-                  tabbarRefs.current[mode.id] = el?.querySelector?.('button') || el;
                 }} className="relative flex-1 h-7">
                   <Tooltip content={mode.label} placement={isSidebarLayout ? 'right' : 'bottom'} asChild>
                     <button
                       onClick={() => handleEmojiModeChange(mode.id)}
                       className={`relative z-10 flex items-center justify-center w-full h-full rounded-lg focus:outline-none ${uiAnimationEnabled ? 'hover:scale-105' : ''} ${
-                        emojiMode === mode.id || isTabbarActive(mode.id)
+                        emojiMode === mode.id
                           ? 'qc-active-icon-button bg-[var(--qc-accent)] text-[var(--qc-accent-fg)] shadow-md hover:bg-[var(--qc-accent)]'
                           : 'text-qc-fg-muted hover:bg-qc-hover'
                       }`}
