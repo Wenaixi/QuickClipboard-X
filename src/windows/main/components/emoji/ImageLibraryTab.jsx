@@ -1061,6 +1061,20 @@ const ImageLibraryTab = forwardRef(function ImageLibraryTab({
     navigateLeft: () => kbMove(-1, 0),
     navigateRight: () => kbMove(1, 0),
     executeCurrent,
+    getKbIndex: () => kbImageIndexRef.current,
+    // 回到当前分类/搜索结果第一格(最右列 → 越界 grid-home 用):
+    // 图片网格用自身 imageCols 计算行首,不依赖 EmojiTab 侧列数
+    goHome: () => {
+      const total = displayImageItemsRef.current.length;
+      if (total <= 0 || imageCols <= 0) return;
+      const current = kbImageIndexRef.current;
+      if (current < 0) return;
+      const target = Math.floor(current / imageCols) * imageCols;
+      if (target === current) return;
+      kbImageIndexRef.current = target;
+      setKbImageIndex(target);
+      imageScrollerRef.current?.scrollToIndex({ index: Math.floor(target / imageCols), align: 'center' });
+    },
     resetKbIndex: () => {
       // 同步清 ref,避免 reset 后同 tick activateKb 读到旧 index
       kbImageIndexRef.current = -1;
