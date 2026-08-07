@@ -1,20 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readSource } from './readSource.js';
 
 // App 守卫收敛护栏(standards #3/#4)
 // background: handleTabLeft/Right 的 emojiKbActive 前置守卫与
 // dispatchEmojiNav 内部判断重复,同一条件检查两遍。删守卫统一走 dispatch。
 
 test('App handleTabLeft/Right 不再有 emojiKbActive 前置守卫', async () => {
-  const fs = await import('node:fs/promises');
-  const path = await import('node:path');
-  const { fileURLToPath } = await import('node:url');
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const src = await fs.readFile(path.join(here, '../../App.jsx'), 'utf8');
-  const body = src
-    .split('\n')
-    .filter((l) => !l.trimStart().startsWith('//'))
-    .join('\n');
+  const body = await readSource('../../App.jsx');
   // handleTabLeft/Right 体内不得再出现 emojiKbActive 守卫
   const tabLeft = body.slice(body.indexOf('const handleTabLeft'), body.indexOf('const handleTabRight'));
   const tabRight = body.slice(body.indexOf('const handleTabRight'), body.indexOf('const handleNavigateUp'));
@@ -26,15 +19,7 @@ test('App handleTabLeft/Right 不再有 emojiKbActive 前置守卫', async () =>
 });
 
 test('App dispatchEmojiNav 内保留 emojiKbActive 门控决策', async () => {
-  const fs = await import('node:fs/promises');
-  const path = await import('node:path');
-  const { fileURLToPath } = await import('node:url');
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const src = await fs.readFile(path.join(here, '../../App.jsx'), 'utf8');
-  const body = src
-    .split('\n')
-    .filter((l) => !l.trimStart().startsWith('//'))
-    .join('\n');
+  const body = await readSource('../../App.jsx');
   // 边界锚点改用函数名 + 下一个 const 声明:注释锚点 '// EmojiTab 请求' 会被剥行注释
   // 提前去掉,indexOf 恒 -1,slice 会一直切到 EOF,断言作用域漂移有假绿窗口。
   // F4 删 tabbar 死码后 handleEmojiEnterTabbar 已不存在,改用下一个 const 声明锚点。
@@ -54,15 +39,7 @@ test('App dispatchEmojiNav 内保留 emojiKbActive 门控决策', async () => {
 // 决策基于旧 zone,按键被吞或跳区。
 // 修复:删函数体内所有显式 setEmojiKbActive,全部交由 useEffect([kbZone]) 兜底。
 test('F8 EmojiTab setEmojiKbActive 只在 useEffect 依赖内出现(单写)', async () => {
-  const fs = await import('node:fs/promises');
-  const path = await import('node:path');
-  const { fileURLToPath } = await import('node:url');
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const src = await fs.readFile(path.join(here, '../EmojiTab.jsx'), 'utf8');
-  const body = src
-    .split('\n')
-    .filter((l) => !l.trimStart().startsWith('//'))
-    .join('\n');
+  const body = await readSource('../EmojiTab.jsx');
   // 全部调用位置
   const calls = body.match(/navigationStore\.setEmojiKbActive\([^)]*\)/g) || [];
   assert.equal(calls.length, 1, `setEmojiKbActive 应只在 useEffect 单点调用,实际 ${calls.length} 处: ${calls.join(' | ')}`);
