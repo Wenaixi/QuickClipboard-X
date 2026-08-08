@@ -23,7 +23,9 @@ import {
   resolveSidebarCategoryId,
   resolveZoneNav,
   isSidebarCategoryActive,
+  cycleValue,
 } from './emoji/emojiKbNavigation';
+import { EMOJI_MODE_IDS } from './TabNavigation';
 
 const DEFAULT_GRID_COLS = 8;
 const GRID_MIN_COLS = 4;
@@ -1045,7 +1047,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
           setKbZone('outside');
           onSwitchTab?.('favorites');
         } else {
-          onEmojiModeChange?.(cycleValue(['emoji', 'symbols', 'images'], emojiMode, -1));
+          onEmojiModeChange?.(cycleValue(EMOJI_MODE_IDS, emojiMode, -1));
         }
         break;
       case 'deactivate':
@@ -1069,7 +1071,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
       default:
         break;
     }
-  }, [focusSearchInput, enterGrid, enterSidebar, blurSearchInput, moveGridBy, moveSidebarBy, gridHome, onSwitchTab]);
+  }, [focusSearchInput, enterGrid, enterSidebar, blurSearchInput, moveGridBy, moveSidebarBy, gridHome, onSwitchTab, emojiMode, onEmojiModeChange, resetKbNav]);
 
   // 主路径:App 转发后端 navigation-action。不挂 window keydown,
   // 避免与 RegisterHotKey 在搜索框聚焦时双触发(进 grid 两次/跳格)。
