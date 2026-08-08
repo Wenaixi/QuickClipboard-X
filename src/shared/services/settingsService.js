@@ -69,6 +69,8 @@ export const defaultSettings = {
   previousGroupShortcut: 'Ctrl+ArrowUp',
   nextGroupShortcut: 'Ctrl+ArrowDown',
   togglePinShortcut: 'Ctrl+P',
+  filterLeftShortcut: 'Ctrl+ArrowLeft',
+  filterRightShortcut: 'Ctrl+ArrowRight',
   toggleClipboardMonitorShortcut: '',
   togglePasteWithFormatShortcut: '',
   toggleLowMemoryModeShortcut: '',

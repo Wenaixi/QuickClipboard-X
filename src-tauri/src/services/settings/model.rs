@@ -176,6 +176,8 @@ pub struct AppSettings {
     pub previous_group_shortcut: String,
     pub next_group_shortcut: String,
     pub toggle_pin_shortcut: String,
+    pub filter_left_shortcut: String,
+    pub filter_right_shortcut: String,
     pub toggle_clipboard_monitor_shortcut: String,
     pub toggle_paste_with_format_shortcut: String,
     pub toggle_low_memory_mode_shortcut: String,
@@ -361,6 +363,8 @@ impl Default for AppSettings {
             previous_group_shortcut: "Ctrl+ArrowUp".to_string(),
             next_group_shortcut: "Ctrl+ArrowDown".to_string(),
             toggle_pin_shortcut: "Ctrl+P".to_string(),
+            filter_left_shortcut: "Ctrl+ArrowLeft".to_string(),
+            filter_right_shortcut: "Ctrl+ArrowRight".to_string(),
             toggle_clipboard_monitor_shortcut: String::new(),
             toggle_paste_with_format_shortcut: String::new(),
             toggle_low_memory_mode_shortcut: String::new(),
@@ -467,6 +471,13 @@ mod tests {
             "daily"
         );
         assert_eq!(AppSettings::normalize_update_check_interval(""), "daily");
+    }
+
+    #[test]
+    fn default_filter_shortcuts_are_ctrl_arrows() {
+        let settings = AppSettings::default();
+        assert_eq!(settings.filter_left_shortcut, "Ctrl+ArrowLeft");
+        assert_eq!(settings.filter_right_shortcut, "Ctrl+ArrowRight");
     }
 
     #[test]
