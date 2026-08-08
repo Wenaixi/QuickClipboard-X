@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback, useLayoutEffect } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, useLayoutEffect, forwardRef, useImperativeHandle } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { toast, TOAST_SIZES, TOAST_POSITIONS } from '@shared/store/toastStore';
@@ -9,6 +9,7 @@ import { useCustomScrollbar } from '@shared/hooks/useCustomScrollbar';
 import * as imageLibrary from '@shared/api/imageLibrary';
 import SimpleInputDialog from '../SimpleInputDialog';
 import Tooltip from '@shared/components/common/Tooltip.jsx';
+import { resolveActivateKb } from './emojiKbNavigation';
 
 const IMAGE_DEFAULT_COLS = 4;
 const IMAGE_MIN_COLS = 4;
@@ -262,6 +263,7 @@ function ImageTile({
   t,
   isDragging,
   isSelected,
+  isKbFocused,
   onClick,
   onMouseDown,
   onCopy,
@@ -290,9 +292,11 @@ function ImageTile({
         className={`relative group aspect-square rounded-lg bg-qc-panel-2 flex items-center justify-center cursor-pointer transition-all overflow-hidden ${
           isDragging
             ? 'opacity-45 scale-95 saturate-50 ring-2 ring-dashed ring-blue-400 bg-qc-active'
-            : isSelected
-              ? 'bg-qc-active ring-2 ring-blue-500 shadow-sm'
-              : 'hover:bg-qc-hover hover:ring-2 hover:ring-blue-400'
+            : isKbFocused
+              ? 'ring-2 ring-blue-500 ring-inset'
+              : isSelected
+                ? 'bg-qc-active ring-2 ring-blue-500 shadow-sm'
+                : 'hover:bg-qc-hover hover:ring-2 hover:ring-blue-400'
         }`}
         style={{ touchAction: 'none' }}
       >
@@ -372,7 +376,7 @@ function ImageTile({
   );
 }
 
-function ImageLibraryTab({
+const ImageLibraryTab = forwardRef(function ImageLibraryTab({
   currentGroup,
   imageGroups = [],
   searchQuery,
@@ -381,7 +385,7 @@ function ImageLibraryTab({
   onImageDragEnd,
   onImageDragCancel,
   reloadKey = 0
-}) {
+}, ref) {
   const { t } = useTranslation();
   const [imageTotal, setImageTotal] = useState(0);
   const [imageItems, setImageItems] = useState([]);
@@ -405,6 +409,9 @@ function ImageLibraryTab({
   const gridMeasureRef = useRef(null);
   const [contentWidth, setContentWidth] = useState(0);
   const imageCols = useMemo(() => getImageGridCols(contentWidth), [contentWidth]);
+  const [kbImageIndex, setKbImageIndex] = useState(-1);
+  const kbImageIndexRef = useRef(kbImageIndex);
+  kbImageIndexRef.current = kbImageIndex;
   const [scrollerElement, setScrollerElement] = useState(null);
   const scrollerRefCallback = useCallback(element => element && setScrollerElement(element), []);
   useCustomScrollbar(scrollerElement);
@@ -426,11 +433,25 @@ function ImageLibraryTab({
     loadedImageIndexesRef.current = new Set();
     loadingImageIndexesRef.current = new Set();
     loadGenerationRef.current += 1;
+    // F1-4:搜索词变化会缩小结果集(displayImageItems 换源),旧 kbImageIndex
+    // 可能越界 → 高亮停在空位、Enter 静默无操作。与 currentGroup 切换同款
+    // 重置:同步清 ref 避免同 tick activateKb 读到旧 index。
+    kbImageIndexRef.current = -1;
+    setKbImageIndex(-1);
   }, []);
   const activeGroupMeta = useMemo(
     () => imageGroups.find(group => group.name === currentGroup) || null,
     [imageGroups, currentGroup]
   );
+  // F1-4:搜索词变化 → displayImageItems 换源(过滤),旧 kbImageIndex 可能越界
+  // (kbMove/executeCurrent 用已加载数组,而 activateKb 曾用全量 clamp,口径
+  // 不一致 → 高亮停空位、Enter 静默)。统一:搜索词变化时重置 index 回 -1。
+  const prevSearchQueryRef = useRef(searchQuery);
+  if (prevSearchQueryRef.current !== searchQuery) {
+    prevSearchQueryRef.current = searchQuery;
+    kbImageIndexRef.current = -1;
+    setKbImageIndex(-1);
+  }
   selectedImageKeysRef.current = selectedImageKeys;
   selectionAnchorKeyRef.current = selectionAnchorKey;
 
@@ -518,6 +539,9 @@ function ImageLibraryTab({
     setSelectedImageKeys(new Set());
     setSelectionAnchorKey('');
     setSelectionBox(null);
+    // 同步清 ref,避免 reset 后同 tick activateKb 读到旧 index(与 resetKbIndex 同款)
+    kbImageIndexRef.current = -1;
+    setKbImageIndex(-1);
   }, [currentGroup, reloadKey]);
 
   const loadImageCount = useCallback(async () => {
@@ -1007,6 +1031,82 @@ function ImageLibraryTab({
     document.removeEventListener('mouseup', handleSelectionMouseUp);
   }, [handleSelectionMouseMove, handleSelectionMouseUp]);
 
+  // 键盘导航:在 displayImageItems 中以行优先顺序移动,越界返回 false
+  const kbMove = useCallback((dx, dy) => {
+    const current = kbImageIndexRef.current;
+    // 边界用实际已加载数组长度:懒加载未加载槽位是 loading 占位格,
+    // 用全量 displayImageTotal 会把高亮停在占位格上而 Enter 静默无操作
+    const total = displayImageItemsRef.current.length;
+    if (current < 0 || total <= 0 || imageCols <= 0) return false;
+    const row = Math.floor(current / imageCols);
+    const col = current % imageCols;
+    const nextRow = row + dy;
+    const nextCol = col + dx;
+    if (nextCol < 0 || nextCol >= imageCols) return false;
+    const next = nextRow * imageCols + nextCol;
+    if (next < 0 || next >= total) return false;
+    setKbImageIndex(next);
+    imageScrollerRef.current?.scrollToIndex({ index: nextRow, align: 'center' });
+    return true;
+  }, [imageCols]);
+
+  const executeCurrent = useCallback(async () => {
+    const index = kbImageIndexRef.current;
+    if (index < 0) return;
+    const item = displayImageItemsRef.current[index];
+    // 懒加载未加载槽位是 loading 占位格,直接静默返回,不再走高亮但无操作路径
+    if (!item || item.loading) return;
+    if (!isSelectableImageItem(item) || isUploading) return;
+    try {
+      await restoreLastFocus();
+      await invoke('paste_image_file', { filePath: item.path });
+    } catch (err) {
+      console.error('粘贴图片失败:', err);
+      toast.error(t('common.pasteFailed') || '粘贴失败', {
+        size: TOAST_SIZES.EXTRA_SMALL,
+        position: TOAST_POSITIONS.BOTTOM_RIGHT
+      });
+    }
+  }, [t, isUploading]);
+
+  useImperativeHandle(ref, () => ({
+    navigateUp: () => kbMove(0, -1),
+    navigateDown: () => kbMove(0, 1),
+    navigateLeft: () => kbMove(-1, 0),
+    navigateRight: () => kbMove(1, 0),
+    executeCurrent,
+    getKbIndex: () => kbImageIndexRef.current,
+    // 回到当前分类/搜索结果第一格(最右列 → 越界 grid-home 用):
+    // 图片网格用自身 imageCols 计算行首,不依赖 EmojiTab 侧列数
+    goHome: () => {
+      const total = displayImageItemsRef.current.length;
+      if (total <= 0 || imageCols <= 0) return;
+      const current = kbImageIndexRef.current;
+      if (current < 0) return;
+      const target = Math.floor(current / imageCols) * imageCols;
+      if (target === current) return;
+      kbImageIndexRef.current = target;
+      setKbImageIndex(target);
+      imageScrollerRef.current?.scrollToIndex({ index: Math.floor(target / imageCols), align: 'center' });
+    },
+    resetKbIndex: () => {
+      // 同步清 ref,避免 reset 后同 tick activateKb 读到旧 index
+      kbImageIndexRef.current = -1;
+      setKbImageIndex(-1);
+    },
+    activateKb: () => {
+      // 同步写 ref 再返回,避免 setState 异步导致首次永远 false
+      // F1-4:与 kbMove/executeCurrent 同口径——用已加载数组长度 clamp,
+      // 不用全量 displayImageTotal(懒加载未加载槽位是占位格,index 落在
+      // 占位格上高亮可见但 Enter 静默,口径不一致)
+      const result = resolveActivateKb(kbImageIndexRef.current, displayImageItemsRef.current.length);
+      if (!result.ok) return false;
+      kbImageIndexRef.current = result.index;
+      setKbImageIndex(result.index);
+      return true;
+    }
+  }));
+
   const handleSelectionMouseDown = useCallback((e) => {
     if (e.button !== 0 || isUploading || selfPluginDragRef.current || !currentGroup || displayImageTotal === 0) return;
     if (shouldIgnoreImageSelectionStart(e.target)) return;
@@ -1043,7 +1143,7 @@ function ImageLibraryTab({
   const renderImageRow = useCallback((rowIndex) => {
     const startIdx = rowIndex * imageCols;
     const rowItems = [];
-    
+
     for (let i = 0; i < imageCols; i++) {
       const idx = startIdx + i;
       if (idx >= displayImageTotal) break;
@@ -1063,6 +1163,7 @@ function ImageLibraryTab({
       >
         {rowItems.map((item) => {
           const itemKey = getImageItemKey(item);
+          const gridIndex = startIdx + rowItems.indexOf(item);
           return (
             <ImageTile
               key={item.id || itemKey}
@@ -1070,6 +1171,7 @@ function ImageLibraryTab({
               t={t}
               isDragging={Boolean(itemKey && draggingImageKeys.has(itemKey))}
               isSelected={Boolean(itemKey && selectedImageKeys.has(itemKey))}
+              isKbFocused={kbImageIndex === gridIndex}
               onClick={handleImageClick}
               onMouseDown={handleImageDragMouseDown}
               onCopy={handleCopyImage}
@@ -1080,7 +1182,7 @@ function ImageLibraryTab({
         })}
       </div>
     );
-  }, [displayImageItems, displayImageTotal, hasSearchQuery, imageCols, scheduleLoadRange, handleImageClick, handleImageDragMouseDown, handleCopyImage, handleDeleteImage, handleRenameStart, draggingImageKeys, selectedImageKeys, t]);
+  }, [displayImageItems, displayImageTotal, hasSearchQuery, imageCols, scheduleLoadRange, handleImageClick, handleImageDragMouseDown, handleCopyImage, handleDeleteImage, handleRenameStart, draggingImageKeys, selectedImageKeys, kbImageIndex, t]);
 
   return (
     <div
@@ -1181,6 +1283,6 @@ function ImageLibraryTab({
       )}
     </div>
   );
-}
+});
 
 export default ImageLibraryTab;

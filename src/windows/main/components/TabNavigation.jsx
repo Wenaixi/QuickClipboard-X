@@ -1,6 +1,6 @@
 import '@tabler/icons-webfont/dist/tabler-icons.min.css';
 import { useTranslation } from 'react-i18next';
-import { useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useLayoutEffect, useState, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { useSnapshot } from 'valtio';
 import { settingsStore } from '@shared/store/settingsStore';
 import { normalizeVisibleOptionalTabs } from '@shared/constants/tabVisibility';
@@ -12,7 +12,12 @@ import Tooltip from '@shared/components/common/Tooltip.jsx';
 const FILTER_BUTTON_SIZE = 28;
 const FILTER_BUTTON_GAP = 4;
 const GROUP_BUTTON_WIDTH = 60;
-const FILTER_IDS = ['all', 'text', 'image', 'file', 'link'];
+const GROUP_REVEAL_EDGE_ZONE = 24;
+const GROUP_REVEAL_HIDE_DELAY = 300;
+// 过滤器选项常量:App.jsx 过滤热键(⌘+←/→)也复用,避免硬编码数组漂移
+export const FILTER_IDS = ['all', 'text', 'image', 'file', 'link'];
+// emoji 子模式顺序常量:App.jsx 过滤热键与 handleKbNav 共用
+export const EMOJI_MODE_IDS = ['emoji', 'symbols', 'images'];
 
 function getCollapsedFilterWidth(filterCount, groupButtonWidth) {
   if (filterCount <= 0) {
@@ -26,13 +31,14 @@ function getCollapsedFilterWidth(filterCount, groupButtonWidth) {
 }
 
 function getVisibleFilterCountByWidth(width, groupButtonWidth) {
-  for (let count = FILTER_IDS.length; count >= 1; count -= 1) {
+  // 最小显示 4 个:全部/文本/图片/链接 默认常驻,第 5 个(文件)折叠
+  for (let count = FILTER_IDS.length; count >= 4; count -= 1) {
     if (width >= getCollapsedFilterWidth(count, groupButtonWidth)) {
       return count;
     }
   }
 
-  return 1;
+  return 4;
 }
 
 function measureIndicator(activeElement, containerElement) {
@@ -73,7 +79,7 @@ function TabNavigation({
   onGroupChange,
   groupsPopupRef,
   navigationMode = 'horizontal'
-}) {
+}, ref) {
   const {
     t
   } = useTranslation();
@@ -83,6 +89,8 @@ function TabNavigation({
   const isSidebarLayout = navigationMode === 'sidebar';
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isGroupsPanelOpen, setIsGroupsPanelOpen] = useState(false);
+  const [isGroupButtonRevealed, setIsGroupButtonRevealed] = useState(false);
+  const groupRevealTimerRef = useRef(null);
   const tabsRef = useRef({});
   const filtersRef = useRef({});
   const emojiModesRef = useRef({});
@@ -95,7 +103,7 @@ function TabNavigation({
   const [filterAnimationKey, setFilterAnimationKey] = useState(0);
   const [emojiModeAnimationKey, setEmojiModeAnimationKey] = useState(0);
   const [isFilterExpanded, setIsFilterExpanded] = useState(false);
-  const [collapsedVisibleFilterCount, setCollapsedVisibleFilterCount] = useState(3);
+  const [collapsedVisibleFilterCount, setCollapsedVisibleFilterCount] = useState(4);
   const [sidebarFixedWidth, setSidebarFixedWidth] = useState(null);
   const sidebarTabsMainRef = useRef(null);
   const filterCollapseTimerRef = useRef(null);
@@ -160,14 +168,19 @@ function TabNavigation({
 
   const isFilterAutoExpanded = collapsedVisibleFilterCount >= 5;
   const expandableFilters = filters.slice(collapsedVisibleFilterCount);
-  const useFloatingExpandedFilters = !isFilterAutoExpanded && collapsedVisibleFilterCount <= 2 && expandableFilters.length > 0;
-  const shouldStretchHorizontalFilters = !isSidebarLayout && !useFloatingExpandedFilters;
+  const shouldStretchHorizontalFilters = !isSidebarLayout;
   const shouldExpandFilters = isFilterAutoExpanded || isFilterExpanded;
-  const shouldHideGroupButton = !useFloatingExpandedFilters && !isFilterAutoExpanded && shouldExpandFilters;
+  // F2 修:useFloatingExpandedFilters(!isFilterAutoExpanded && count<=2 && ...)在
+  // collapsedVisibleFilterCount 最小 4 后(commit 6af73f0f 产品决策:全部/文本/
+  // 图片/链接常驻,文件折叠)恒 false,浮动展开分支(878-903 死代码)已删。
+  const shouldHideGroupButton = !isFilterAutoExpanded && shouldExpandFilters;
   const expandedExtraWidth = expandableFilters.length > 0
     ? expandableFilters.length * FILTER_BUTTON_SIZE + (expandableFilters.length - 1) * FILTER_BUTTON_GAP
     : 0;
   const groupButtonWidth = isSidebarLayout ? 92 : GROUP_BUTTON_WIDTH;
+  const groupButtonVisible = isSidebarLayout || isGroupButtonRevealed || isGroupsPanelOpen;
+  // F2 修:三连重复三元提取单变量(行为不变)
+  const hideGroup = shouldHideGroupButton || !groupButtonVisible;
   const sidebarShowLabel = isSidebarLayout ? !isSidebarCollapsed : true;
 
   const updateTabIndicator = useCallback(() => {
@@ -202,6 +215,10 @@ function TabNavigation({
         clearTimeout(filterCollapseTimerRef.current);
         filterCollapseTimerRef.current = null;
       }
+      if (groupRevealTimerRef.current) {
+        clearTimeout(groupRevealTimerRef.current);
+        groupRevealTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -209,14 +226,16 @@ function TabNavigation({
     if (isSidebarLayout) {
       return undefined;
     }
-
+    if (isGroupsPanelOpen) {
+      setIsGroupButtonRevealed(true);
+    }
     const timer = setTimeout(() => {
       setTabAnimationKey(prev => prev + 1);
     }, 300);
     return () => {
       clearTimeout(timer);
     };
-  }, [activeTab, isSidebarLayout]);
+  }, [activeTab, isSidebarLayout, isGroupsPanelOpen]);
 
   useEffect(() => {
     if (!isSidebarLayout) {
@@ -247,6 +266,7 @@ function TabNavigation({
 
   useEffect(() => {
     setIsFilterExpanded(false);
+    setIsGroupButtonRevealed(false);
   }, [activeTab]);
 
   useEffect(() => {
@@ -256,7 +276,7 @@ function TabNavigation({
     }
 
     if (activeTab === 'emoji') {
-      setCollapsedVisibleFilterCount(3);
+      setCollapsedVisibleFilterCount(4);
       return undefined;
     }
 
@@ -408,6 +428,57 @@ function TabNavigation({
     onEmojiModeChange(id);
   };
 
+  // 分组按钮边缘悬停弹出:鼠标移到顶栏最右边缘时按钮滑出,离开后收回。
+  // 按钮本身悬停(或面板打开)时保持显示,避免闪烁。
+  const handleGroupRevealMouseMove = (event) => {
+    if (isSidebarLayout || isGroupsPanelOpen || isGroupButtonRevealed) {
+      // F2 修:悬停中(已 reveal)移回也必须取消挂起的隐藏定时器,
+      // 否则按钮滑出→鼠标移出挂 300ms 定时器→定时器内移回→定时器到期按钮收起。
+      if (groupRevealTimerRef.current) {
+        clearTimeout(groupRevealTimerRef.current);
+        groupRevealTimerRef.current = null;
+      }
+      return;
+    }
+    const rightArea = rightAreaRef.current;
+    if (!rightArea) {
+      return;
+    }
+    const rect = rightArea.getBoundingClientRect();
+    if (rect.width <= 0) {
+      return;
+    }
+    if (rect.right - event.clientX <= GROUP_REVEAL_EDGE_ZONE) {
+      if (groupRevealTimerRef.current) {
+        clearTimeout(groupRevealTimerRef.current);
+        groupRevealTimerRef.current = null;
+      }
+      setIsGroupButtonRevealed(true);
+    }
+  };
+
+  const handleGroupRevealMouseLeave = () => {
+    if (isSidebarLayout || isGroupsPanelOpen) {
+      return;
+    }
+    if (groupRevealTimerRef.current) {
+      clearTimeout(groupRevealTimerRef.current);
+    }
+    groupRevealTimerRef.current = setTimeout(() => {
+      setIsGroupButtonRevealed(false);
+      groupRevealTimerRef.current = null;
+    }, GROUP_REVEAL_HIDE_DELAY);
+  };
+
+  // controlsContainer 的 onMouseLeave 会同时被 filter 折叠与分组按钮收回使用。
+  // 两个 handler 均无条件执行(无 activeTab 守卫):emoji 模式下 filter leave
+  // 也会挂折叠定时器,但 emoji 模式无 filter onMouseEnter,isFilterExpanded
+  // 恒 false,定时器到期同值短路,无害;分组收回独立挂在 onMouseLeave 上。
+  const handleControlsContainerMouseLeave = (event) => {
+    handleFilterAreaMouseLeave(event);
+    handleGroupRevealMouseLeave();
+  };
+
   const handleFilterAreaMouseEnter = () => {
     if (isFilterAutoExpanded) {
       return;
@@ -499,7 +570,9 @@ function TabNavigation({
                 isActive={activeTab === tab.id}
                 onClick={onTabChange}
                 index={index}
-                buttonRef={el => { tabsRef.current[tab.id] = el; }}
+                buttonRef={el => {
+                  tabsRef.current[tab.id] = el;
+                }}
                 navigationMode="sidebar"
                 showLabel={sidebarShowLabel}
               />
@@ -514,18 +587,18 @@ function TabNavigation({
           <div className="flex-1 min-h-0 overflow-y-auto px-2 py-2 w-full min-w-0">
             <div className="grid grid-cols-1 gap-1 w-full min-w-0 justify-items-stretch">
               {activeTab === 'emoji'
-                ? emojiModes.map(mode => renderSidebarButton({
-                    id: mode.id,
-                    label: mode.label,
-                    icon: mode.icon,
-                    emoji: mode.emoji,
-                    isActive: emojiMode === mode.id,
-                    onClick: handleEmojiModeChange,
-                    showLabel: sidebarShowLabel,
-                    buttonRef: el => {
-                      emojiModesRef.current[mode.id] = el;
-                    }
-                  }))
+                    ? emojiModes.map(mode => renderSidebarButton({
+                        id: mode.id,
+                        label: mode.label,
+                        icon: mode.icon,
+                        emoji: mode.emoji,
+                        isActive: emojiMode === mode.id,
+                        onClick: handleEmojiModeChange,
+                        showLabel: sidebarShowLabel,
+                        buttonRef: el => {
+                          emojiModesRef.current[mode.id] = el;
+                        }
+                      }))
                 : filters.map(filter => renderSidebarButton({
                     id: filter.id,
                     label: filter.label,
@@ -648,7 +721,9 @@ function TabNavigation({
               isActive={activeTab === tab.id}
               onClick={onTabChange}
               index={index}
-              buttonRef={el => tabsRef.current[tab.id] = el}
+              buttonRef={el => {
+                tabsRef.current[tab.id] = el;
+              }}
               navigationMode={isSidebarLayout ? 'sidebar' : 'horizontal'}
             />
           ))}
@@ -676,7 +751,8 @@ function TabNavigation({
               ? 'w-full justify-center'
               : 'w-full'
           }`}
-          onMouseLeave={activeTab === 'emoji' ? undefined : handleFilterAreaMouseLeave}
+          onMouseLeave={handleControlsContainerMouseLeave}
+          onMouseMove={handleGroupRevealMouseMove}
         >
           {!isSidebarLayout && (
             <div ref={controlsIndicatorRef} className={`absolute left-0 w-0 rounded-lg pointer-events-none ${uiAnimationEnabled ? 'transition-all duration-300 ease-out' : ''}`} style={{
@@ -689,7 +765,9 @@ function TabNavigation({
           )}
           {activeTab === 'emoji'
             ? emojiModes.map(mode => (
-                <div key={mode.id} ref={el => emojiModesRef.current[mode.id] = el} className="relative flex-1 h-7">
+                <div key={mode.id} ref={el => {
+                  emojiModesRef.current[mode.id] = el;
+                }} className="relative flex-1 h-7">
                   <Tooltip content={mode.label} placement={isSidebarLayout ? 'right' : 'bottom'} asChild>
                     <button
                       onClick={() => handleEmojiModeChange(mode.id)}
@@ -744,33 +822,6 @@ function TabNavigation({
                         />
                       ))}
 
-                      {useFloatingExpandedFilters ? (
-                        <div
-                          className={`absolute right-0 top-[calc(100%+6px)] z-[75] box-content flex w-7 flex-col items-center gap-1 rounded-lg border border-qc-border bg-qc-panel py-1 shadow-lg ${
-                            uiAnimationEnabled ? 'transition-all duration-200 ease-out' : ''
-                          }`}
-                          style={{
-                            opacity: shouldExpandFilters ? 1 : 0,
-                            transform: shouldExpandFilters ? 'translateY(0)' : 'translateY(-4px)',
-                            pointerEvents: shouldExpandFilters ? 'auto' : 'none'
-                          }}
-                        >
-                          {expandableFilters.map(filter => (
-                            <FilterButton
-                              key={filter.id}
-                              id={filter.id}
-                              label={filter.label}
-                              icon={filter.icon}
-                              isActive={contentFilter === filter.id}
-                              onClick={onFilterChange}
-                              tooltipPlacement="left"
-                              buttonRef={el => {
-                                filtersRef.current[filter.id] = el;
-                              }}
-                            />
-                          ))}
-                        </div>
-                      ) : (
                         <div
                           className={`flex items-center gap-1 overflow-hidden shrink-0 min-w-0 ${uiAnimationEnabled ? 'transition-all duration-300 ease-out' : ''}`}
                           style={{
@@ -794,16 +845,15 @@ function TabNavigation({
                             />
                           ))}
                         </div>
-                      )}
                     </div>
                   )}
 
                   <div
                     className={`overflow-visible shrink-0 ${uiAnimationEnabled ? 'transition-all duration-300 ease-out' : ''}`}
                     style={{
-                      width: shouldHideGroupButton ? '0px' : `${groupButtonWidth}px`,
-                      opacity: shouldHideGroupButton ? 0 : 1,
-                      pointerEvents: shouldHideGroupButton ? 'none' : 'auto'
+                      width: hideGroup ? '0px' : `${groupButtonWidth}px`,
+                      opacity: hideGroup ? 0 : 1,
+                      pointerEvents: hideGroup ? 'none' : 'auto'
                     }}
                   >
                     <GroupsPopup
@@ -823,4 +873,4 @@ function TabNavigation({
     </div>
   </div>;
 }
-export default TabNavigation;
+export default forwardRef(TabNavigation);
