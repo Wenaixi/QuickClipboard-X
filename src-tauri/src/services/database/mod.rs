@@ -85,4 +85,15 @@ mod like_pattern_tests {
         // first escape backslash, then %/_
         assert_eq!(like_pattern(r"a\b%c_d"), r"%a\\b\%c\_d%");
     }
+
+    /// C25:content_type 过滤也必须走 like_pattern(与搜索词同契约)。
+    #[test]
+    fn like_pattern_suitable_for_content_type_filter() {
+        // 常见 content_type 片段
+        assert_eq!(like_pattern("image"), "%image%");
+        assert_eq!(like_pattern("text"), "%text%");
+        // 若 content_type 含通配符字面,必须被转义
+        assert_eq!(like_pattern("rich_text"), r"%rich\_text%");
+        assert_eq!(like_pattern("100%"), r"%100\%%");
+    }
 }
