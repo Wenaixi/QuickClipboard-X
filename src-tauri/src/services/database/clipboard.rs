@@ -204,8 +204,9 @@ pub fn query_clipboard_items(params: QueryParams) -> Result<PaginatedResult<Clip
         
         if let Some(ref content_type) = params.content_type {
             if content_type != "all" {
-                where_clauses.push("content_type LIKE ?");
-                let pattern = format!("%{}%", content_type);
+                // 与搜索词路径一致:转义 %/_/\ + ESCAPE,避免 content_type 含通配符时误匹配
+                where_clauses.push("content_type LIKE ? ESCAPE '\\'");
+                let pattern = super::like_pattern(content_type);
                 query_params.push(Box::new(pattern));
             }
         }
@@ -1210,5 +1211,58 @@ pub fn toggle_pin_clipboard_item(id: i64) -> Result<bool, String> {
             Ok(false)
         }
     })
+}
+
+#[cfg(test)]
+mod content_type_like_tests {
+    use std::fs;
+
+    /// C25 护栏:content_type 过滤必须 like_pattern + ESCAPE,与搜索词路径一致。
+    #[test]
+    fn query_clipboard_content_type_uses_like_pattern_with_escape() {
+        let source = fs::read_to_string(format!(
+            "{}/src/services/database/clipboard.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读 clipboard.rs");
+
+        let body: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // 定位 query_clipboard_items 函数体
+        let start = body
+            .find("pub fn query_clipboard_items")
+            .expect("找不到 query_clipboard_items");
+        let after = &body[start..];
+        // 取到下一个 pub fn
+        let end = after
+            .find("\npub fn ")
+            .or_else(|| after.find("\nfn "))
+            .map(|i| start + i)
+            .unwrap_or(body.len());
+        // 限制在 content_type 分支附近,避免函数过长误扫
+        let fn_body = &body[start..end.min(start + 2500)];
+
+        assert!(
+            fn_body.contains("content_type LIKE ? ESCAPE"),
+            "content_type 过滤必须带 ESCAPE '\\\\'"
+        );
+        assert!(
+            fn_body.contains("like_pattern(content_type)")
+                || fn_body.contains("super::like_pattern(content_type)"),
+            "content_type 必须走 like_pattern,禁止 format!(\"%{{}}%\")"
+        );
+        // 负向:裸 format!("%{}%") 拼 content_type 不得再出现
+        let has_raw_format = fn_body
+            .lines()
+            .any(|l| l.contains("format!") && l.contains("%{}%") && l.contains("content_type"));
+        assert!(
+            !has_raw_format,
+            "content_type 不得再用 format!(\"%{{}}%\") 裸拼"
+        );
+    }
 }
 
