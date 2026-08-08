@@ -23,7 +23,9 @@ import {
   resolveSidebarCategoryId,
   resolveZoneNav,
   isSidebarCategoryActive,
+  cycleValue,
 } from './emoji/emojiKbNavigation';
+import { EMOJI_MODE_IDS } from './TabNavigation';
 
 const DEFAULT_GRID_COLS = 8;
 const GRID_MIN_COLS = 4;
@@ -1045,7 +1047,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
           setKbZone('outside');
           onSwitchTab?.('favorites');
         } else {
-          onEmojiModeChange?.(cycleValue(['emoji', 'symbols', 'images'], emojiMode, -1));
+          onEmojiModeChange?.(cycleValue(EMOJI_MODE_IDS, emojiMode, -1));
         }
         break;
       case 'deactivate':
