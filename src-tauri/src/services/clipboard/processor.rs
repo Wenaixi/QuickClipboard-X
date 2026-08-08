@@ -1,6 +1,7 @@
 use super::capture::{ClipboardContent, ContentType as CaptureType};
 use super::content_type::ContentType;
 use crate::services::database::ClipboardDataSeed;
+use crate::utils::{HTML_ENTITY_RE, HTML_TAG_RE};
 use image::ImageFormat;
 use std::io::Cursor;
 use std::fs;
@@ -11,13 +12,19 @@ use serde::{Serialize, Deserialize};
 use std::sync::LazyLock;
 
 // 静态正则:避免每次调用重新编译。
-// url/tag/entity/whitespace 四种模式字面确定,compile 永远成功,
+// url/img-src 模式字面确定,compile 永远成功。
+// tag/entity 复用 utils::html 共享 LazyLock,避免三份复制。
 static URL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?i)\b(https?://|ftp://|www\.)[^\s<>"]+\b"#).unwrap()
 });
-static TAG_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^>]*>").unwrap());
-static ENTITY_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"&[a-zA-Z]+;").unwrap());
 static WHITESPACE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").unwrap());
+// img src 双引号 / 单引号两模式,热路径只编译一次。
+static IMG_SRC_DQ_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(<img\b[^>]*?\bsrc\s*=\s*")([^"]+)(")"#).unwrap()
+});
+static IMG_SRC_SQ_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(<img\b[^>]*?\bsrc\s*=\s*')([^']+)(')"#).unwrap()
+});
 use crate::utils::cf_html::normalize_clipboard_html;
 
 
@@ -286,27 +293,25 @@ fn contains_links(text: &str) -> bool {
 
 // 从HTML中提取纯文本
 fn strip_html(html: &str) -> String {
-    let text = TAG_RE.replace_all(html, " ");
-    let text = ENTITY_RE.replace_all(&text, " ");
+    let text = HTML_TAG_RE.replace_all(html, " ");
+    let text = HTML_ENTITY_RE.replace_all(&text, " ");
     WHITESPACE_RE.replace_all(&text, " ").trim().to_string()
 }
 
 // 处理HTML中的图片
 fn process_html_images(html: &str) -> Result<(String, Vec<String>), String> {
-    use regex::Regex;
-    
     let mut processed_html = html.to_string();
     let mut image_ids = Vec::new();
-    
-    if let Ok(re) = Regex::new(r#"(<img\b[^>]*?\bsrc\s*=\s*")([^"]+)(")"#) {
-        processed_html = re.replace_all(&processed_html, |caps: &regex::Captures| {
+
+    processed_html = IMG_SRC_DQ_RE
+        .replace_all(&processed_html, |caps: &regex::Captures| {
             let full_tag = &caps[0];
             let src = &caps[2];
-            
+
             if full_tag.contains("data-image-id") {
                 return full_tag.to_string();
             }
-            
+
             if let Some(image_id) = try_save_image_from_url(src) {
                 image_ids.push(image_id.clone());
                 // 在 <img 后插入 data-image-id 属性
@@ -314,18 +319,18 @@ fn process_html_images(html: &str) -> Result<(String, Vec<String>), String> {
             } else {
                 full_tag.to_string()
             }
-        }).to_string();
-    }
-    
-    if let Ok(re) = Regex::new(r#"(<img\b[^>]*?\bsrc\s*=\s*')([^']+)(')"#) {
-        processed_html = re.replace_all(&processed_html, |caps: &regex::Captures| {
+        })
+        .to_string();
+
+    processed_html = IMG_SRC_SQ_RE
+        .replace_all(&processed_html, |caps: &regex::Captures| {
             let full_tag = &caps[0];
             let src = &caps[2];
-            
+
             if full_tag.contains("data-image-id") {
                 return full_tag.to_string();
             }
-            
+
             if let Some(image_id) = try_save_image_from_url(src) {
                 if !image_ids.contains(&image_id) {
                     image_ids.push(image_id.clone());
@@ -334,9 +339,9 @@ fn process_html_images(html: &str) -> Result<(String, Vec<String>), String> {
             } else {
                 full_tag.to_string()
             }
-        }).to_string();
-    }
-    
+        })
+        .to_string();
+
     Ok((processed_html, image_ids))
 }
 
@@ -557,6 +562,60 @@ mod tests {
                 err, src
             );
         }
+    }
+
+    /// C02 护栏:process_html_images 必须用 IMG_SRC_* LazyLock,禁止函数内裸 Regex::new。
+    #[test]
+    fn process_html_images_uses_lazy_img_src_regex() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/clipboard/processor.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读 processor.rs");
+
+        // 只看生产代码(测试模块前),并剥行注释,避免护栏自指误命中
+        let prod = source
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or(&source);
+        let body: String = prod
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let start = body
+            .find("fn process_html_images")
+            .expect("找不到 process_html_images");
+        let after = &body[start..];
+        let end = after
+            .find("\nfn ")
+            .map(|i| start + i)
+            .unwrap_or(body.len());
+        let fn_body = &body[start..end];
+
+        assert!(
+            fn_body.contains("IMG_SRC_DQ_RE") && fn_body.contains("IMG_SRC_SQ_RE"),
+            "process_html_images 应使用 IMG_SRC_DQ_RE / IMG_SRC_SQ_RE"
+        );
+        assert!(
+            !fn_body.contains("Regex::new"),
+            "process_html_images 函数体内不得再 Regex::new"
+        );
+        assert!(
+            body.contains("static IMG_SRC_DQ_RE: LazyLock")
+                && body.contains("static IMG_SRC_SQ_RE: LazyLock"),
+            "processor 顶部应声明 IMG_SRC_* LazyLock"
+        );
+        // 本地 TAG/ENTITY 静态已迁出
+        assert!(
+            !body.contains("static TAG_RE") && !body.contains("static ENTITY_RE"),
+            "TAG/ENTITY 应迁到 utils::html 共享,processor 不再自建"
+        );
+        assert!(
+            body.contains("HTML_TAG_RE") && body.contains("HTML_ENTITY_RE"),
+            "strip_html 应使用共享 HTML_TAG_RE / HTML_ENTITY_RE"
+        );
     }
 }
 
