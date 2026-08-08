@@ -86,14 +86,10 @@ mod tests {
     // A2 护栏:is_portable_runtime 必须是唯一判定入口,
     // 禁止调用点各自内联 portable.flag / portable.txt 判定(语义漂移)。
     // 剥注释后再匹配,避免注释字面误命中。
+    use crate::services::system::hotkey::test_utils::{source_file, strip_line_comments};
+
     fn bare_source(rel: &str) -> String {
-        let path = format!("{}/src/{}", env!("CARGO_MANIFEST_DIR"), rel);
-        let raw = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("找不到源文件 {}: {}", path, e));
-        raw.lines()
-            .filter(|l| !l.trim_start().starts_with("//"))
-            .collect::<Vec<_>>()
-            .join("\n")
+        strip_line_comments(&source_file(&format!("src/{rel}")))
     }
 
     #[test]
