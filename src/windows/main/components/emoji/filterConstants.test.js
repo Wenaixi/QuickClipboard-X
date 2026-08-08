@@ -77,3 +77,20 @@ test('C09 EmojiTab prev-mode 复用 EMOJI_MODE_IDS 与 cycleValue,不再硬编�
     'prev-mode 不应再硬编码 emoji 子模式数组'
   );
 });
+
+
+// C12: applyNavIntent 闭包读 emojiMode,deps 缺 emojiMode → stale 子模式决策。
+test('C12 applyNavIntent useCallback deps 必须含 emojiMode', async () => {
+  const body = await readBody('../EmojiTab.jsx');
+  const start = body.indexOf('const applyNavIntent = useCallback');
+  assert.ok(start >= 0, '应有 applyNavIntent');
+  // deps 数组在 useCallback 第二个参数
+  const depsStart = body.indexOf('}, [', start);
+  assert.ok(depsStart > start, 'applyNavIntent 应有 deps 数组');
+  const depsEnd = body.indexOf(']);', depsStart);
+  const deps = body.slice(depsStart, depsEnd + 3);
+  assert.ok(
+    /\bemojiMode\b/.test(deps),
+    'applyNavIntent deps 必须含 emojiMode,否则 prev-mode 读到 stale 值'
+  );
+});
