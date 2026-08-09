@@ -125,7 +125,7 @@ fn outer() {
 }
 "#;
         let body = fn_body(src, "outer");
-        assert!(body.contains("tail()"), "match 内含 `}` 必须不截断外层");
+        assert!(body.contains("tail()"), "match 内含 `}}` 必须不截断外层");
         assert!(body.contains("None => {}"));
     }
 
