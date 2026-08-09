@@ -22,12 +22,12 @@ pub fn generate_cf_html(html: &str) -> String {
 }
 
 /// 保证 html 含 StartFragment/EndFragment 标记。
-/// 1. 已有标记:原样返回
+/// 1. 已有成对标记:原样返回
 /// 2. 无 <html 外壳:包一层完整文档 + 标记
 /// 3. 有外壳:大小写不敏感找 <body...> 与 </body>,在 body 内插入标记
 /// 4. 找不到 body:把整个输入包在一对 Fragment 标记中
 fn ensure_fragment_markers(html: &str) -> String {
-    if html.contains("<!--StartFragment-->") {
+    if html.contains("<!--StartFragment-->") && html.contains("<!--EndFragment-->") {
         return html.to_string();
     }
 
@@ -158,5 +158,33 @@ mod tests {
         let html = "<html><body><!--StartFragment-->x<!--EndFragment--></body></html>";
         let out = generate_cf_html(html);
         assert_eq!(out.matches("<!--StartFragment-->").count(), 1);
+    }
+
+    /// F06 回归:仅有 StartFragment 无 EndFragment 时,早返必须禁止,
+    /// 否则 generate_cf_html 中 .find("<!--EndFragment-->").expect() 会 panic。
+    /// 改后早返条件为"成对标记都存在",StartFragment 单独存在时按"无外壳"路径包一对。
+    #[test]
+    fn generate_cf_html_start_only_marker_does_not_panic() {
+        // 单独 StartFragment + 无 <html 外壳 → 走第 2 路径,补一对 EndFragment
+        let html = "<b>orphan</b><!--StartFragment-->";
+        let out = generate_cf_html(html);
+        assert!(out.contains("<!--StartFragment-->"));
+        assert!(out.contains("<!--EndFragment-->"));
+        // 偏移必须指向真实标记,不能是 0
+        let end_line = out.lines().find(|l| l.starts_with("EndFragment:")).unwrap();
+        let offset: usize = end_line.split(':').nth(1).unwrap().parse().unwrap();
+        assert!(offset > 0, "EndFragment 偏移不应是 0");
+        assert_eq!(&out.as_bytes()[offset..offset + 18], b"<!--EndFragment-->");
+    }
+
+    /// F06 额外:Start 单独 + 有 <html 外壳 → 保留原有 Start,补 EndFragment
+    #[test]
+    fn generate_cf_html_start_only_with_html_shell() {
+        let html = "<html><body>x<!--StartFragment-->y</body></html>";
+        let out = generate_cf_html(html);
+        assert!(out.contains("<!--EndFragment-->"));
+        // 输入中的 StartFragment 位于 body 内,补标记不会重复插入 StartFragment
+        assert_eq!(out.matches("<!--StartFragment-->").count(), 2);
+        assert_eq!(out.matches("<!--EndFragment-->").count(), 1);
     }
 }

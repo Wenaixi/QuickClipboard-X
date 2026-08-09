@@ -3,23 +3,9 @@ use std::collections::HashMap;
 use super::models::{ClipboardDataSeed, FavoriteItem, PaginatedResult, FavoritesQueryParams};
 use super::connection::{with_connection, MAX_CONTENT_LENGTH};
 use crate::services::webdav_sync::types::{CloudRecord, CloudRecordMeta};
-use crate::utils::{is_textual_content_type, truncate_string, truncate_around_keyword, truncate_html};
+use crate::utils::{is_textual_content_type, truncate_string, truncate_around_keyword, truncate_html, calculate_char_count};
 use rusqlite::{params, OptionalExtension};
 use chrono;
-
-// 计算文本字符数
-fn calculate_char_count(content: &str, content_type: &str) -> Option<i64> {
-    if content_type.contains("text") || content_type.contains("rich_text") {
-        let count = content.chars().count() as i64;
-        if count > 0 {
-            Some(count)
-        } else {
-            None
-        }
-    } else {
-        None
-    }
-}
 
 // 异步更新缺失的字符数
 pub fn update_missing_favorite_char_counts(items: Vec<(String, String, String)>) {
@@ -397,8 +383,9 @@ pub fn query_favorites(params: FavoritesQueryParams) -> Result<PaginatedResult<F
 
         if let Some(content_type) = params.content_type {
             if content_type != "all" {
-                let pattern = format!("%{}%", content_type);
-                where_clauses.push("content_type LIKE ?");
+                // 与搜索词路径一致:转义 %/_/\ + ESCAPE,避免 content_type 含通配符时误匹配
+                let pattern = super::like_pattern(&content_type);
+                where_clauses.push("content_type LIKE ? ESCAPE '\\'");
                 count_params.push(Box::new(pattern.clone()));
                 query_params.push(Box::new(pattern));
             }
@@ -460,12 +447,8 @@ pub fn query_favorites(params: FavoritesQueryParams) -> Result<PaginatedResult<F
             };
 
             // 计算字符数
-            let needs_char_count = content_type.contains("text") || content_type.contains("rich_text");
-            let final_char_count = if char_count.is_none() && needs_char_count && !content.is_empty() {
-                Some(content.chars().count() as i64)
-            } else {
-                char_count
-            };
+            let needs_update = char_count.is_none() && calculate_char_count(&content, &content_type).is_some();
+            let final_char_count = char_count.or_else(|| calculate_char_count(&content, &content_type));
 
             Ok((FavoriteItem {
                 id: id.clone(),
@@ -480,7 +463,7 @@ pub fn query_favorites(params: FavoritesQueryParams) -> Result<PaginatedResult<F
                 char_count: final_char_count,
                 created_at: row.get(9)?,
                 updated_at: row.get(10)?,
-            }, char_count.is_none() && needs_char_count, id, content, content_type))
+            }, char_count.is_none() && needs_update, id, content, content_type))
         })?
         .collect::<Result<Vec<_>, rusqlite::Error>>()?;
 
@@ -588,11 +571,7 @@ pub fn get_favorite_by_id_with_limit(id: &str, max_content_length: Option<usize>
                 };
                 
                 // 计算字符数
-                let final_char_count = if char_count.is_none() && (content_type.contains("text") || content_type.contains("rich_text")) && !content.is_empty() {
-                    Some(content.chars().count() as i64)
-                } else {
-                    char_count
-                };
+                let final_char_count = char_count.or_else(|| calculate_char_count(&content, &content_type));
                 
                 Ok(FavoriteItem {
                     id: row.get(0)?,
@@ -734,11 +713,7 @@ pub fn add_clipboard_to_favorites(clipboard_id: i64, group_name: Option<String>)
         
         let title = String::new();
 
-        let final_char_count = if char_count.is_none() && (content_type.contains("text") || content_type.contains("rich_text")) && !content.is_empty() {
-            Some(content.chars().count() as i64)
-        } else {
-            char_count
-        };
+        let final_char_count = char_count.or_else(|| calculate_char_count(&content, &content_type));
         
         let id = source_clipboard_uuid.clone();
         let now = chrono::Local::now().timestamp();
@@ -1036,4 +1011,58 @@ pub fn update_favorite(
     }
     
     get_favorite_by_id(&id)?.ok_or_else(|| format!("更新后无法获取收藏项: {}", id))
+}
+
+#[cfg(test)]
+mod content_type_like_tests {
+    use std::fs;
+
+    /// F01 护栏:收藏 content_type 过滤必须 like_pattern + ESCAPE,与 clipboard 路径一致。
+    /// 防止未来有人退回到 format!("%{}%", content_type) 裸拼(通配符未转义)。
+    #[test]
+    fn query_favorites_content_type_uses_like_pattern_with_escape() {
+        let source = fs::read_to_string(format!(
+            "{}/src/services/database/favorites.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读 favorites.rs");
+
+        // 剥行注释,避免 §10.4 注释字面误命中
+        let body: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let start = body
+            .find("pub fn query_favorites")
+            .expect("找不到 query_favorites");
+        let after = &body[start..];
+        let end = after
+            .find("\npub fn ")
+            .or_else(|| after.find("\nfn "))
+            .map(|i| start + i)
+            .unwrap_or(body.len());
+        let fn_body = &body[start..end.min(start + 3000)];
+
+        assert!(
+            fn_body.contains("content_type LIKE ? ESCAPE"),
+            "content_type 过滤必须带 ESCAPE '\\\\'"
+        );
+        assert!(
+            fn_body.contains("super::like_pattern(&content_type)")
+                || fn_body.contains("super::like_pattern(content_type)")
+                || fn_body.contains("like_pattern(&content_type)")
+                || fn_body.contains("like_pattern(content_type)"),
+            "content_type 必须走 like_pattern,禁止 format!(\"%{{}}%\")"
+        );
+        // 负向:裸 format!("%{}%") 拼 content_type 不得再出现
+        let has_raw_format = fn_body
+            .lines()
+            .any(|l| l.contains("format!") && l.contains("%{}%") && l.contains("content_type"));
+        assert!(
+            !has_raw_format,
+            "content_type 不得再用 format!(\"%{{}}%\") 裸拼"
+        );
+    }
 }
