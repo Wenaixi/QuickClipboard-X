@@ -483,6 +483,12 @@ fn handle_menu_action(app: &AppHandle, action: &str) -> Result<(), String> {
 // 编辑功能
 static EDITING_WINDOW_ID: Lazy<Mutex<Option<u64>>> = Lazy::new(|| Mutex::new(None));
 
+// 锁 helper:poison 后仍能拿到数据(标准 stdlib 模式)
+// ponytail:3 个调用点都走这里,统一 poison 恢复语义
+fn lock_editing_id() -> std::sync::MutexGuard<'static, Option<u64>> {
+    EDITING_WINDOW_ID.lock().unwrap_or_else(|p| p.into_inner())
+}
+
 async fn start_edit_mode(app: &AppHandle, window_id: u64) -> Result<(), String> {
     let window_info = gpu_image_viewer::window::get_info(window_id)?;
     let window_data = get_window_data(window_id).ok_or("window data not found")?;
@@ -504,7 +510,7 @@ async fn start_edit_mode(app: &AppHandle, window_id: u64) -> Result<(), String> 
     let logical_height = (image_height as f64 / scale_factor).round() as u32;
     
     {
-        let mut editing = EDITING_WINDOW_ID.lock().unwrap();
+        let mut editing = lock_editing_id();
         *editing = Some(window_id);
     }
     
@@ -568,7 +574,7 @@ pub fn confirm_native_pin_edit(
     edit_data: Option<String>,
 ) -> Result<(), String> {
     {
-        let mut editing = EDITING_WINDOW_ID.lock().unwrap();
+        let mut editing = lock_editing_id();
         *editing = None;
     }
     
@@ -600,7 +606,7 @@ pub fn cancel_native_pin_edit(
     window_id: u64,
 ) -> Result<(), String> {
     {
-        let mut editing = EDITING_WINDOW_ID.lock().unwrap();
+        let mut editing = lock_editing_id();
         *editing = None;
     }
     
@@ -692,6 +698,12 @@ pub fn create_native_pin_from_file(app: AppHandle, file_path: String) -> Result<
 
 static PREVIEW_WINDOW_ID: Lazy<Mutex<Option<u64>>> = Lazy::new(|| Mutex::new(None));
 
+// 锁 helper:poison 后仍能拿到数据(标准 stdlib 模式)
+// ponytail:2 个调用点都走这里,统一 poison 恢复语义
+fn lock_preview_id() -> std::sync::MutexGuard<'static, Option<u64>> {
+    PREVIEW_WINDOW_ID.lock().unwrap_or_else(|p| p.into_inner())
+}
+
 const DEFAULT_PREVIEW_SIZE: u32 = 600;
 
 #[tauri::command]
@@ -773,7 +785,7 @@ pub fn show_native_image_preview(app: AppHandle, file_path: String) -> Result<()
     )?;
     
     {
-        let mut preview = PREVIEW_WINDOW_ID.lock().unwrap();
+        let mut preview = lock_preview_id();
         *preview = Some(window_id);
     }
     
@@ -783,7 +795,7 @@ pub fn show_native_image_preview(app: AppHandle, file_path: String) -> Result<()
 #[tauri::command]
 pub fn close_native_image_preview() -> Result<(), String> {
     let window_id = {
-        let mut preview = PREVIEW_WINDOW_ID.lock().unwrap();
+        let mut preview = lock_preview_id();
         preview.take()
     };
 
