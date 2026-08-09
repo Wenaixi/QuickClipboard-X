@@ -20,13 +20,7 @@ mod poison_recovery_guards {
     // §10.3 源码字面护栏:native_pin_window 在 no-default-features 下不编译,
     // 所以用 fs 读源 + contains 锁死 helper 与无裸 unwrap 不变量。
     // 运行时 poison 恢复测试见 native_pin_window::tests(开 feature 时跑)。
-
-    fn strip_line_comments(src: &str) -> String {
-        src.lines()
-            .filter(|l| !l.trim_start().starts_with("//"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
+    use crate::services::system::hotkey::test_utils::{source_file, strip_line_comments};
 
     // 只取生产代码(#[cfg(test)] 之前),避免测试体内制造 poison 的 .lock().unwrap() 误命中
     fn production_body(src: &str) -> String {
@@ -35,8 +29,7 @@ mod poison_recovery_guards {
     }
 
     fn read_src(rel: &str) -> String {
-        std::fs::read_to_string(format!("{}/src/{}", env!("CARGO_MANIFEST_DIR"), rel))
-            .unwrap_or_else(|e| panic!("找不到源文件 {}: {}", rel, e))
+        source_file(&format!("src/{rel}"))
     }
 
     #[test]

@@ -192,12 +192,9 @@ mod tests {
     // "pub fn show_snapped_window" 到下一个 "fn begin_animation" 之前——
     // show 之后是 begin_animation / share_animation_version / animate_window_position
     // 三个私有小函数,与隐藏/可见记账无关,截在它们之前刚好收尾。
+    // 复用 snap_source() OnceLock,避免每测一次 IO。
     fn show_snapped_window_body() -> String {
-        let source = std::fs::read_to_string(format!(
-            "{}/src/windows/main_window/snap.rs",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .expect("找不到 src/windows/main_window/snap.rs 源文件");
+        let source = snap_source();
         let start = source
             .find("pub fn show_snapped_window")
             .expect("找不到 show_snapped_window 定义");

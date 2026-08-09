@@ -60,15 +60,7 @@ test('F7 TabButton 不再有 tabbar 编程焦点用 tabIndex=-1', async () => {
 // !isFilterAutoExpanded && count<=2 && ... 恒 false,浮动展开过滤分支
 // (absolute 浮层)成为死代码。保留 4 个设计,删除死分支与恒 false 派生。
 test('TabNavigation 无 useFloatingExpandedFilters 恒 false 死逻辑与浮动展开分支', async () => {
-  const fs = await import('node:fs/promises');
-  const path = await import('node:path');
-  const { fileURLToPath } = await import('node:url');
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const src = await fs.readFile(path.join(here, '../TabNavigation.jsx'), 'utf8');
-  const body = src
-    .split('\n')
-    .filter((l) => !l.trimStart().startsWith('//'))
-    .join('\n');
+  const body = await readSource('../TabNavigation.jsx');
   // 恒 false 派生已删
   assert.equal(body.includes('useFloatingExpandedFilters'), false, '不应再有 useFloatingExpandedFilters(最小过滤数 4 后恒 false)');
   // 浮动展开浮层(absolute 弹出)已删,只保留内联展开
@@ -86,15 +78,7 @@ test('TabNavigation 无 useFloatingExpandedFilters 恒 false 死逻辑与浮动�
 // (命中提前 return)→定时器到期→按钮在悬停中收起。对称语义:边缘命中分支
 // (502-505)移回即取消隐藏,提前 return 分支同样应取消。
 test('TabNavigation 分组按钮悬停中移回不清除隐藏定时器', async () => {
-  const fs = await import('node:fs/promises');
-  const path = await import('node:path');
-  const { fileURLToPath } = await import('node:url');
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const src = await fs.readFile(path.join(here, '../TabNavigation.jsx'), 'utf8');
-  const body = src
-    .split('\n')
-    .filter((l) => !l.trimStart().startsWith('//'))
-    .join('\n');
+  const body = await readSource('../TabNavigation.jsx');
   const fnStart = body.indexOf('const handleGroupRevealMouseMove');
   const fnEnd = body.indexOf('const handleGroupRevealMouseLeave', fnStart);
   const fnBody = body.slice(fnStart, fnEnd);

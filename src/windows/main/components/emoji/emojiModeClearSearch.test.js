@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readSource } from './readSource.js';
 
 // F1-3: 切子模式(emoji/symbols/images)后搜索态残留。
 // 旧版 main 的 emojiMode effect 第一行 setSearchQuery(''),commit 80acf679
@@ -7,20 +8,8 @@ import assert from 'node:assert/strict';
 // 切子模式仍按旧关键词过滤 → 无匹配时渲染 no-results 空网格。
 // 修复:App 在 emojiMode 变化的回调里清空搜索(搜索框归 App 所有)。
 
-async function readAppBody() {
-  const fs = await import('node:fs/promises');
-  const path = await import('node:path');
-  const { fileURLToPath } = await import('node:url');
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const src = await fs.readFile(path.join(here, '../../App.jsx'), 'utf8');
-  return src
-    .split('\n')
-    .filter((l) => !l.trimStart().startsWith('//'))
-    .join('\n');
-}
-
 test('F1-3 App 有 handleEmojiModeChange 且在模式变化时清空 searchQuery', async () => {
-  const body = await readAppBody();
+  const body = await readSource('../../App.jsx');
   const fnStart = body.indexOf('const handleEmojiModeChange');
   assert.notEqual(fnStart, -1, '缺 const handleEmojiModeChange');
   const fnEnd = body.indexOf('const handleFilterLeft', fnStart);
@@ -30,7 +19,7 @@ test('F1-3 App 有 handleEmojiModeChange 且在模式变化时清空 searchQuery
 });
 
 test('F1-3 App 用 handleEmojiModeChange 取代全部裸 setEmojiMode', async () => {
-  const body = await readAppBody();
+  const body = await readSource('../../App.jsx');
   // TabNavigation / EmojiTab 拿到的是带清搜索的包装回调
   const tabNavProps = body.slice(body.indexOf('const TabNavigationComponent'), body.indexOf('const ContentComponent'));
   assert.ok(tabNavProps.includes('onEmojiModeChange={handleEmojiModeChange}'), 'TabNavigation 应接 handleEmojiModeChange');

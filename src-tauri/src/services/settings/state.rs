@@ -137,28 +137,12 @@ mod tests {
     // 但 save 期间必须显式释放写锁——这是单一调用点必守的最小契约。
     #[test]
     fn update_with_releases_lock_before_io_save() {
+        use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
         let _g = lock_serial();
-        let body = std::fs::read_to_string(format!(
-            "{}/src/services/settings/state.rs",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .expect("找不到 state.rs 源文件");
-
-        // 抽取 update_with 函数体范围
-        let fn_start = body.find("pub fn update_with").expect("找不到 update_with");
-        // 找下一个顶级定义边界("\npub fn " 或 "\nfn "),剥离闭包/impl 干扰
-        let fn_body_end_rel = body[fn_start..]
-            .find("\npub fn ")
-            .or_else(|| body[fn_start..].find("\nfn "))
-            .unwrap_or(body.len() - fn_start);
-        let fn_body = &body[fn_start..fn_start + fn_body_end_rel];
-
+        let body = source_file("src/services/settings/state.rs");
         // 剥行注释后再匹配(§10.3:负向/顺序断言必须先剥注释,否则注释里的字面误命中)
-        let bare: String = fn_body
-            .lines()
-            .filter(|l| !l.trim_start().starts_with("//"))
-            .collect::<Vec<_>>()
-            .join("\n");
+        let bare = strip_line_comments(fn_body(&body, "update_with"));
 
         // 1. 函数体内必须显式 drop 写锁 guard
         assert!(
