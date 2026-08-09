@@ -4,7 +4,7 @@ mod state;
 
 pub use model::AppSettings;
 pub use state::{
-    get_settings, is_edge_hover_popup_enabled, update_settings, update_with, get_data_directory,
+    get_settings, get_edge_monitor_settings, is_edge_hover_popup_enabled, update_settings, update_with, get_data_directory,
 };
 pub use storage::SettingsStorage;
 
