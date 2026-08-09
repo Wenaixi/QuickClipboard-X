@@ -239,6 +239,8 @@ mod tests {
         );
     }
 
+    #[test]
+    fn start_edge_monitoring_uses_small_hover_snapshot() {
         let source = source_file("src/windows/main_window/edge_monitor.rs");
         // 剥行注释再匹配,避免注释字面误命中
         let body = strip_line_comments(fn_body(&source, "start_edge_monitoring"));
