@@ -274,6 +274,14 @@ fn destroy_all_webviews(app: &AppHandle) {
 fn recreate_main_window(app: &AppHandle) -> Result<(), String> {
     use tauri::{WebviewUrl, WebviewWindowBuilder};
 
+    // 退出低占用模式必须对称恢复导航键/鼠标监听。即使主窗口已存在走
+    // 早返分支,enter_low_memory_mode 已调过 disable_navigation_keys() /
+    // disable_mouse_monitoring()(行 67/70),这里必须无条件 enable,否则
+    // 退出后导航键/鼠标监控永久失效。原实现把 enable 放在早返检查之后,
+    // 主窗口已存在时早返跳过恢复,与 enter_low_memory_mode 不对称。
+    crate::input_monitor::enable_navigation_keys();
+    crate::input_monitor::enable_mouse_monitoring();
+
     if app.get_webview_window("main").is_some() {
         return Ok(());
     }
@@ -324,10 +332,6 @@ fn recreate_main_window(app: &AppHandle) -> Result<(), String> {
 
     let _ = crate::windows::main_window::restore_edge_snap_on_startup(&window);
 
-    // F3: 低占用模式进入时 disable_navigation_keys()，退出重建主窗口
-    // 必须对称恢复，否则退出后导航键（Enter/Tab/Esc 等）永久失效。
-    // 与 enable_mouse_monitoring 同处成功路径，恢复顺序与进入时相反。
-    crate::input_monitor::enable_navigation_keys();
     crate::input_monitor::enable_mouse_monitoring();
 
     Ok(())
@@ -360,6 +364,46 @@ mod tests {
         assert!(
             b.find("enable_navigation_keys()") < b.find("enable_mouse_monitoring()"),
             "导航键恢复必须先于鼠标监控恢复"
+        );
+    }
+
+    // F14: 早返分支 `if app.get_webview_window("main").is_some() { return Ok(()); }`
+    // 必须保留对 enable_navigation_keys() / enable_mouse_monitoring() 的恢复调用。
+    // 若两次 enable 写在早返检查之后,主窗口已存在时早返就跳过恢复——
+    // 退出低占用模式后导航键/鼠标监控永久失效。与 enter_low_memory_mode 中
+    // disable_navigation_keys() / disable_mouse_monitoring() (行 67/70) 对称必须。
+    // 顺序类不变量,源码字面 find() 下标比较,无法用 contains 替代。
+    #[test]
+    fn recreate_main_window_early_return_still_restores_io() {
+        let src = strip_line_comments(&manager_source());
+        let start = src
+            .find("fn recreate_main_window(app: &AppHandle)")
+            .expect("缺 recreate_main_window");
+        let after_start = &src[start..];
+        // 早返检查必须先于下一次 enable 调用,故先定位早返下标
+        let early_return_rel = after_start
+            .find("if app.get_webview_window(\"main\").is_some()")
+            .expect("缺早返检查");
+        let pos_enable_nav_rel = after_start
+            .find("enable_navigation_keys()")
+            .expect("缺 enable_navigation_keys()");
+        let pos_enable_mouse_rel = after_start
+            .find("enable_mouse_monitoring()")
+            .expect("缺 enable_mouse_monitoring()");
+        assert!(
+            pos_enable_nav_rel < early_return_rel,
+            "enable_navigation_keys() 必须在早返检查之前被调用。\
+             当前 enable_navigation_keys 位于第 {} 字符,早返检查位于第 {} 字符。\
+             退出低占用时主窗口已存在会导致早返跳过恢复,导航键永久失效。",
+            pos_enable_nav_rel,
+            early_return_rel,
+        );
+        assert!(
+            pos_enable_mouse_rel < early_return_rel,
+            "enable_mouse_monitoring() 必须在早返检查之前被调用。\
+             当前 enable_mouse_monitoring 位于第 {} 字符,早返检查位于第 {} 字符。",
+            pos_enable_mouse_rel,
+            early_return_rel,
         );
     }
 }
