@@ -447,8 +447,9 @@ pub fn query_favorites(params: FavoritesQueryParams) -> Result<PaginatedResult<F
             };
 
             // 计算字符数
-            let needs_update = char_count.is_none() && calculate_char_count(&content, &content_type).is_some();
-            let final_char_count = char_count.or_else(|| calculate_char_count(&content, &content_type));
+            let calculated_char_count = calculate_char_count(&content, &content_type);
+            let needs_update = char_count.is_none() && calculated_char_count.is_some();
+            let final_char_count = char_count.or(calculated_char_count);
 
             Ok((FavoriteItem {
                 id: id.clone(),
@@ -463,7 +464,7 @@ pub fn query_favorites(params: FavoritesQueryParams) -> Result<PaginatedResult<F
                 char_count: final_char_count,
                 created_at: row.get(9)?,
                 updated_at: row.get(10)?,
-            }, char_count.is_none() && needs_update, id, content, content_type))
+            }, char_count.is_none() && calculated_char_count.is_some(), id, content, content_type))
         })?
         .collect::<Result<Vec<_>, rusqlite::Error>>()?;
 

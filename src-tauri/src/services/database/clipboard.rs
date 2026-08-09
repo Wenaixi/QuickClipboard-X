@@ -1,25 +1,11 @@
 use super::models::{ClipboardDataItem, ClipboardDataSeed, ClipboardItem, PaginatedResult, QueryParams};
 use super::connection::{with_connection, MAX_CONTENT_LENGTH};
 use crate::services::webdav_sync::types::{CloudRecord, CloudRecordMeta};
-use crate::utils::{is_textual_content_type, truncate_string, truncate_around_keyword, truncate_html};
+use crate::utils::{is_textual_content_type, truncate_string, truncate_around_keyword, truncate_html, calculate_char_count};
 use rusqlite::{params, OptionalExtension};
 use std::collections::{HashMap, HashSet};
 use chrono;
 use uuid::Uuid;
-
-// 计算文本字符数
-fn calculate_char_count(content: &str, content_type: &str) -> Option<i64> {
-    if content_type.contains("text") || content_type.contains("rich_text") {
-        let count = content.chars().count() as i64;
-        if count > 0 {
-            Some(count)
-        } else {
-            None
-        }
-    } else {
-        None
-    }
-}
 
 pub fn save_clipboard_data_items(
     target_kind: &str,
@@ -298,12 +284,9 @@ pub fn query_clipboard_items(params: QueryParams) -> Result<PaginatedResult<Clip
                     (content.clone(), html_content)
                 };
 
-                let needs_char_count = content_type.contains("text") || content_type.contains("rich_text");
-                let final_char_count = if char_count.is_none() && needs_char_count && !content.is_empty() {
-                    Some(content.chars().count() as i64)
-                } else {
-                    char_count
-                };
+                let calculated_char_count = calculate_char_count(&content, &content_type);
+                let needs_update = char_count.is_none() && calculated_char_count.is_some();
+                let final_char_count = char_count.or(calculated_char_count);
                 
                 Ok((ClipboardItem {
                     id,
@@ -323,7 +306,7 @@ pub fn query_clipboard_items(params: QueryParams) -> Result<PaginatedResult<Clip
                     char_count: final_char_count,
                     created_at: row.get(13)?,
                     updated_at: row.get(14)?,
-                }, char_count.is_none() && needs_char_count, id, content, content_type))
+                }, char_count.is_none() && calculated_char_count.is_some(), id, content, content_type))
             }
         )?
         .collect::<Result<Vec<_>, _>>()?;
@@ -796,11 +779,9 @@ pub fn get_clipboard_item_by_id_with_limit(id: i64, max_content_length: Option<u
                 };
                 
                 // 计算字符数
-                let final_char_count = if char_count.is_none() && (content_type.contains("text") || content_type.contains("rich_text")) && !content.is_empty() {
-                    Some(content.chars().count() as i64)
-                } else {
-                    char_count
-                };
+                let calculated_char_count = calculate_char_count(&content, &content_type);
+                let needs_update = char_count.is_none() && calculated_char_count.is_some();
+                let final_char_count = char_count.or(calculated_char_count);
                 
                 Ok(ClipboardItem {
                     id: row.get(0)?,
