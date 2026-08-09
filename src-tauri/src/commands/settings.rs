@@ -436,6 +436,7 @@ pub fn set_one_time_paste_enabled(enabled: bool) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::system::hotkey::test_utils::strip_line_comments;
     use std::sync::OnceLock;
 
     // settings.rs 自身源码缓存:多个源码字面护栏共享,避免每测一次 IO
@@ -499,21 +500,24 @@ mod tests {
     // 禁止直接 update_settings(settings) 跳过归一化。
     // 源码字面存在性检查:即使函数无法在 lib test 中构造 AppHandle 调用,
     // 也能确保回归保护不被未来改写绕过。
-    // 运行时读源(include_str! 自指会编译期递归,不可用)。
+    // 运行时读源(include_str! 自指会编译期递归,不可用);
+    // 必须先剥行注释再 contains,否则注释里出现 `normalize_edge_hover_invariant`
+    // 会误命中让护栏永远绿(§10.4 注释字面误命中陷阱)。
     #[test]
     fn set_edge_hide_enabled_calls_normalize_in_body() {
         let source = settings_source();
-        let start = source
+        let body = strip_line_comments(source);
+        let start = body
             .find("pub fn set_edge_hide_enabled")
             .expect("找不到 set_edge_hide_enabled 定义");
-        let after = &source[start..];
+        let after = &body[start..];
         let end_rel = after
             .find("\n#[tauri::command]")
             .or_else(|| after.find("\npub fn "))
             .unwrap_or(after.len());
-        let body = &after[..end_rel];
+        let fn_body = &after[..end_rel];
         assert!(
-            body.contains("normalize_edge_hover_invariant"),
+            fn_body.contains("normalize_edge_hover_invariant"),
             "set_edge_hide_enabled 必须显式调用 normalize_edge_hover_invariant,\
              禁止直接 update_settings(settings) 跳过归一化"
         );
