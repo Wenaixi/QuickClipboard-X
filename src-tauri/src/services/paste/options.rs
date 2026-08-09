@@ -1,6 +1,5 @@
-use regex::Regex;
-
 use crate::services::database::{ClipboardDataItem, ClipboardItem, PasteOption};
+use crate::utils::is_image_only_html;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PasteAction {
@@ -214,21 +213,4 @@ fn is_pure_image_item(item: &ClipboardItem) -> bool {
     }
 
     is_image_only_html(item.html_content.as_deref())
-}
-
-fn is_image_only_html(html: Option<&str>) -> bool {
-    let Some(html) = html else {
-        return false;
-    };
-
-    if !html.contains("<img") {
-        return false;
-    }
-
-    let tag_regex = Regex::new(r"<[^>]*>").unwrap();
-    let entity_regex = Regex::new(r"&[a-zA-Z]+;").unwrap();
-
-    let mut text = tag_regex.replace_all(html, " ").to_string();
-    text = entity_regex.replace_all(&text, " ").to_string();
-    text.trim().is_empty()
 }

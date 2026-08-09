@@ -1,7 +1,7 @@
 ﻿use clipboard_rs::{common::RustImage, Clipboard, ClipboardContext, RustImageData};
 
 use crate::services::database::ClipboardDataSeed;
-use regex::Regex;
+use crate::utils::is_image_only_html;
 
 // 剪贴板内容类型
 #[derive(Debug, Clone, PartialEq)]
@@ -380,21 +380,4 @@ fn is_supported_raw_format(format_name: &str) -> bool {
         format_name,
         "CF_HDROP" | "CF_TEXT" | "CF_UNICODETEXT" | "HTML Format" | "Rich Text Format"
     )
-}
-
-fn is_image_only_html(html: Option<&str>) -> bool {
-    let Some(html) = html else {
-        return false;
-    };
-
-    if !html.contains("<img") {
-        return false;
-    }
-
-    let tag_regex = Regex::new(r"<[^>]*>").unwrap();
-    let entity_regex = Regex::new(r"&[a-zA-Z]+;").unwrap();
-
-    let mut text = tag_regex.replace_all(html, " ").to_string();
-    text = entity_regex.replace_all(&text, " ").to_string();
-    text.trim().is_empty()
 }
