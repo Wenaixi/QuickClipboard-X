@@ -1007,6 +1007,8 @@ mod tests {
     use super::*;
     use std::sync::OnceLock;
 
+    use crate::services::system::hotkey::test_utils::strip_line_comments;
+
     // snap.rs 自身源码缓存:多个源码字面护栏共享,避免每测一次 IO
     static SNAP_SOURCE: OnceLock<String> = OnceLock::new();
 
@@ -1045,11 +1047,7 @@ mod tests {
     // 只在 build_monitor_contexts_uncached 内。
     #[test]
     fn build_monitor_contexts_uses_ttl_cache() {
-        let source = std::fs::read_to_string(format!(
-            "{}/src/windows/main_window/snap.rs",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .expect("找不到 snap.rs 源文件");
+        let source = snap_source();
         // 剥行注释
         let body: String = source
             .lines()
