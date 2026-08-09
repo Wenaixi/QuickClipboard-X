@@ -50,6 +50,7 @@ export const defaultSettings = {
   cardSpacing: 8, 
   
   // 快捷键设置
+  hotkeysEnabled: true,
   toggleShortcut: 'Shift+Space',
   openSettingsShortcut: '',
   quickpasteShortcut: 'Ctrl+`',
@@ -93,6 +94,9 @@ export const defaultSettings = {
   edgeHideEnabled: true,
   edgeHoverPopupEnabled: true,
   edgeSnapPosition: null,
+  edgeSnapEdge: null,
+  edgeSnapRatio: null,
+  edgeSnapMonitorId: null,
   edgeHideOffset: 3,
   autoFocusSearch: false,
   pasteWithFormat: true,
@@ -125,6 +129,8 @@ export const defaultSettings = {
   quickpastePasteOnModifierRelease: true,
   quickpasteScrollSound: true,
   quickpasteScrollSoundPath: 'sounds/roll.mp3',
+  quickpasteWindowWidth: 300,
+  quickpasteWindowHeight: 400,
   
   // 截屏设置
   screenshotEnabled: true,
@@ -164,6 +170,8 @@ export const defaultSettings = {
   // 应用过滤
   appFilterEnabled: false,
   appFilterBlocklist: [],
+  appFilterMode: 'blacklist',
+  appFilterList: [],
   appFilterEffect: 'clipboard_only',
   
   // 保存的窗口状态
