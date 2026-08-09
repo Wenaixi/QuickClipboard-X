@@ -133,6 +133,14 @@ fn register_navigation_hotkeys_from_settings() -> Result<(), String> {
             Ok(shortcut) => shortcut,
             Err(error) => {
                 eprintln!("解析导航快捷键 [{}] 失败: {}", config.id, error);
+                // F8: parse 失败与 register 失败对称——写 SHORTCUT_STATUS,
+                // 否则用户配错键时前端 navigation tab 静默无红错提示。
+                super::global::set_shortcut_status(
+                    &config.id,
+                    &config.shortcut,
+                    false,
+                    Some("REGISTRATION_FAILED".to_string()),
+                );
                 continue;
             }
         };
@@ -516,6 +524,39 @@ mod tests {
         assert!(
             !segment.contains("has_failure"),
             "store 表达式不得依赖 has_failure,单键失败不能整体置 REGISTERED=false"
+        );
+    }
+
+    // F8: parse_shortcut 失败必须与 register 失败对称——写 global 的
+    // SHORTCUT_STATUS 状态表,否则用户配错键时前端 navigation tab 静默无红错提示。
+    // 错误码固定 REGISTRATION_FAILED(parse 失败与 OS 层注册失败同源)。
+    #[test]
+    fn navigation_parse_shortcut_failure_writes_shortcut_status() {
+        let src = strip_line_comments(&navigation_source());
+        let b = fn_body(&src, "register_navigation_hotkeys_from_settings");
+        let parse_pos = b
+            .find("parse_shortcut(&config.shortcut)")
+            .expect("必须存在 parse_shortcut 调用");
+        let err_pos = b[parse_pos..]
+            .find("Err(error)")
+            .map(|i| parse_pos + i)
+            .expect("parse_shortcut 必须有 Err 分支");
+        // Err 分支必须以 `continue;` 结尾——切片到此之前。
+        // 这样不混入后面的 register 失败分支(也有 set_shortcut_status)
+        // 才能精确验证 parse 失败分支本身写了状态表。
+        let continue_pos = b[err_pos..]
+            .find("continue;")
+            .map(|i| err_pos + i)
+            .expect("parse_shortcut Err 分支必须以 continue; 收尾");
+        let err_branch = &b[err_pos..continue_pos];
+        assert!(
+            err_branch.contains("set_shortcut_status"),
+            "parse_shortcut Err 分支必须调 set_shortcut_status 写失败状态,\
+             与 register 失败对称——禁止只 eprintln+continue 静默吞错"
+        );
+        assert!(
+            err_branch.contains("REGISTRATION_FAILED"),
+            "parse_shortcut Err 分支错误码必须为 REGISTRATION_FAILED"
         );
     }
 
