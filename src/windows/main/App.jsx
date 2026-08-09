@@ -482,10 +482,12 @@ function App() {
     }
   };
   const handleToggleSearch = () => {
+    // F02:toggleFocus 是 async(内部 await focusWindowImmediately 后才 focus),
+    // 此前同步读 ref.isFocused() 必拿旧值。isSearchFocused 交由
+    // TitleBarSearch onFocus/onBlur → notifyFocusChange → onSearchFocusChange 单写。
     if (searchRef.current?.toggleFocus) {
       searchRef.current.toggleFocus();
     }
-    setIsSearchFocused(searchRef.current?.isFocused?.() === true);
   };
 
   // F1-3:切子模式统一入口——先清空搜索再切模式。搜索框是 App 顶层 state,

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readSource } from './readSource.js';
+import { readSource, readSourceRaw } from './readSource.js';
 
 // F1-5: App handleFilterLeft/Right 硬编码过滤器数组,与 TabNavigation 常量重复。
 // 修复:从 TabNavigation 导出 FILTER_IDS / EMOJI_MODE_IDS,App import 复用。
@@ -34,13 +34,7 @@ test('F1-5 App 过滤热键复用常量,不再硬编码数组', async () => {
 // 修复:import cycleValue + EMOJI_MODE_IDS,cycleValue(EMOJI_MODE_IDS, ...) 复用单一真源。
 test('C09 EmojiTab prev-mode 复用 EMOJI_MODE_IDS 与 cycleValue,不再硬编码子模式数组', async () => {
   const body = await readSource('../EmojiTab.jsx');
-  const raw = await (async () => {
-    const fs = await import('node:fs/promises');
-    const path = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const here = path.dirname(fileURLToPath(import.meta.url));
-    return fs.readFile(path.join(here, '../EmojiTab.jsx'), 'utf8');
-  })();
+  const raw = await readSourceRaw('../EmojiTab.jsx');
   // import 必须有 cycleValue 与 EMOJI_MODE_IDS(raw 保留 import 行,body 已剥注释)
   assert.ok(
     /import\s*\{[^}]*\bcycleValue\b[^}]*\}\s*from\s*['"]\.\/emoji\/emojiKbNavigation['"]/.test(raw)
@@ -81,5 +75,25 @@ test('C12 applyNavIntent useCallback deps 必须含 emojiMode', async () => {
   assert.ok(
     /\bemojiMode\b/.test(deps),
     'applyNavIntent deps 必须含 emojiMode,否则 prev-mode 读到 stale 值'
+  );
+});
+
+
+// F09: EmojiTab enterGrid useCallback deps 缺 focusSearchInput(G06)。fixSearchInput
+// 当前是 useCallback(() => setKbZone('search'), []) 空 deps,加不加不影响运行时;
+// 但若日后有人给 focusSearchInput 加 deps(例如同步 kbZoneRef / 滚动到搜索框),
+// 不补 deps 的 enterGrid 会读旧 closure 触发 stale focus 行为。
+// 护栏:enterGrid deps 必须含 focusSearchInput。
+test('F09 enterGrid useCallback deps 必须含 focusSearchInput', async () => {
+  const body = await readSource('../EmojiTab.jsx');
+  const start = body.indexOf('const enterGrid = useCallback');
+  assert.ok(start >= 0, '应有 enterGrid');
+  const depsStart = body.indexOf('}, [', start);
+  assert.ok(depsStart > start, 'enterGrid 应有 deps 数组');
+  const depsEnd = body.indexOf(']);', depsStart);
+  const deps = body.slice(depsStart, depsEnd + 3);
+  assert.ok(
+    /\bfocusSearchInput\b/.test(deps),
+    'enterGrid deps 必须含 focusSearchInput,防止日后该函数加 deps 后产生 stale closure'
   );
 });
