@@ -223,27 +223,13 @@ mod tests {
     // 50ms 主循环热路径:悬浮开关守卫必须走单字段 accessor,
     // 禁止 get_settings() 深克隆整份 AppSettings(~135 字段 × 20Hz)。
     // 运行时读源(include_str! 自指会编译期递归,不可用)。
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
     #[test]
     fn hover_guard_uses_single_field_accessor_not_full_clone() {
-        let source = std::fs::read_to_string(format!(
-            "{}/src/windows/main_window/edge_monitor.rs",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .expect("找不到 edge_monitor.rs 源文件");
-        let start = source
-            .find("pub fn start_edge_monitoring")
-            .expect("找不到 start_edge_monitoring 定义");
-        let after = &source[start..];
-        let end_rel = after[1..]
-            .find("\npub fn ")
-            .map(|rel| rel + 1)
-            .unwrap_or(after.len());
+        let source = source_file("src/windows/main_window/edge_monitor.rs");
         // 剥行注释再匹配,避免注释字面误命中
-        let body: String = after[..end_rel]
-            .lines()
-            .filter(|line| !line.trim_start().starts_with("//"))
-            .collect::<Vec<_>>()
-            .join("\n");
+        let body = strip_line_comments(fn_body(&source, "start_edge_monitoring"));
 
         assert!(
             body.contains("is_edge_hover_popup_enabled()"),

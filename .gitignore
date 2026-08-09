@@ -143,8 +143,9 @@ D:newC*
 /src-tauri/Cargo.toml.local
 
 # === review-tdd 临时标记文件(不入库) ===
-# 记录本次 review 的 base commit;4f100b67 曾误提交该文件进 mine 分支
+# 记录本次 review 的 base/head commit;4f100b67 曾误提交该文件进 mine 分支
 .review-tdd-base
+.review-tdd-head
 
 # === Claude Code worktree 目录(不入库) ===
 # .claude/worktrees/ 下是 review-tdd 各组的临时工作树

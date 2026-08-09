@@ -1085,9 +1085,10 @@ mod tests {
     // 前台切换全挂死。内层契约：reload_from_settings 顶层持锁贯穿整个
     // reload 过程，unregister_all / register_* 全部假设锁已持。
     // 锁序契约（F8）见 GLOBAL_HOTKEY_SYNC_LOCK 定义处注释。
+    // 负向 contains 必须剥注释,避免注释字面误命中(§10.3)。
     #[test]
     fn reload_inner_and_callees_must_not_reenter_sync_lock() {
-        let src = global_source();
+        let src = strip_line_comments(&global_source());
         for name in [
             "reload_from_settings_inner",
             "unregister_all",
@@ -1108,7 +1109,7 @@ mod tests {
     // 保证 reload/disable 过程仍串行。
     #[test]
     fn reload_outer_entries_hold_sync_lock() {
-        let src = global_source();
+        let src = strip_line_comments(&global_source());
         for name in ["reload_from_settings", "disable_hotkeys", "enable_hotkeys"] {
             let b = fn_body(&src, name);
             assert!(
@@ -1123,7 +1124,7 @@ mod tests {
     // 且锁位置早于 HOTKEYS_ENABLED.store(true)。
     #[test]
     fn enable_hotkeys_holds_lock_and_calls_inner_reload() {
-        let src = global_source();
+        let src = strip_line_comments(&global_source());
         let b = fn_body(&src, "enable_hotkeys");
         let lock_pos = b.find("GLOBAL_HOTKEY_SYNC_LOCK.lock()");
         let store_pos = b.find("HOTKEYS_ENABLED.store(true");
@@ -1140,8 +1141,10 @@ mod tests {
 
     // F8: 锁序契约必须成文——global 层入口(持 GLOBAL)内部调 navigation
     // sync(持 NAVIGATION),反向顺序即 AB-BA 死锁。注释须在锁定义处。
+    // 本测试故意匹配注释字面("锁序契约"/"NAVIGATION"),故保留 raw 源码不剥注释。
     #[test]
     fn lock_order_contract_documented_at_global_lock_definition() {
+        // ponytail: 故意 raw——断言目标就是注释本身,strip 会让护栏永远红
         let src = global_source();
         let def_pos = src.find("static GLOBAL_HOTKEY_SYNC_LOCK");
         let doc_pos = src.find("锁序契约");
@@ -1162,7 +1165,7 @@ mod tests {
     // 的 register_* 并发留下半注册幽灵热键。
     #[test]
     fn disable_all_shortcuts_holds_sync_lock_before_clear() {
-        let src = global_source();
+        let src = strip_line_comments(&global_source());
         let b = fn_body(&src, "disable_all_shortcuts");
         let lock_pos = b.find("GLOBAL_HOTKEY_SYNC_LOCK.lock()");
         let clear_pos = b.find("REGISTERED_SHORTCUTS.lock().clear()");
@@ -1177,20 +1180,13 @@ mod tests {
     // 统一走 safe_unregister 公共函数（内含 is_registered 探测）。
     #[test]
     fn direct_registration_fns_cleanup_ghost_hotkey_on_failure() {
-        let src = global_source();
-        let body = |name: &str| {
-            let start = src.find(&format!("pub fn {name}(")).unwrap_or_else(|| panic!("缺 {name}"));
-            let rest = &src[start..];
-            let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(src.len());
-            &src[start..end]
-        };
-
+        let src = strip_line_comments(&global_source());
         for name in [
             "register_quickpaste_hotkey",
             "register_paste_plain_text_hotkey",
             "register_number_shortcuts",
         ] {
-            let b = body(name);
+            let b = fn_body(&src, name);
             assert!(
                 b.find("safe_unregister(&app, shortcut)").is_some(),
                 "{name} 失败路径必须调 safe_unregister 清理幽灵热键"
