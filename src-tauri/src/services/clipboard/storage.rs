@@ -3,6 +3,7 @@ use crate::services::database::connection::with_connection;
 use crate::services::database::clipboard::limit_clipboard_history;
 use crate::services::database::ClipboardDataSeed;
 use crate::services::settings::get_settings;
+use crate::utils::calculate_char_count;
 use rusqlite::params;
 use chrono;
 use serde_json::Value;
@@ -12,20 +13,6 @@ use uuid::Uuid;
 struct DuplicateClipboardItem {
     id: i64,
     is_pinned: i64,
-}
-
-// 计算文本字符数
-fn calculate_char_count(content: &str, content_type: &str) -> Option<i64> {
-    if content_type.contains("text") || content_type.contains("rich_text") {
-        let count = content.chars().count() as i64;
-        if count > 0 {
-            Some(count)
-        } else {
-            None
-        }
-    } else {
-        None
-    }
 }
 
 pub fn store_clipboard_item(content: ProcessedContent) -> Result<i64, String> {

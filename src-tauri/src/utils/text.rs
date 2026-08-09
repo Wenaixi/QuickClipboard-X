@@ -10,6 +10,21 @@ pub fn is_textual_content_type(content_type: &str) -> bool {
         .any(|kind| matches!(kind, "text" | "rich_text" | "link"))
 }
 
+/// 统一文本字符数计算:仅 content_type 含 "text" 或 "rich_text" 时返回字符数,空内容返回 None。
+/// 三个调用点(数据库 clipboard / favorites / service clipboard storage)共用,语义统一以避免漂移。
+pub fn calculate_char_count(content: &str, content_type: &str) -> Option<i64> {
+    if content_type.contains("text") || content_type.contains("rich_text") {
+        let count = content.chars().count() as i64;
+        if count > 0 {
+            Some(count)
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
 pub fn truncate_string(s: String, max_len: usize) -> String {
     if s.is_empty() || s.len() <= max_len {
         return s;
@@ -168,5 +183,55 @@ mod tests {
 
         assert!(excerpt.len() <= 257);
         assert!(excerpt.contains("关键字"));
+    }
+
+    #[test]
+    fn calculate_char_count_text_only_for_textual_types() {
+        let count = calculate_char_count("hello", "text").expect("text 应返回字符数");
+        assert_eq!(count, 5);
+        let count = calculate_char_count("rich content", "rich_text").expect("rich_text 应返回字符数");
+        assert_eq!(count, 12);
+    }
+
+    #[test]
+    fn calculate_char_count_empty_returns_none() {
+        assert_eq!(calculate_char_count("", "text"), None);
+    }
+
+    #[test]
+    fn calculate_char_count_non_textual_returns_none() {
+        assert_eq!(calculate_char_count("anything", "image"), None);
+        assert_eq!(calculate_char_count("data", "file"), None);
+    }
+
+    /// F11 护栏:三个调用点应共享 `utils::calculate_char_count`,
+    /// 不允许在 database/clipboard.rs / database/favorites.rs / clipboard/storage.rs 重新定义同名 fn。
+    /// 防止未来有人复制粘贴回旧位置导致语义漂移。
+    #[test]
+    fn calculate_char_count_not_redefined_in_three_callers() {
+        let manifest = env!("CARGO_MANIFEST_DIR");
+        let pages = [
+            "src/services/database/clipboard.rs",
+            "src/services/database/favorites.rs",
+            "src/services/clipboard/storage.rs",
+        ];
+        for p in pages {
+            let body = std::fs::read_to_string(format!("{}/{}", manifest, p))
+                .unwrap_or_else(|e| panic!("读 {} 失败: {}", p, e));
+            // 剥行注释:§10.4 防注释字面误命中
+            let uncommented: String = body
+                .lines()
+                .filter(|l| !l.trim_start().starts_with("//"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let has_definition = uncommented
+                .lines()
+                .any(|l| l.trim_start().starts_with("fn calculate_char_count"));
+            assert!(
+                !has_definition,
+                "{} 不得再定义 fn calculate_char_count,应 use crate::utils::calculate_char_count",
+                p
+            );
+        }
     }
 }
