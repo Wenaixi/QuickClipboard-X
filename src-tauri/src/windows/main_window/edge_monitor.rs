@@ -151,32 +151,32 @@ fn check_mouse_near_edge(
 ) -> Result<bool, String> {
     let (cursor_x, cursor_y) = crate::mouse::get_cursor_position();
     let (win_x, win_y, win_width, win_height) = crate::get_window_bounds(window)?;
-    let settings = crate::get_settings();
-    let ratio = state
-        .snap_ratio
-        .or(settings.edge_snap_ratio)
-        .unwrap_or(super::snap::compute_snap_ratio(
+    let (edge_snap_ratio, edge_snap_monitor_id, edge_hide_offset) =
+        crate::services::settings::get_edge_monitor_settings();
+    let ratio = state.snap_ratio.or(edge_snap_ratio).unwrap_or(
+        super::snap::compute_snap_ratio(
             window.app_handle(),
             state.snap_edge,
             win_x,
             win_y,
             win_width as i32,
             win_height as i32,
-        )?);
+        )?,
+    );
     let resolved = super::snap::resolve_snapped_position(
         window.app_handle(),
         state.snap_edge,
         state
             .snap_monitor_id
             .as_deref()
-            .or(settings.edge_snap_monitor_id.as_deref()),
+            .or(edge_snap_monitor_id.as_deref()),
         ratio,
         win_width as i32,
         win_height as i32,
     )?;
 
-    let base_trigger = if settings.edge_hide_offset >= 10 {
-        settings.edge_hide_offset
+    let base_trigger = if edge_hide_offset >= 10 {
+        edge_hide_offset
     } else {
         10
     };
@@ -226,7 +226,19 @@ mod tests {
     use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
 
     #[test]
-    fn hover_guard_uses_single_field_accessor_not_full_clone() {
+    fn check_mouse_near_edge_uses_small_settings_snapshot() {
+        let source = source_file("src/windows/main_window/edge_monitor.rs");
+        let body = strip_line_comments(fn_body(&source, "check_mouse_near_edge"));
+        assert!(
+            body.contains("get_edge_monitor_settings()"),
+            "check_mouse_near_edge 必须通过最小 accessor 读取三项设置"
+        );
+        assert!(
+            !body.contains("get_settings()"),
+            "check_mouse_near_edge 禁止 20Hz 深克隆整份 AppSettings"
+        );
+    }
+
         let source = source_file("src/windows/main_window/edge_monitor.rs");
         // 剥行注释再匹配,避免注释字面误命中
         let body = strip_line_comments(fn_body(&source, "start_edge_monitoring"));

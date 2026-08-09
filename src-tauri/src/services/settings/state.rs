@@ -16,6 +16,16 @@ pub fn is_edge_hover_popup_enabled() -> bool {
     SETTINGS.read().edge_hover_popup_enabled
 }
 
+// edge_monitor 热路径只复制贴边计算需要的三项,避免 20Hz 深克隆整份设置。
+pub fn get_edge_monitor_settings() -> (Option<f64>, Option<String>, i32) {
+    let settings = SETTINGS.read();
+    (
+        settings.edge_snap_ratio,
+        settings.edge_snap_monitor_id.clone(),
+        settings.edge_hide_offset,
+    )
+}
+
 pub fn update_settings(mut settings: AppSettings) -> Result<(), String> {
     // 守不变量:所有写入路径统一入口,杜绝 hide=false/hover=true 违规组合落地
     settings.normalize_edge_hover_invariant();
