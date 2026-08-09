@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readSource } from './readSource.js';
+import { readSource, readSourceRaw } from './readSource.js';
 
 // F1-5: App handleFilterLeft/Right 硬编码过滤器数组,与 TabNavigation 常量重复。
 // 修复:从 TabNavigation 导出 FILTER_IDS / EMOJI_MODE_IDS,App import 复用。
@@ -34,13 +34,7 @@ test('F1-5 App 过滤热键复用常量,不再硬编码数组', async () => {
 // 修复:import cycleValue + EMOJI_MODE_IDS,cycleValue(EMOJI_MODE_IDS, ...) 复用单一真源。
 test('C09 EmojiTab prev-mode 复用 EMOJI_MODE_IDS 与 cycleValue,不再硬编码子模式数组', async () => {
   const body = await readSource('../EmojiTab.jsx');
-  const raw = await (async () => {
-    const fs = await import('node:fs/promises');
-    const path = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const here = path.dirname(fileURLToPath(import.meta.url));
-    return fs.readFile(path.join(here, '../EmojiTab.jsx'), 'utf8');
-  })();
+  const raw = await readSourceRaw('../EmojiTab.jsx');
   // import 必须有 cycleValue 与 EMOJI_MODE_IDS(raw 保留 import 行,body 已剥注释)
   assert.ok(
     /import\s*\{[^}]*\bcycleValue\b[^}]*\}\s*from\s*['"]\.\/emoji\/emojiKbNavigation['"]/.test(raw)
