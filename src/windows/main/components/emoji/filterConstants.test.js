@@ -77,3 +77,23 @@ test('C12 applyNavIntent useCallback deps 必须含 emojiMode', async () => {
     'applyNavIntent deps 必须含 emojiMode,否则 prev-mode 读到 stale 值'
   );
 });
+
+
+// F09: EmojiTab enterGrid useCallback deps 缺 focusSearchInput(G06)。fixSearchInput
+// 当前是 useCallback(() => setKbZone('search'), []) 空 deps,加不加不影响运行时;
+// 但若日后有人给 focusSearchInput 加 deps(例如同步 kbZoneRef / 滚动到搜索框),
+// 不补 deps 的 enterGrid 会读旧 closure 触发 stale focus 行为。
+// 护栏:enterGrid deps 必须含 focusSearchInput。
+test('F09 enterGrid useCallback deps 必须含 focusSearchInput', async () => {
+  const body = await readSource('../EmojiTab.jsx');
+  const start = body.indexOf('const enterGrid = useCallback');
+  assert.ok(start >= 0, '应有 enterGrid');
+  const depsStart = body.indexOf('}, [', start);
+  assert.ok(depsStart > start, 'enterGrid 应有 deps 数组');
+  const depsEnd = body.indexOf(']);', depsStart);
+  const deps = body.slice(depsStart, depsEnd + 3);
+  assert.ok(
+    /\bfocusSearchInput\b/.test(deps),
+    'enterGrid deps 必须含 focusSearchInput,防止日后该函数加 deps 后产生 stale closure'
+  );
+});

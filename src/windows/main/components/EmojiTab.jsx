@@ -898,7 +898,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
     setKbCol(0);
     setKbZone('grid');
     scrollContainerRef.current?.scrollToIndex({ index: firstRowIndex, align: 'center' });
-  }, [showImages]);
+  }, [showImages, focusSearchInput]);
 
   const enterSidebar = useCallback(() => {
     const cats = currentCategories;
