@@ -23,58 +23,10 @@ jobs:
           ssh-keyscan github.com >> ~/.ssh/known_hosts
         shell: bash
 
-      # 多行 deploy key 必须走 env 注入,禁止 YAML 缩进 heredoc 直接展开:
-      # 后者在 windows-latest + bash 上常写出带前导空白/CRLF 的坏 key,
-      # OpenSSH 报 Load key: error in libcrypto: unsupported。
-      - name: Prepare SSH keys
-        shell: bash
-        env:
-          SCREENSHOT_SUITE_DEPLOY_KEY: ${{ secrets.SCREENSHOT_SUITE_DEPLOY_KEY }}
-          GPU_VIEWER_DEPLOY_KEY: ${{ secrets.GPU_VIEWER_DEPLOY_KEY }}
-        run: |
-          set -euo pipefail
-          mkdir -p "$HOME/.ssh"
-          chmod 700 "$HOME/.ssh"
-
-          write_deploy_key() {
-            local path="$1"
-            local value="$2"
-            local label="$3"
-            if [ -z "${value}" ]; then
-              echo "::error::Secret ${label} is empty or missing on this repo"
-              exit 1
-            fi
-            # 去 CR、去每行首尾空白,避免粘贴/heredoc 污染
-            printf '%s\n' "$value" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' > "$path"
-            chmod 600 "$path"
-            if ! ssh-keygen -y -f "$path" >/dev/null 2>&1; then
-              echo "::error::Secret ${label} is not a loadable OpenSSH private key"
-              echo "bytes=$(wc -c < "$path") lines=$(wc -l < "$path")"
-              echo "head=$(head -n 1 "$path")"
-              echo "tail=$(tail -n 1 "$path")"
-              exit 1
-            fi
-            # 只打印 key type,不泄露指纹对应的私钥内容
-            echo "${label}: key OK ($(ssh-keygen -y -f "$path" | awk '{print $1}'))"
-          }
-
-          write_deploy_key "$HOME/.ssh/screenshot-suite.key" "$SCREENSHOT_SUITE_DEPLOY_KEY" "SCREENSHOT_SUITE_DEPLOY_KEY"
-          write_deploy_key "$HOME/.ssh/gpu-image-viewer.key" "$GPU_VIEWER_DEPLOY_KEY" "GPU_VIEWER_DEPLOY_KEY"
-
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           persist-credentials: false
-
-      - name: Checkout submodules (SSH)
-        shell: bash
-        run: |
-          set -euo pipefail
-          # GIT_SSH_COMMAND 必须在 run 内 export,YAML env 不会展开 $HOME
-          export GIT_SSH_COMMAND="ssh -i ${HOME}/.ssh/screenshot-suite.key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
-          git config --global --unset-all url.https://github.com/.insteadOf || true
-          git submodule sync --recursive
-          git submodule update --init --force --depth=1 --recursive
 
       - name: Configure Cargo to use git CLI
         run: |
@@ -90,7 +42,6 @@ jobs:
           cache: 'npm'
           cache-dependency-path: |
             package-lock.json
-            src-tauri/plugins/screenshot-suite/web/package-lock.json
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -110,7 +61,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
-          GIT_SSH_COMMAND: ssh -i ~/.ssh/gpu-image-viewer.key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'QuickClipboard ${{ github.ref_name }}'
