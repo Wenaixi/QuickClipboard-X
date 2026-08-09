@@ -65,4 +65,38 @@ mod poison_recovery_guards {
             "pin_image_window 不得再有 .lock().unwrap() 裸调用(PIN_IMAGE_DATA_MAP)"
         );
     }
+
+    #[test]
+    fn native_pin_window_uses_lock_editing_id_helper() {
+        let body = production_body(&read_src("windows/native_pin_window/mod.rs"));
+        assert!(
+            body.contains("fn lock_editing_id()"),
+            "必须有 lock_editing_id helper"
+        );
+        assert!(
+            body.contains("unwrap_or_else(|p| p.into_inner())"),
+            "lock_editing_id 必须 poison 恢复"
+        );
+        assert!(
+            !body.contains("EDITING_WINDOW_ID.lock().unwrap()"),
+            "不得再有 EDITING_WINDOW_ID.lock().unwrap() 裸调用"
+        );
+    }
+
+    #[test]
+    fn native_pin_window_uses_lock_preview_id_helper() {
+        let body = production_body(&read_src("windows/native_pin_window/mod.rs"));
+        assert!(
+            body.contains("fn lock_preview_id()"),
+            "必须有 lock_preview_id helper"
+        );
+        assert!(
+            body.contains("unwrap_or_else(|p| p.into_inner())"),
+            "lock_preview_id 必须 poison 恢复"
+        );
+        assert!(
+            !body.contains("PREVIEW_WINDOW_ID.lock().unwrap()"),
+            "不得再有 PREVIEW_WINDOW_ID.lock().unwrap() 裸调用"
+        );
+    }
 }
