@@ -872,6 +872,11 @@ const ImageLibraryTab = forwardRef(function ImageLibraryTab({
   displayImageItemsRef.current = displayImageItems;
   selectedImageItemsRef.current = selectedImageItems;
 
+  // F10:imageRowCount 用 displayImageTotal 而非 displayImageItemsRef 是有意设计。
+  // Virtuoso 的 totalCount prop(下方渲染处)需要全量行数才能正确虚拟化,含懒加载
+  // 占位格;键盘边界 kbMove/executeCurrent/activateKb 用 displayImageItemsRef.current.length
+  // (已加载数组)防止高亮停在 placeholder,激活 Enter 静默无操作。视觉/键盘两套
+  // 边界是有意设计,详见 imageKbBounds.test.js F1-4 护栏。
   const imageRowCount = useMemo(() => {
     return Math.ceil(displayImageTotal / imageCols);
   }, [displayImageTotal, imageCols]);
