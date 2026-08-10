@@ -3,8 +3,7 @@ use super::model::{
     SETTINGS_MIGRATION_VERSION_V3,
 };
 use std::{
-    env,
-    fs,
+    env, fs,
     path::{Path, PathBuf},
 };
 
@@ -84,42 +83,62 @@ impl SettingsStorage {
         paths
     }
 
-    fn read_settings_file(path: &Path) -> Result<AppSettings, String> {
-        let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
-        serde_json::from_str(&content).map_err(|e| e.to_string())
-    }
+    fn load_settings_from_paths(
+        target: &Path,
+        legacy_paths: &[PathBuf],
+    ) -> Result<Option<(AppSettings, String)>, String> {
+        let mut last_error = None;
+        if target.exists() {
+            let content = fs::read_to_string(target).map_err(|e| e.to_string())?;
+            match serde_json::from_str(&content) {
+                Ok(settings) => return Ok(Some((settings, content))),
+                Err(error) => last_error = Some(error.to_string()),
+            }
+        }
 
-    fn load_legacy_settings(target: &Path) -> Result<Option<AppSettings>, String> {
-        for source in Self::legacy_settings_paths(target) {
+        for source in legacy_paths {
             if !source.exists() {
                 continue;
             }
-            let settings = Self::read_settings_file(&source)?;
-            let content = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
-            fs::write(target, content).map_err(|e| e.to_string())?;
-            return Ok(Some(settings));
+            let content = match fs::read_to_string(source) {
+                Ok(content) => content,
+                Err(error) => {
+                    last_error = Some(error.to_string());
+                    continue;
+                }
+            };
+            let settings = match serde_json::from_str::<AppSettings>(&content) {
+                Ok(settings) => settings,
+                Err(error) => {
+                    last_error = Some(error.to_string());
+                    continue;
+                }
+            };
+            let migrated_content =
+                serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
+            fs::write(target, migrated_content).map_err(|e| e.to_string())?;
+            return Ok(Some((settings, content)));
         }
-        Ok(None)
+
+        match last_error {
+            Some(error) => Err(error),
+            None => Ok(None),
+        }
     }
 
     pub fn load() -> Result<AppSettings, String> {
         let path = Self::get_settings_path()?;
-
-        let (mut settings, content) = if path.exists() {
-            let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-            let settings = Self::read_settings_file(&path)?;
-            (settings, content)
-        } else if let Some(settings) = Self::load_legacy_settings(&path)? {
-            let content = serde_json::to_string(&settings).map_err(|e| e.to_string())?;
-            (settings, content)
-        } else {
-            return Ok(AppSettings::default());
-        };
+        let (mut settings, content) =
+            match Self::load_settings_from_paths(&path, &Self::legacy_settings_paths(&path))? {
+                Some(settings) => settings,
+                None => return Ok(AppSettings::default()),
+            };
 
         let has_legacy_lan_sync_settings = content.contains("\"lanSync");
         let had_legacy_webdav_password = !settings.webdav_password.is_empty();
         if had_legacy_webdav_password {
-            if !settings.webdav_url.trim().is_empty() && !settings.webdav_username.trim().is_empty() {
+            if !settings.webdav_url.trim().is_empty() && !settings.webdav_username.trim().is_empty()
+            {
                 if let Err(e) = crate::services::secure_credentials::set_webdav_password(
                     &settings.webdav_url,
                     &settings.webdav_username,
@@ -142,7 +161,7 @@ impl SettingsStorage {
         if migrated {
             let _ = Self::save(&settings);
         }
-        
+
         Ok(settings)
     }
 
@@ -165,9 +184,74 @@ impl SettingsStorage {
                 return Ok(custom_dir);
             }
         }
-        
+
         let dir = Self::get_data_dir()?;
         fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         Ok(dir)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn test_dir() -> PathBuf {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let dir = env::temp_dir().join(format!(
+            "quickclipboard-settings-storage-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write_settings(path: &Path, language: &str) {
+        let mut settings = AppSettings::default();
+        settings.language = language.to_string();
+        fs::write(path, serde_json::to_string(&settings).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn valid_target_is_preferred_over_legacy_candidates() {
+        let dir = test_dir();
+        let target = dir.join("settings.json");
+        let legacy = dir.join("legacy.json");
+        write_settings(&target, "target");
+        write_settings(&legacy, "legacy");
+
+        let loaded = SettingsStorage::load_settings_from_paths(&target, &[legacy]).unwrap();
+        assert_eq!(loaded.unwrap().0.language, "target");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn damaged_target_is_preserved_when_no_legacy_is_usable() {
+        let dir = test_dir();
+        let target = dir.join("settings.json");
+        let original = "{ damaged settings";
+        fs::write(&target, original).unwrap();
+
+        assert!(SettingsStorage::load_settings_from_paths(&target, &[]).is_err());
+        assert_eq!(fs::read_to_string(&target).unwrap(), original);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn damaged_legacy_is_skipped_in_favor_of_later_candidate() {
+        let dir = test_dir();
+        let target = dir.join("settings.json");
+        let damaged = dir.join("damaged.json");
+        let valid = dir.join("valid.json");
+        let original = "{ damaged target";
+        fs::write(&target, original).unwrap();
+        fs::write(&damaged, "{ damaged legacy").unwrap();
+        write_settings(&valid, "legacy");
+
+        let loaded = SettingsStorage::load_settings_from_paths(&target, &[damaged, valid]).unwrap();
+        assert_eq!(loaded.unwrap().0.language, "legacy");
+        assert_ne!(fs::read_to_string(&target).unwrap(), original);
+        fs::remove_dir_all(dir).unwrap();
     }
 }
