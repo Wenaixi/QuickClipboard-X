@@ -932,13 +932,15 @@ fn animate_window_position(
 }
 
 pub fn restore_from_snap(window: &WebviewWindow) -> Result<(), String> {
+    // 恢复前取消在飞隐藏动画，避免旧动画把窗口再次写回屏外位置。
+    cancel_pending_animation();
     let state = super::state::get_window_state();
-    
+
     if let Some(pos) = state.snap_position {
         window.set_position(tauri::PhysicalPosition::new(pos.0, pos.1))
             .map_err(|e| e.to_string())?;
     }
-    
+
     clear_snap();
     Ok(())
 }
@@ -1022,7 +1024,22 @@ mod tests {
         })
     }
 
-    // Finding D2: build_monitor_contexts 500ms TTL 新鲜度纯函数。
+    #[test]
+    fn restore_from_snap_cancels_animation_before_position_and_clear() {
+        let body = strip_line_comments(fn_body(snap_source(), "restore_from_snap"));
+        let cancel = body
+            .find("cancel_pending_animation();")
+            .expect("restore_from_snap 必须先取消在飞动画");
+        let position = body
+            .find("set_position")
+            .expect("restore_from_snap 必须包含位置恢复");
+        let clear = body
+            .find("clear_snap();")
+            .expect("restore_from_snap 必须清理贴边状态");
+        assert!(cancel < position, "取消动画必须位于 set_position 之前");
+        assert!(cancel < clear, "取消动画必须位于 clear_snap 之前");
+    }
+
     // edge_monitor 50ms 轮询 + snap_ratio 双 None 时每 tick 都走
     // available_monitors + get_all_monitors_with_edges;TTL 把 20Hz 压到 ~2Hz。
     #[test]

@@ -2,7 +2,11 @@ use super::model::{
     AppSettings, SETTINGS_MIGRATION_VERSION_V1, SETTINGS_MIGRATION_VERSION_V2,
     SETTINGS_MIGRATION_VERSION_V3,
 };
-use std::{env, fs, path::PathBuf};
+use std::{
+    env,
+    fs,
+    path::{Path, PathBuf},
+};
 
 pub struct SettingsStorage;
 
@@ -59,16 +63,60 @@ impl SettingsStorage {
         Ok(dir.join("settings.json"))
     }
 
+    fn legacy_settings_paths(target: &Path) -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+        if let Ok(exe_dir) = env::current_exe().and_then(|exe| {
+            exe.parent()
+                .map(|path| path.to_path_buf())
+                .ok_or_else(|| std::io::Error::other("无法获取执行目录"))
+        }) {
+            let path = exe_dir.join("data").join("settings.json");
+            if path != target {
+                paths.push(path);
+            }
+        }
+        if let Some(local_app_data) = dirs::data_local_dir() {
+            let path = local_app_data.join("quickclipboard").join("settings.json");
+            if path != target && !paths.contains(&path) {
+                paths.push(path);
+            }
+        }
+        paths
+    }
+
+    fn read_settings_file(path: &Path) -> Result<AppSettings, String> {
+        let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
+        serde_json::from_str(&content).map_err(|e| e.to_string())
+    }
+
+    fn load_legacy_settings(target: &Path) -> Result<Option<AppSettings>, String> {
+        for source in Self::legacy_settings_paths(target) {
+            if !source.exists() {
+                continue;
+            }
+            let settings = Self::read_settings_file(&source)?;
+            let content = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
+            fs::write(target, content).map_err(|e| e.to_string())?;
+            return Ok(Some(settings));
+        }
+        Ok(None)
+    }
+
     pub fn load() -> Result<AppSettings, String> {
         let path = Self::get_settings_path()?;
-        
-        if !path.exists() {
-            return Ok(AppSettings::default());
-        }
 
-        let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        let (mut settings, content) = if path.exists() {
+            let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+            let settings = Self::read_settings_file(&path)?;
+            (settings, content)
+        } else if let Some(settings) = Self::load_legacy_settings(&path)? {
+            let content = serde_json::to_string(&settings).map_err(|e| e.to_string())?;
+            (settings, content)
+        } else {
+            return Ok(AppSettings::default());
+        };
+
         let has_legacy_lan_sync_settings = content.contains("\"lanSync");
-        let mut settings: AppSettings = serde_json::from_str(&content).map_err(|e| e.to_string())?;
         let had_legacy_webdav_password = !settings.webdav_password.is_empty();
         if had_legacy_webdav_password {
             if !settings.webdav_url.trim().is_empty() && !settings.webdav_username.trim().is_empty() {

@@ -3,7 +3,14 @@ use once_cell::sync::Lazy;
 use parking_lot::RwLock;
 
 static SETTINGS: Lazy<RwLock<AppSettings>> = Lazy::new(|| {
-    RwLock::new(SettingsStorage::load().unwrap_or_default())
+    let settings = match SettingsStorage::load() {
+        Ok(settings) => settings,
+        Err(error) => {
+            eprintln!("读取设置失败，将使用默认设置: {}", error);
+            AppSettings::default()
+        }
+    };
+    RwLock::new(settings)
 });
 
 pub fn get_settings() -> AppSettings {
