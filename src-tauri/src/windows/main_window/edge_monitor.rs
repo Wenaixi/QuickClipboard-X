@@ -5,6 +5,7 @@ use tauri::{WebviewWindow, Manager};
 
 static MAIN_WINDOW: Mutex<Option<WebviewWindow>> = Mutex::new(None);
 static MONITORING_ACTIVE: AtomicBool = AtomicBool::new(false);
+static MONITORING_GENERATION: AtomicU64 = AtomicU64::new(0);
 static RESIZE_SUPPRESS_UNTIL_MS: AtomicU64 = AtomicU64::new(0);
 
 const RESIZE_SUPPRESS_DURATION_MS: u64 = 400;
@@ -26,22 +27,24 @@ pub fn init_edge_monitor(window: WebviewWindow) {
 
 pub fn start_edge_monitoring() {
     let was_active = MONITORING_ACTIVE.swap(true, Ordering::Relaxed);
-    
+
     if was_active {
         return;
     }
-    
-    std::thread::spawn(|| {
+
+    let generation = MONITORING_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    std::thread::spawn(move || {
         // 初始缓冲期，避免贴边后立即触发隐藏
         std::thread::sleep(Duration::from_millis(200));
-        
+
         let mut last_near_state = false;
         let mut last_hidden_state = false;
-        
+
         loop {
-            if !MONITORING_ACTIVE.load(Ordering::Relaxed) {
-                std::thread::sleep(Duration::from_millis(100));
-                continue;
+            if !MONITORING_ACTIVE.load(Ordering::Relaxed)
+                || MONITORING_GENERATION.load(Ordering::SeqCst) != generation
+            {
+                return;
             }
             
             let window = match MAIN_WINDOW.lock().clone() {
@@ -236,6 +239,20 @@ mod tests {
         assert!(
             !body.contains("get_settings()"),
             "check_mouse_near_edge 禁止 20Hz 深克隆整份 AppSettings"
+        );
+    }
+
+    #[test]
+    fn monitor_worker_exits_when_generation_changes() {
+        let source = source_file("src/windows/main_window/edge_monitor.rs");
+        let body = strip_line_comments(fn_body(&source, "start_edge_monitoring"));
+        assert!(
+            body.contains("MONITORING_GENERATION.load(Ordering::SeqCst) != generation"),
+            "worker 必须在 generation 变化后退出"
+        );
+        assert!(
+            body.contains("return;"),
+            "worker 停止条件必须直接退出线程"
         );
     }
 
