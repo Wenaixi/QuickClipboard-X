@@ -56,20 +56,20 @@ const getWindowsBuildNumber = (rawVersion) => {
   return Number(parts[2]) || 0;
 };
 
-const getWindowsFamily = () => {
-  const buildNumber = getWindowsBuildNumber(osVersion());
+const getWindowsFamily = async () => {
+  const buildNumber = getWindowsBuildNumber(await osVersion());
   if (buildNumber >= 22000) return 'win11';
   if (buildNumber > 0) return 'win10';
   return 'unknown';
 };
 
-const shouldUseEmojiFallbackFont = () => {
+const shouldUseEmojiFallbackFont = async () => {
   const currentPlatform = platform();
   const target = EMOJI_FALLBACK_FONT_TARGET[currentPlatform];
   if (!target) return false;
   if (target === true || target === 'all') return true;
   if (currentPlatform !== 'windows') return Boolean(target);
-  return target === getWindowsFamily();
+  return target === await getWindowsFamily();
 };
 
 const ensureEmojiFallbackFontStyle = () => {
@@ -277,18 +277,17 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
   useEffect(() => {
     let cancelled = false;
 
-    try {
-      if (!shouldUseEmojiFallbackFont()) return undefined;
-      ensureEmojiFallbackFontLoaded()
-        .then(() => {
-          if (!cancelled) setUseEmojiFallbackFont(true);
-        })
-        .catch(e => {
-          console.warn('加载 Noto Color Emoji 字体失败:', e);
-        });
-    } catch (e) {
-      console.warn('判断 Windows 版本失败:', e);
-    }
+    const loadFallbackFont = async () => {
+      try {
+        if (!await shouldUseEmojiFallbackFont()) return;
+        await ensureEmojiFallbackFontLoaded();
+        if (!cancelled) setUseEmojiFallbackFont(true);
+      } catch (e) {
+        console.warn('加载 Noto Color Emoji 字体失败:', e);
+      }
+    };
+
+    loadFallbackFont();
 
     return () => {
       cancelled = true;
