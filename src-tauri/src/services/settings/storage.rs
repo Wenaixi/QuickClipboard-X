@@ -89,9 +89,11 @@ impl SettingsStorage {
     ) -> Result<Option<(AppSettings, String)>, String> {
         let mut last_error = None;
         if target.exists() {
-            let content = fs::read_to_string(target).map_err(|e| e.to_string())?;
-            match serde_json::from_str(&content) {
-                Ok(settings) => return Ok(Some((settings, content))),
+            match fs::read_to_string(target) {
+                Ok(content) => match serde_json::from_str(&content) {
+                    Ok(settings) => return Ok(Some((settings, content))),
+                    Err(error) => last_error = Some(error.to_string()),
+                },
                 Err(error) => last_error = Some(error.to_string()),
             }
         }
@@ -116,7 +118,10 @@ impl SettingsStorage {
             };
             let migrated_content =
                 serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
-            fs::write(target, migrated_content).map_err(|e| e.to_string())?;
+            if let Err(error) = fs::write(target, migrated_content) {
+                // 目标路径可能暂时不可写,先返回已恢复的设置,下次启动继续尝试迁移。
+                eprintln!("迁移设置到目标路径失败: {}", error);
+            }
             return Ok(Some((settings, content)));
         }
 
@@ -235,6 +240,20 @@ mod tests {
 
         assert!(SettingsStorage::load_settings_from_paths(&target, &[]).is_err());
         assert_eq!(fs::read_to_string(&target).unwrap(), original);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn unreadable_target_falls_back_to_usable_legacy_candidate() {
+        let dir = test_dir();
+        let target = dir.join("settings.json");
+        let legacy = dir.join("legacy.json");
+        fs::create_dir(&target).unwrap();
+        write_settings(&legacy, "legacy");
+
+        let loaded = SettingsStorage::load_settings_from_paths(&target, &[legacy]).unwrap();
+        assert_eq!(loaded.unwrap().0.language, "legacy");
+        assert!(target.is_dir());
         fs::remove_dir_all(dir).unwrap();
     }
 
