@@ -1009,7 +1009,7 @@ mod tests {
     use super::*;
     use std::sync::OnceLock;
 
-    use crate::services::system::hotkey::test_utils::strip_line_comments;
+    use crate::services::system::hotkey::test_utils::{fn_body, strip_line_comments};
 
     // snap.rs 自身源码缓存:多个源码字面护栏共享,避免每测一次 IO
     static SNAP_SOURCE: OnceLock<String> = OnceLock::new();
