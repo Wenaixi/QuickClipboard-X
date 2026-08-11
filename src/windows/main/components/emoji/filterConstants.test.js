@@ -97,3 +97,16 @@ test('F09 enterGrid useCallback deps 必须含 focusSearchInput', async () => {
     'enterGrid deps 必须含 focusSearchInput,防止日后该函数加 deps 后产生 stale closure'
   );
 });
+
+// 回归:依赖数组会在组件渲染时立即求值,不能引用后面仍处于 TDZ 的 const。
+test('F10 enterGrid 的依赖回调必须先于 enterGrid 声明', async () => {
+  const body = await readSource('../EmojiTab.jsx');
+  const focusSearchInputStart = body.indexOf('const focusSearchInput = useCallback');
+  const enterGridStart = body.indexOf('const enterGrid = useCallback');
+  assert.ok(focusSearchInputStart >= 0, '应有 focusSearchInput');
+  assert.ok(enterGridStart >= 0, '应有 enterGrid');
+  assert.ok(
+    focusSearchInputStart < enterGridStart,
+    'enterGrid 的依赖 focusSearchInput 必须先声明,否则首次渲染会触发 TDZ ReferenceError'
+  );
+});
