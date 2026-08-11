@@ -776,7 +776,7 @@ pub fn show_snapped_window(window: &WebviewWindow) -> Result<(), String> {
 
     let state = super::state::get_window_state();
 
-    if !state.is_snapped || !state.is_hidden {
+    if !state.is_snapped {
         return Ok(());
     }
 
@@ -1177,6 +1177,22 @@ mod tests {
              否则 post-refresh 仍能用旧设置覆盖 show 形态(当前位置:cancel={}, set_hidden={})",
             cancel_pos,
             set_hidden_pos
+        );
+    }
+
+    // 原生窗口可能被系统隐藏,但内部仍记为贴边可见。
+    // visibility.rs 会复用本函数恢复贴边形态,入口不能再要求 is_hidden=true,
+    // 否则快捷键唤出会在任何窗口操作前直接 no-op。
+    #[test]
+    fn show_allows_native_hidden_visible_state() {
+        let body = strip_line_comments(fn_body(snap_source(), "show_snapped_window"));
+        assert!(
+            body.contains("if !state.is_snapped {"),
+            "show_snapped_window 必须允许 is_snapped=true、is_hidden=false 的原生隐藏恢复路径"
+        );
+        assert!(
+            !body.contains("if !state.is_snapped || !state.is_hidden {"),
+            "show_snapped_window 不能要求 is_hidden=true,否则原生隐藏但内部可见时会直接 no-op"
         );
     }
 
