@@ -85,9 +85,11 @@ pub fn toggle_main_window_visibility(app: &AppHandle) {
         }
 
         let state = super::state::get_window_state();
+        let native_visible = window.is_visible().unwrap_or(false);
 
-        let should_show =
-            state.is_snapped && state.is_hidden || state.state != WindowState::Visible;
+        let should_show = state.is_snapped && state.is_hidden
+            || state.state != WindowState::Visible
+            || !native_visible;
 
         if should_show {
             show_main_window(&window);
@@ -267,4 +269,30 @@ fn hide_normal_window(window: &WebviewWindow) {
 
     crate::input_monitor::disable_mouse_monitoring();
     crate::input_monitor::disable_navigation_keys();
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn toggle_checks_native_visibility_before_hiding() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/windows/main_window/visibility.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 visibility.rs");
+        let body = source
+            .split("pub fn toggle_main_window_visibility")
+            .nth(1)
+            .and_then(|body| body.split("fn show_normal_window").next())
+            .expect("找不到 toggle_main_window_visibility 函数体");
+
+        assert!(
+            body.contains("let native_visible = window.is_visible().unwrap_or(false);"),
+            "热键切换必须检查原生窗口可见性，避免状态漂移时再次隐藏窗口"
+        );
+        assert!(
+            body.contains("|| !native_visible;"),
+            "原生窗口不可见时必须走显示分支"
+        );
+    }
 }
