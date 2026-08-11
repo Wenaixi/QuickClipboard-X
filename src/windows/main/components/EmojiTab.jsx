@@ -878,6 +878,10 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
   // ==== 键盘区域导航 ====
   // 主路径:后端 hotkey → App.dispatchEmojiNav → handleNavAction
   // zone: outside(默认) → search(↓激活) ↔ grid/sidebar; search↑ → outside
+  const focusSearchInput = useCallback(() => {
+    setKbZone('search');
+  }, []);
+
   const enterGrid = useCallback(() => {
     if (showImages) {
       const ok = imageLibraryRef.current?.activateKb?.();
@@ -912,10 +916,6 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
     const btn = sidebarButtonsRef.current[catId];
     btn?.focus?.();
   }, [currentCategories, handleCategoryClick, showImages, currentImageGroup]);
-
-  const focusSearchInput = useCallback(() => {
-    setKbZone('search');
-  }, []);
 
   // 键盘导航重置到 outside:任何"退出激活态"路径的唯一出口(deactivate 意图、
   // 过滤热键、emojiMode 切换、越界兜底)。blurSearchInput/resetKbNav 语义名不同
