@@ -92,7 +92,11 @@ pub fn toggle_main_window_visibility(app: &AppHandle) {
             || native_visible == Some(false);
 
         if should_show {
-            show_main_window(&window);
+            if state.is_snapped && !state.is_hidden && native_visible == Some(false) {
+                let _ = super::show_snapped_window(&window);
+            } else {
+                show_main_window(&window);
+            }
         } else {
             hide_main_window(&window);
         }
@@ -293,6 +297,10 @@ mod tests {
         assert!(
             body.contains("native_visible == Some(false);"),
             "只有原生窗口明确不可见时才走显示分支，查询失败必须沿用状态机判断"
+        );
+        assert!(
+            body.contains("super::show_snapped_window(&window)"),
+            "贴边窗口原生不可见时必须恢复贴边形态，不能走普通显示并清除贴边状态"
         );
     }
 }
