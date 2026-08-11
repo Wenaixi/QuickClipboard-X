@@ -59,6 +59,12 @@ pub fn hide_main_window(window: &WebviewWindow) {
     hide_normal_window(window);
 }
 
+fn should_show_window(state: &super::state::MainWindowState, native_visible: Option<bool>) -> bool {
+    state.is_snapped && state.is_hidden
+        || state.state != WindowState::Visible
+        || native_visible == Some(false)
+}
+
 pub fn toggle_main_window_visibility(app: &AppHandle) {
     if crate::services::low_memory::is_low_memory_mode() {
         if crate::get_settings().auto_exit_low_memory_mode {
@@ -87,9 +93,7 @@ pub fn toggle_main_window_visibility(app: &AppHandle) {
         let state = super::state::get_window_state();
         let native_visible = window.is_visible().ok();
 
-        let should_show = state.is_snapped && state.is_hidden
-            || state.state != WindowState::Visible
-            || native_visible == Some(false);
+        let should_show = should_show_window(&state, native_visible);
 
         if should_show {
             if state.is_snapped && !state.is_hidden && native_visible == Some(false) {
@@ -277,30 +281,39 @@ fn hide_normal_window(window: &WebviewWindow) {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn toggle_checks_native_visibility_before_hiding() {
-        let source = std::fs::read_to_string(format!(
-            "{}/src/windows/main_window/visibility.rs",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .expect("找不到 visibility.rs");
-        let body = source
-            .split("pub fn toggle_main_window_visibility")
-            .nth(1)
-            .and_then(|body| body.split("fn show_normal_window").next())
-            .expect("找不到 toggle_main_window_visibility 函数体");
+    use super::super::state::{MainWindowState, WindowState};
+    use super::should_show_window;
 
-        assert!(
-            body.contains("let native_visible = window.is_visible().ok();"),
-            "热键切换必须检查原生窗口可见性，避免状态漂移时再次隐藏窗口"
-        );
-        assert!(
-            body.contains("native_visible == Some(false);"),
-            "只有原生窗口明确不可见时才走显示分支，查询失败必须沿用状态机判断"
-        );
-        assert!(
-            body.contains("super::show_snapped_window(&window)"),
-            "贴边窗口原生不可见时必须恢复贴边形态，不能走普通显示并清除贴边状态"
-        );
+    fn state(window_state: WindowState, is_snapped: bool, is_hidden: bool) -> MainWindowState {
+        MainWindowState {
+            state: window_state,
+            is_snapped,
+            is_hidden,
+            ..MainWindowState::default()
+        }
+    }
+
+    #[test]
+    fn should_show_when_native_window_is_hidden_despite_visible_state() {
+        assert!(should_show_window(
+            &state(WindowState::Visible, false, false),
+            Some(false)
+        ));
+        assert!(!should_show_window(
+            &state(WindowState::Visible, false, false),
+            Some(true)
+        ));
+        assert!(!should_show_window(
+            &state(WindowState::Visible, false, false),
+            None
+        ));
+        assert!(should_show_window(
+            &state(WindowState::Hidden, false, false),
+            Some(true)
+        ));
+        assert!(should_show_window(
+            &state(WindowState::Visible, true, true),
+            Some(true)
+        ));
     }
 }
