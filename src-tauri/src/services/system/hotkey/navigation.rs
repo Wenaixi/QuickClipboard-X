@@ -580,4 +580,68 @@ mod tests {
             "unregister_navigation_hotkeys 必须清除对应 id 的 SHORTCUT_STATUS 状态"
         );
     }
+
+    // F9 节流护栏:execute-item 必须先 throttle 再发射粘贴,
+    // 否则松手再按瞬间会重复触发粘贴动作。用户视角即"回车无效/重复粘贴"。
+    // throttle 在 emit_navigation_action_if_ready -> should_throttle 链路上生效;
+    // Pressed 处理函数必须经过 emit_navigation_action_if_ready 才能拿到 throttle。
+    // 锁住契约但保留调阈值空间:Pressed 必须走这条链,具体毫秒值独立调整。
+    #[test]
+    fn execute_item_throttle_keeps_quick_double_enter() {
+        let src = strip_line_comments(&navigation_source());
+        let pressed_fn = fn_body(&src, "handle_navigation_pressed");
+        // Pressed 处理必须经由 emit_navigation_action_if_ready 触发 throttle,
+        // 否则 should_throttle 永远不会被调用,松手再按瞬间会重复粘贴
+        assert!(
+            pressed_fn.contains("emit_navigation_action_if_ready(action)"),
+            "Pressed 处理必须经过 emit_navigation_action_if_ready 才能触发 throttle"
+        );
+        let helper_fn = fn_body(&src, "emit_navigation_action_if_ready");
+        assert!(
+            helper_fn.contains("should_throttle(action)"),
+            "emit_navigation_action_if_ready 必须真正调用 should_throttle"
+        );
+        // throttle 调用必须早于 emit,否则节流失败
+        let throttle_pos = helper_fn
+            .find("should_throttle(action)")
+            .expect("缺 should_throttle 调用");
+        let emit_pos = helper_fn
+            .find("emit_navigation_action(")
+            .expect("缺 emit_navigation_action 调用");
+        assert!(
+            throttle_pos < emit_pos,
+            "should_throttle 必须早于 emit,否则节流无效"
+        );
+        // throttle 表必须包含 execute-item
+        let throttle_fn = fn_body(&src, "get_throttle_delay");
+        assert!(
+            throttle_fn.contains("\"execute-item\""),
+            "get_throttle_delay 必须为 execute-item 给出非 None 延迟"
+        );
+    }
+
+    // F10 防回归:导航热键必须同时处理 Pressed 与 Released。
+    // 仅监听 Pressed 时,throttle 只滤"重复按下",但松手立刻再按 Enter
+    // 仍会被新一次 Pressed 命中导致单次按下触发两次粘贴。
+    // 必须显式区分两个状态,并保证 throttle 同时作用于 Pressed 路径。
+    #[test]
+    fn navigation_handles_both_pressed_and_released_events() {
+        let src = strip_line_comments(&navigation_source());
+        let b = fn_body(&src, "register_navigation_hotkeys_from_settings");
+        assert!(
+            b.contains("ShortcutState::Pressed"),
+            "必须订阅 ShortcutState::Pressed"
+        );
+        assert!(
+            b.contains("ShortcutState::Released"),
+            "必须订阅 ShortcutState::Released,否则 throttle 失效"
+        );
+        let released_pos = b.find("ShortcutState::Released").unwrap();
+        // Released 分支不能误触发粘贴动作,只能用于清理 repeat token。
+        let released_block = &b[released_pos..];
+        assert!(
+            !released_block.contains("emit_navigation_action"),
+            "Released 分支禁止发射 paste 动作"
+        );
+    }
 }
