@@ -301,3 +301,33 @@ describe('F9 resolveTabbarMove 已删(死导出清理)', () => {
     );
   });
 });
+
+// F16 性能护栏:EmojiTab renderVirtualItem 的 useCallback deps 不得依赖键盘导航状态。
+// 否则每按一次方向键,所有可见格子都重渲染(主人原话"表情页卡")。
+// 修复方向:把高亮信息从 deps 拆出,抽 React.memo cell 组件。
+describe('F16 emoji grid renderVirtualItem deps', () => {
+  it('renderVirtualItem deps 不含 kbZone/kbRow/kbCol', async () => {
+    const body = await readSource('../EmojiTab.jsx');
+    const fnStart = body.indexOf('const renderVirtualItem = useCallback');
+    assert.notEqual(fnStart, -1, '应有 renderVirtualItem');
+    const depsStart = body.indexOf('}, [', fnStart);
+    assert.ok(depsStart > fnStart, 'renderVirtualItem 应有 deps 数组');
+    const depsEnd = body.indexOf(']);', depsStart);
+    const deps = body.slice(depsStart, depsEnd + 3);
+    assert.equal(/\bkbZone\b/.test(deps), false, 'renderVirtualItem deps 不得含 kbZone');
+    assert.equal(/\bkbRow\b/.test(deps), false, 'renderVirtualItem deps 不得含 kbRow');
+    assert.equal(/\bkbCol\b/.test(deps), false, 'renderVirtualItem deps 不得含 kbCol');
+  });
+
+  it('EmojiTab 必须存在 React.memo 化的 cell 组件', async () => {
+    const body = await readSource('../EmojiTab.jsx');
+    const hasMemo =
+      body.includes('memo(') ||
+      body.includes('React.memo') ||
+      body.includes('Memo(');
+    assert.ok(
+      hasMemo,
+      '必须抽 memo 组件,避免每次方向键重渲全部可见格子'
+    );
+  });
+});

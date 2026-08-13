@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback, useLayoutEffect, forwardRef, useImperativeHandle } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, useLayoutEffect, forwardRef, useImperativeHandle, memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { platform, version as osVersion } from '@tauri-apps/plugin-os';
@@ -727,6 +727,110 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
     }
   }, [updateSidebarHighlight]);
 
+  // 单格 emoji 单元:memo 化后,只有高亮状态或 props 变化时才重渲染。
+  // 把整个 row map 抽出来变成可单独 memo 的组件,避免方向键每次按都重建
+  // 全部可见格子。F16 性能护栏锁住这一前提。
+  const EmojiCell = useMemo(
+    () =>
+      memo(function EmojiCell({
+        item,
+        idx,
+        rowIndex,
+        section,
+        isChinese,
+        glyphClassName,
+        isHighlighted,
+        shouldApplySkin,
+        applySkintone,
+        getSkinVariants,
+        emojiMetaRef,
+        uiAnimationEnabled,
+        handlePaste,
+        handleSkinPickerOpen,
+        t,
+      }) {
+        const baseChar = typeof item === 'string' ? item : item.emoji;
+        const displayChar = shouldApplySkin ? applySkintone(baseChar) : baseChar;
+        const skinVariants = shouldApplySkin ? getSkinVariants(baseChar) : null;
+        const meta = emojiMetaRef.current[baseChar];
+        const codePoint = baseChar?.codePointAt?.(0);
+        const codeLabel = codePoint
+          ? `U+${codePoint.toString(16).toUpperCase().padStart(4, '0')}`
+          : '';
+        const name =
+          typeof item === 'object'
+            ? isChinese
+              ? item.nameCn || item.name
+              : item.name || item.nameCn
+            : (isChinese ? meta?.nameCn || meta?.name : meta?.name || meta?.nameCn) || baseChar;
+        return (
+          <div key={`${baseChar}-${idx}`} className="relative group">
+            <Tooltip
+              content={
+                <PreviewTooltipCard
+                  char={displayChar}
+                  title={name}
+                  subtitle={
+                    section.catId === 'symbols'
+                      ? t('emoji.symbols')
+                      : section.catId === 'people-body'
+                      ? t('emoji.people')
+                      : ''
+                  }
+                  codeLabel={codeLabel}
+                  sizeClass={
+                    section.catId === 'symbols' ? 'text-[27px]' : 'text-[34px]'
+                  }
+                  glyphClassName={glyphClassName}
+                />
+              }
+              placement="top"
+              maxWidth={360}
+              asChild
+            >
+              <button
+                onClick={() => handlePaste(item, section.catId)}
+                className={`aspect-square w-full flex items-center justify-center text-2xl leading-none text-qc-fg rounded cursor-pointer transition-[transform,box-shadow,background-color,border-color] ${
+                  uiAnimationEnabled
+                    ? 'active:scale-95 hover:bg-qc-panel hover:shadow-lg hover:border hover:border-qc-border'
+                    : 'hover:bg-qc-hover'
+                } ${
+                  isHighlighted ? 'ring-2 ring-blue-500 ring-inset' : ''
+                }`}
+                style={
+                  uiAnimationEnabled
+                    ? {
+                        opacity: 0,
+                        animation: `fadeIn 0.15s ease-out ${idx * 15}ms forwards`,
+                      }
+                    : {}
+                }
+              >
+                <span
+                  className={`inline-flex items-center justify-center w-[1.2em] h-[1.2em] overflow-hidden ${glyphClassName}`}
+                >
+                  {displayChar}
+                </span>
+              </button>
+            </Tooltip>
+            {skinVariants && (
+              <Tooltip content="选择肤色" placement="left" asChild>
+                <button
+                  onClick={(e) =>
+                    handleSkinPickerOpen(e, baseChar, skinVariants, item, section.catId)
+                  }
+                  className={`absolute top-0.5 right-0.5 z-10 w-3 h-3 rounded-full bg-gradient-to-br from-amber-200 via-amber-400 to-amber-700 border border-white opacity-0 group-hover:opacity-100 shadow-sm ${
+                    uiAnimationEnabled ? 'transition-opacity hover:scale-125' : ''
+                  }`}
+                />
+              </Tooltip>
+            )}
+          </div>
+        );
+      }),
+    []
+  );
+
   const renderVirtualItem = useCallback((index) => {
     const section = virtualDataRef.current[index];
     if (!section) return null;
@@ -750,83 +854,48 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
     
     if (section.type === 'row') {
       const shouldApplySkin = section.catId === 'people-body';
+      // 高亮比较通过 ref 取最新 kbZone/kbRow/kbCol,避免 useCallback deps 含键盘状态
+      // (F16:方向键每次按都重建 useCallback → Virtuoso 重渲全部可见格子)。
+      const zone = kbZoneRef.current;
+      const currentRow = kbRowRef.current;
+      const currentCol = kbColRef.current;
       return (
-        <div 
-          className="grid gap-0.5 px-1" 
-          style={{ 
+        <div
+          className="grid gap-0.5 px-1"
+          style={{
             gridTemplateColumns: `repeat(${section.cols}, minmax(0, 1fr))`,
             contentVisibility: 'auto',
             containIntrinsicSize: '0 36px'
           }}
         >
-          {section.items.map((item, idx) => {
-            const baseChar = typeof item === 'string' ? item : item.emoji;
-            const displayChar = shouldApplySkin ? applySkintone(baseChar) : baseChar;
-            const skinVariants = shouldApplySkin ? getSkinVariants(baseChar) : null;
-            const meta = emojiMetaRef.current[baseChar];
-            const codePoint = baseChar?.codePointAt?.(0);
-            const codeLabel = codePoint ? `U+${codePoint.toString(16).toUpperCase().padStart(4, '0')}` : '';
-            const name = typeof item === 'object'
-              ? (isChinese ? (item.nameCn || item.name) : (item.name || item.nameCn))
-              : (isChinese ? (meta?.nameCn || meta?.name) : (meta?.name || meta?.nameCn)) || baseChar;
-            return (
-              <div key={`${baseChar}-${idx}`} className="relative group">
-                <Tooltip
-                  content={
-                    <PreviewTooltipCard
-                      char={displayChar}
-                      title={name}
-                      subtitle={section.catId === 'symbols'
-                        ? t('emoji.symbols')
-                        : (section.catId === 'people-body' ? t('emoji.people') : '')}
-                      codeLabel={codeLabel}
-                      sizeClass={section.catId === 'symbols' ? 'text-[27px]' : 'text-[34px]'}
-                      glyphClassName={emojiGlyphClassName}
-                    />
-                  }
-                  placement="top"
-                  maxWidth={360}
-                  asChild
-                >
-                  <button
-                    onClick={() => handlePaste(item, section.catId)}
-                    className={`aspect-square w-full flex items-center justify-center text-2xl leading-none text-qc-fg rounded cursor-pointer transition-[transform,box-shadow,background-color,border-color] ${uiAnimationEnabled ? 'active:scale-95 hover:bg-qc-panel hover:shadow-lg hover:border hover:border-qc-border' : 'hover:bg-qc-hover'} ${
-                      kbZone === 'grid' && index === kbRow && idx === kbCol ? 'ring-2 ring-blue-500 ring-inset' : ''
-                    }`}
-                    style={uiAnimationEnabled ? {
-                      opacity: 0,
-                      animation: `fadeIn 0.15s ease-out ${idx * 15}ms forwards`
-                    } : {}}
-                  >
-                    <span
-                      className={`inline-flex items-center justify-center w-[1.2em] h-[1.2em] overflow-hidden ${emojiGlyphClassName}`}
-                    >
-                      {displayChar}
-                    </span>
-                  </button>
-                </Tooltip>
-                {/* 肤色选择按钮 */}
-                {skinVariants && (
-                  <Tooltip content="选择肤色" placement="left" asChild>
-                    <button
-                      onClick={(e) => handleSkinPickerOpen(e, baseChar, skinVariants, item, section.catId)}
-                      className={`absolute top-0.5 right-0.5 z-10 w-3 h-3 rounded-full bg-gradient-to-br from-amber-200 via-amber-400 to-amber-700 border border-white opacity-0 group-hover:opacity-100 shadow-sm ${uiAnimationEnabled ? 'transition-opacity hover:scale-125' : ''}`}
-                    />
-                  </Tooltip>
-                )}
-              </div>
-            );
-          })}
+          {section.items.map((item, idx) => (
+            <EmojiCell
+              key={`${section.catId}-${index}-${idx}`}
+              item={item}
+              idx={idx}
+              rowIndex={index}
+              section={section}
+              isChinese={isChinese}
+              glyphClassName={emojiGlyphClassName}
+              isHighlighted={zone === 'grid' && index === currentRow && idx === currentCol}
+              shouldApplySkin={shouldApplySkin}
+              applySkintone={applySkintone}
+              getSkinVariants={getSkinVariants}
+              emojiMetaRef={emojiMetaRef}
+              uiAnimationEnabled={uiAnimationEnabled}
+              handlePaste={handlePaste}
+              handleSkinPickerOpen={handleSkinPickerOpen}
+              t={t}
+            />
+          ))}
         </div>
       );
     }
     return null;
-    // ponytail: kbZone/kbRow/kbCol 保留在 deps 里——高亮格判定需要它们,每次
-    // 方向键移动都会重建可见行 JSX。抽 memo 子组件只传 isHighlighted 可行,但
-    // 每格还依赖 handlePaste/name 派生/肤色变体等 7 个引用,拆分后收益有限、
-    // 复杂度上升,故保持全量重建(可见行数约 20 行 × 8 格,量级可接受)。
-    // 若未来 grid 大列表卡顿,优先方向:EmojiGridCell memo 组件 + isHighlighted prop。
-  }, [handlePaste, isChinese, skinTone, applySkintone, getSkinVariants, handleSkinPickerOpen, emojiGlyphClassName, kbZone, kbRow, kbCol]);
+    // F16 性能优化:kbZone/kbRow/kbCol 不再列入 deps,而是通过 ref 在调用时取最新值,
+    // 单格高亮由 EmojiCell 通过 isHighlighted prop 接收,React.memo 让单格只在
+    // 自己高亮变化或 props 变化时重渲。方向键每次按不再触发 280+ 格子重渲。
+  }, [handlePaste, isChinese, skinTone, applySkintone, getSkinVariants, handleSkinPickerOpen, emojiGlyphClassName]);
 
   const currentCategories = useMemo(() => {
     if (showImages) return imageGroups.map(group => ({
