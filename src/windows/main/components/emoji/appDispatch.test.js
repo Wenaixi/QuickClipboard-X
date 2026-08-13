@@ -40,14 +40,41 @@ test('App dispatchEmojiNav 内保留 emojiKbActive 门控决策', async () => {
 // 修复:删函数体内所有显式 setEmojiKbActive,全部交由 useEffect([kbZone]) 兜底。
 test('F8 EmojiTab setEmojiKbActive 只在 useEffect 依赖内出现(单写)', async () => {
   const body = await readSource('../EmojiTab.jsx');
-  // 全部调用位置
-  const calls = body.match(/navigationStore\.setEmojiKbActive\([^)]*\)/g) || [];
-  assert.equal(calls.length, 1, `setEmojiKbActive 应只在 useEffect 单点调用,实际 ${calls.length} 处: ${calls.join(' | ')}`);
-  // 必须是 useEffect([kbZone]) 内的统一兜底
-  const effectBlock = body.match(/useEffect\(\(\) => \{[\s\S]{0,150}setEmojiKbActive[\s\S]{0,80}\}, \[kbZone\]\)/);
-  assert.ok(effectBlock, 'setEmojiKbActive 应在 useEffect([kbZone]) 内统一兜底');
-  assert.ok(
-    effectBlock[0].includes("setEmojiKbActive(kbZone !== 'outside')"),
-    'useEffect 应写 kbZone !== outside 单一表达式'
+
+  const calls =
+    body.match(/navigationStore\.setEmojiKbActive\([^)]*\)/g) || [];
+
+  assert.equal(calls.length, 1);
+
+  const effectBlock = body.match(
+    /useEffect\(\(\) => \{[\s\S]{0,150}setEmojiKbActive[\s\S]{0,80}\}, \[kbZone\]\)/
   );
+
+  assert.ok(effectBlock);
+  assert.ok(
+    effectBlock[0].includes("setEmojiKbActive(kbZone !== 'outside')")
+  );
+});
+
+test('EmojiTab 侧栏最左切换使用 App 约定的 previous 方向', async () => {
+  const body = await readSource('../EmojiTab.jsx');
+  const prevModeStart = body.indexOf("if (emojiMode === 'emoji')");
+  const prevModeEnd = body.indexOf('} else {', prevModeStart);
+  assert.notEqual(prevModeStart, -1, '缺少 emoji 最左 prev-mode 分支');
+  assert.notEqual(prevModeEnd, -1, '缺少 prev-mode 分支结束边界');
+  const prevMode = body.slice(prevModeStart, prevModeEnd);
+  assert.ok(prevMode.includes("onSwitchTab?.('previous')"), '最左子模式应请求 previous 顶层标签');
+  assert.equal(prevMode.includes("onSwitchTab?.('favorites')"), false, '不得继续传旧 favorites 标签值');
+});
+
+test('App Emoji 边界切换使用相邻方向而非固定 tab', async () => {
+  const body = await readSource('../../App.jsx');
+  const start = body.indexOf('const handleEmojiSwitchTab');
+  const end = body.indexOf('const handleTabLeft', start);
+  assert.notEqual(start, -1, '缺 handleEmojiSwitchTab');
+  assert.notEqual(end, -1, '缺 handleTabLeft 锚点');
+  const fn = body.slice(start, end);
+  assert.ok(fn.includes("direction !== 'previous' && direction !== 'next'"), '应只接受两个相邻切换方向');
+  assert.ok(fn.includes('visibleTabs'), '应复用可见顶层标签顺序');
+  assert.ok(fn.includes('setActiveTab'), '应由 App 更新顶层标签');
 });

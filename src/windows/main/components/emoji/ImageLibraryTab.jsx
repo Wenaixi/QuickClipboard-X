@@ -384,6 +384,7 @@ const ImageLibraryTab = forwardRef(function ImageLibraryTab({
   onImageDragStart,
   onImageDragEnd,
   onImageDragCancel,
+  onKeyboardGridReady,
   reloadKey = 0
 }, ref) {
   const { t } = useTranslation();
@@ -872,6 +873,12 @@ const ImageLibraryTab = forwardRef(function ImageLibraryTab({
   displayImageItemsRef.current = displayImageItems;
   selectedImageItemsRef.current = selectedImageItems;
 
+  useEffect(() => {
+    if (displayImageItems.some(isSelectableImageItem)) {
+      onKeyboardGridReady?.();
+    }
+  }, [displayImageItems, onKeyboardGridReady]);
+
   // F10:imageRowCount 用 displayImageTotal 而非 displayImageItemsRef 是有意设计。
   // Virtuoso 的 totalCount prop(下方渲染处)需要全量行数才能正确虚拟化,含懒加载
   // 占位格;键盘边界 kbMove/executeCurrent/activateKb 用 displayImageItemsRef.current.length
@@ -880,6 +887,14 @@ const ImageLibraryTab = forwardRef(function ImageLibraryTab({
   const imageRowCount = useMemo(() => {
     return Math.ceil(displayImageTotal / imageCols);
   }, [displayImageTotal, imageCols]);
+
+  const getKeyboardItemIndexes = useCallback(() => {
+    const indexes = [];
+    displayImageItemsRef.current.forEach((item, index) => {
+      if (isSelectableImageItem(item)) indexes.push(index);
+    });
+    return indexes;
+  }, []);
 
   const getDisplayImageEntries = useCallback(() => {
     const entries = [];
@@ -1050,6 +1065,7 @@ const ImageLibraryTab = forwardRef(function ImageLibraryTab({
     if (nextCol < 0 || nextCol >= imageCols) return false;
     const next = nextRow * imageCols + nextCol;
     if (next < 0 || next >= total) return false;
+    if (!isSelectableImageItem(displayImageItemsRef.current[next])) return false;
     setKbImageIndex(next);
     imageScrollerRef.current?.scrollToIndex({ index: nextRow, align: 'center' });
     return true;
@@ -1080,34 +1096,21 @@ const ImageLibraryTab = forwardRef(function ImageLibraryTab({
     navigateLeft: () => kbMove(-1, 0),
     navigateRight: () => kbMove(1, 0),
     executeCurrent,
-    getKbIndex: () => kbImageIndexRef.current,
-    // 回到当前分类/搜索结果第一格(最右列 → 越界 grid-home 用):
-    // 图片网格用自身 imageCols 计算行首,不依赖 EmojiTab 侧列数
-    goHome: () => {
-      const total = displayImageItemsRef.current.length;
-      if (total <= 0 || imageCols <= 0) return;
-      const current = kbImageIndexRef.current;
-      if (current < 0) return;
-      const target = Math.floor(current / imageCols) * imageCols;
-      if (target === current) return;
-      kbImageIndexRef.current = target;
-      setKbImageIndex(target);
-      imageScrollerRef.current?.scrollToIndex({ index: Math.floor(target / imageCols), align: 'center' });
-    },
+    getKeyboardItemCount: () => getKeyboardItemIndexes().length,
     resetKbIndex: () => {
       // 同步清 ref,避免 reset 后同 tick activateKb 读到旧 index
       kbImageIndexRef.current = -1;
       setKbImageIndex(-1);
     },
     activateKb: () => {
-      // 同步写 ref 再返回,避免 setState 异步导致首次永远 false
-      // F1-4:与 kbMove/executeCurrent 同口径——用已加载数组长度 clamp,
-      // 不用全量 displayImageTotal(懒加载未加载槽位是占位格,index 落在
-      // 占位格上高亮可见但 Enter 静默,口径不一致)
-      const result = resolveActivateKb(kbImageIndexRef.current, displayImageItemsRef.current.length);
+      // 只在可执行图片索引中选择目标,避免高亮 loading 占位格后 Enter 静默。
+      const indexes = getKeyboardItemIndexes();
+      const currentPosition = indexes.indexOf(kbImageIndexRef.current);
+      const result = resolveActivateKb(currentPosition, indexes.length);
       if (!result.ok) return false;
-      kbImageIndexRef.current = result.index;
-      setKbImageIndex(result.index);
+      const targetIndex = indexes[result.index];
+      kbImageIndexRef.current = targetIndex;
+      setKbImageIndex(targetIndex);
       return true;
     }
   }));

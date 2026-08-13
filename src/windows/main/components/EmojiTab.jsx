@@ -22,6 +22,7 @@ import {
 import {
   resolveSidebarCategoryId,
   resolveZoneNav,
+  resolveGridActivation,
   isSidebarCategoryActive,
   cycleValue,
 } from './emoji/emojiKbNavigation';
@@ -255,8 +256,17 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
   kbZoneRef.current = kbZone;
   const imageLibraryRef = useRef(null);
   const prevEmojiModeRef = useRef(emojiMode);
+  // 首次方向键遇到异步数据未就绪时暂存激活意图,数据到达后自动重试。
+  const pendingGridActivationRef = useRef(false);
   // F1-2:过滤热键切子模式的挂起恢复意图(zone),由 emojiMode effect 消费
   const pendingRestoreZoneRef = useRef(null);
+  const resetKbToOutside = useCallback((preservePending = false) => {
+    if (!preservePending) pendingGridActivationRef.current = false;
+    setKbZone('outside');
+    setKbRow(-1);
+    setKbCol(0);
+    imageLibraryRef.current?.resetKbIndex?.();
+  }, []);
   const activeImageDragItemsRef = useRef([]);
   const imagePluginDragClearTimerRef = useRef(null);
   const scrollContainerRef = useRef(null);
@@ -590,6 +600,46 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
 
   virtualDataRef.current = virtualData;
 
+  // 统一处理首次进入网格:数据未就绪时只记录待激活意图,不进入已取消的 search 区。
+  const tryActivateGrid = useCallback(() => {
+    if (showImages) {
+      const api = imageLibraryRef.current;
+      const available = api?.getKeyboardItemCount?.() || 0;
+      const decision = resolveGridActivation(available);
+      if (decision.type === 'pending' || !api?.activateKb?.()) {
+        pendingGridActivationRef.current = true;
+        return false;
+      }
+      pendingGridActivationRef.current = false;
+      setKbZone('grid');
+      return true;
+    }
+
+    const rowIndexes = [];
+    virtualDataRef.current.forEach((section, index) => {
+      if (section.type === 'row' && section.items?.length > 0) rowIndexes.push(index);
+    });
+    const decision = resolveGridActivation(rowIndexes.length);
+    if (decision.type === 'pending') {
+      pendingGridActivationRef.current = true;
+      return false;
+    }
+
+    const firstRowIndex = rowIndexes[decision.index];
+    setKbRow(firstRowIndex);
+    setKbCol(0);
+    pendingGridActivationRef.current = false;
+    setKbZone('grid');
+    scrollContainerRef.current?.scrollToIndex({ index: firstRowIndex, align: 'center' });
+    return true;
+  }, [showImages]);
+
+  const handleKeyboardGridReady = useCallback(() => {
+    if (pendingGridActivationRef.current) {
+      tryActivateGrid();
+    }
+  }, [tryActivateGrid]);
+
   // 侧栏高亮受控:只改 ref 真值 + 强制重渲,禁止 classList 手改(re-render 会盖掉)
   // 单一真值:activeCategoryRef(enterSidebar/moveSidebarBy/高亮渲染都读它)
   const updateSidebarHighlight = useCallback((catId) => {
@@ -599,31 +649,23 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
   }, []);
 
   useEffect(() => {
-    // 切换子模式时重置键盘导航状态:回到 outside(无高亮,←/→ 恢复原功能)
-    // emojiKbActive 由下方 useEffect([kbZone]) 单点兜底,这里只改 zone
-    // F1-2:过滤热键(⌘+←/→)切子模式前 App 已经 restoreKbNav 挂起恢复意图,
-    // 在数据重建后按意图恢复 grid(search),而不是一律重置回 outside。
+    // 切换子模式时默认回到 outside;若过滤热键要求恢复 grid,则保留待激活意图。
     const pendingZone = pendingRestoreZoneRef.current;
     pendingRestoreZoneRef.current = null;
-    if (pendingZone) {
-      setKbZone(pendingZone);
-      if (pendingZone === 'grid') {
-        if (showImages) {
-          if (imageLibraryRef.current?.activateKb?.()) {
-            return;
-          }
-        } else {
-          const data = virtualDataRef.current;
-          const firstRowIndex = data.findIndex(section => section.type === 'row');
-          if (firstRowIndex !== -1) {
-            setKbRow(firstRowIndex);
-            setKbCol(0);
-            return;
-          }
-        }
-      }
+
+    if (pendingZone === 'grid') {
+      pendingGridActivationRef.current = true;
+      resetKbToOutside(true);
+      if (tryActivateGrid()) return;
       return;
     }
+
+    if (pendingZone === 'sidebar') {
+      pendingGridActivationRef.current = false;
+      setKbZone('sidebar');
+      return;
+    }
+
     resetKbToOutside();
 
     if (showImages) {
@@ -876,32 +918,10 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
   }, [clearImagePluginDragState]);
 
   // ==== 键盘区域导航 ====
-  // 主路径:后端 hotkey → App.dispatchEmojiNav → handleNavAction
-  // zone: outside(默认) → search(↓激活) ↔ grid/sidebar; search↑ → outside
-  const focusSearchInput = useCallback(() => {
-    setKbZone('search');
-  }, []);
-
+  // zone: outside(默认) → grid;没有内容时保留 outside 并等待异步数据。
   const enterGrid = useCallback(() => {
-    if (showImages) {
-      const ok = imageLibraryRef.current?.activateKb?.();
-      if (ok) {
-        setKbZone('grid');
-        return;
-      }
-      // G6 修:图片库异步未就绪(activateKb 返回 false)时降级到搜索框,
-      // 保留键盘导航态(search)给用户视觉反馈,而不是静默吞掉 ↓ 键
-      focusSearchInput();
-      return;
-    }
-    const data = virtualDataRef.current;
-    const firstRowIndex = data.findIndex(section => section.type === 'row');
-    if (firstRowIndex === -1) return;
-    setKbRow(firstRowIndex);
-    setKbCol(0);
-    setKbZone('grid');
-    scrollContainerRef.current?.scrollToIndex({ index: firstRowIndex, align: 'center' });
-  }, [showImages, focusSearchInput]);
+    tryActivateGrid();
+  }, [tryActivateGrid]);
 
   const enterSidebar = useCallback(() => {
     const cats = currentCategories;
@@ -917,17 +937,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
     btn?.focus?.();
   }, [currentCategories, handleCategoryClick, showImages, currentImageGroup]);
 
-  // 键盘导航重置到 outside:任何"退出激活态"路径的唯一出口(deactivate 意图、
-  // 过滤热键、emojiMode 切换、越界兜底)。blurSearchInput/resetKbNav 语义名不同
-  // (前者是 deactivate 出口,后者是过滤热键路径),但重置动作同一,均收敛于此。
-  const resetKbToOutside = useCallback(() => {
-    setKbZone('outside');
-    setKbRow(-1);
-    setKbCol(0);
-    imageLibraryRef.current?.resetKbIndex?.();
-  }, []);
-  const blurSearchInput = resetKbToOutside;
-
+  // 键盘导航退出激活态、过滤热键和模式切换统一复用顶部 resetKbToOutside。
   // G3:过滤热键路径(App handleFilterLeft/Right)切子模式前调用——把 kbZone 置
   // outside,让 emojiMode effect 的 setKbZone('outside') 同值短路,effect 不跑,
   // 键盘导航态(如 grid 高亮)得以保留
@@ -1005,32 +1015,10 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
     return true;
   }, [showImages]);
 
-  const gridHome = useCallback(() => {
-    if (showImages) {
-      // 图片网格列数与表情不同,行首计算在 ImageLibraryTab 内(用自身 imageCols)
-      imageLibraryRef.current?.goHome?.();
-      return;
-    }
-    const data = virtualDataRef.current;
-    const rowIndexes = [];
-    data.forEach((section, index) => {
-      if (section.type === 'row') rowIndexes.push(index);
-    });
-    if (rowIndexes.length === 0) return;
-    const firstRow = rowIndexes[0];
-    setKbRow(firstRow);
-    setKbCol(0);
-    scrollContainerRef.current?.scrollToIndex({ index: firstRow, align: 'center' });
-  }, [showImages, gridCols]);
-
   // 执行 zone 意图(resolveZoneNav 的 type)
   const applyNavIntent = useCallback((intent) => {
     if (!intent || intent.type === 'none') return;
     switch (intent.type) {
-      case 'activate-search':
-      case 'enter-search':
-        focusSearchInput();
-        break;
       case 'enter-grid':
         enterGrid();
         break;
@@ -1044,33 +1032,37 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
         if (emojiMode === 'emoji') {
           // 表情是最左子模式,再往左切收藏主标签
           setKbZone('outside');
-          onSwitchTab?.('favorites');
+          onSwitchTab?.('previous');
         } else {
           onEmojiModeChange?.(cycleValue(EMOJI_MODE_IDS, emojiMode, -1));
         }
         break;
       case 'deactivate':
-        blurSearchInput();
+        resetKbToOutside();
         break;
       case 'grid-move': {
         const ok = moveGridBy(intent.dRow, intent.dCol);
-        if (!ok && intent.onFail === 'enter-search') focusSearchInput();
+        if (!ok && intent.onFail === 'deactivate') resetKbToOutside();
         if (!ok && intent.onFail === 'enter-sidebar') enterSidebar();
-        // 最右列 → 越界回到当前分类第一个格子(不切子模式)
-        if (!ok && intent.onFail === 'grid-home') {
-          gridHome();
+        if (!ok && intent.onFail === 'switch-tab-left') {
+          resetKbNav();
+          onSwitchTab?.('previous');
+        }
+        if (!ok && intent.onFail === 'switch-tab-right') {
+          resetKbNav();
+          onSwitchTab?.('next');
         }
         break;
       }
       case 'sidebar-move': {
         const ok = moveSidebarBy(intent.delta);
-        if (!ok && intent.onFail === 'enter-search') focusSearchInput();
+        if (!ok && intent.onFail === 'deactivate') resetKbToOutside();
         break;
       }
       default:
         break;
     }
-  }, [focusSearchInput, enterGrid, enterSidebar, blurSearchInput, moveGridBy, moveSidebarBy, gridHome, onSwitchTab, emojiMode, onEmojiModeChange, resetKbNav]);
+  }, [enterGrid, enterSidebar, moveGridBy, moveSidebarBy, onSwitchTab, emojiMode, onEmojiModeChange, resetKbToOutside, resetKbNav]);
 
   // 主路径:App 转发后端 navigation-action。不挂 window keydown,
   // 避免与 RegisterHotKey 在搜索框聚焦时双触发(进 grid 两次/跳格)。
@@ -1091,13 +1083,18 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
     navigationStore.setEmojiKbActive(kbZone !== 'outside');
   }, [kbZone]);
 
-  // 虚拟列表数据变化时:kbRow 越界时夹住;网格为空且 zone='grid' 时回 outside
+  // 虚拟列表数据变化时:待激活请求重试,已有高亮越界则夹回第一行。
   useEffect(() => {
     const data = virtualDataRef.current;
     const rowIndexes = [];
     data.forEach((section, index) => {
-      if (section.type === 'row') rowIndexes.push(index);
+      if (section.type === 'row' && section.items?.length > 0) rowIndexes.push(index);
     });
+
+    if (pendingGridActivationRef.current && !showImages) {
+      if (tryActivateGrid()) return;
+    }
+
     if (rowIndexes.length === 0) {
       if (kbZone === 'grid') resetKbToOutside();
       return;
@@ -1106,7 +1103,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
       setKbRow(rowIndexes[0]);
       setKbCol(0);
     }
-  }, [virtualData, kbZone]);
+  }, [virtualData, kbZone, showImages, tryActivateGrid, resetKbToOutside]);
 
   // 输出选中项:图片模式转发图库,emoji/符号粘贴 kbRow/kbCol 格
   // tabbar 态 Enter 走 TabNavigation 选中(handleKbNav 切换),此处不得用
@@ -1266,6 +1263,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
             onImageDragStart={handleImagePluginDragStart}
             onImageDragEnd={handleImagePluginDragEnd}
             onImageDragCancel={clearImagePluginDragState}
+            onKeyboardGridReady={handleKeyboardGridReady}
             reloadKey={imageLibraryReloadKey}
           />
         ) : (

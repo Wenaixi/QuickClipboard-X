@@ -79,12 +79,8 @@ test('C12 applyNavIntent useCallback deps 必须含 emojiMode', async () => {
 });
 
 
-// F09: EmojiTab enterGrid useCallback deps 缺 focusSearchInput(G06)。fixSearchInput
-// 当前是 useCallback(() => setKbZone('search'), []) 空 deps,加不加不影响运行时;
-// 但若日后有人给 focusSearchInput 加 deps(例如同步 kbZoneRef / 滚动到搜索框),
-// 不补 deps 的 enterGrid 会读旧 closure 触发 stale focus 行为。
-// 护栏:enterGrid deps 必须含 focusSearchInput。
-test('F09 enterGrid useCallback deps 必须含 focusSearchInput', async () => {
+// F09:enterGrid 只依赖数据激活与待加载状态,不应再依赖已取消的内部 search。
+test('F09 enterGrid 不再依赖旧 focusSearchInput', async () => {
   const body = await readSource('../EmojiTab.jsx');
   const start = body.indexOf('const enterGrid = useCallback');
   assert.ok(start >= 0, '应有 enterGrid');
@@ -92,21 +88,15 @@ test('F09 enterGrid useCallback deps 必须含 focusSearchInput', async () => {
   assert.ok(depsStart > start, 'enterGrid 应有 deps 数组');
   const depsEnd = body.indexOf(']);', depsStart);
   const deps = body.slice(depsStart, depsEnd + 3);
-  assert.ok(
-    /\bfocusSearchInput\b/.test(deps),
-    'enterGrid deps 必须含 focusSearchInput,防止日后该函数加 deps 后产生 stale closure'
-  );
+  assert.equal(/\bfocusSearchInput\b/.test(deps), false, 'enterGrid 不应依赖已取消的 focusSearchInput');
 });
 
-// 回归:依赖数组会在组件渲染时立即求值,不能引用后面仍处于 TDZ 的 const。
-test('F10 enterGrid 的依赖回调必须先于 enterGrid 声明', async () => {
+// 回归:enterGrid 的依赖函数必须在声明前可用,防止首次渲染触发 TDZ。
+test('F10 enterGrid 的网格激活依赖必须先于声明', async () => {
   const body = await readSource('../EmojiTab.jsx');
-  const focusSearchInputStart = body.indexOf('const focusSearchInput = useCallback');
+  const activationStart = body.indexOf('const tryActivateGrid = useCallback');
   const enterGridStart = body.indexOf('const enterGrid = useCallback');
-  assert.ok(focusSearchInputStart >= 0, '应有 focusSearchInput');
+  assert.ok(activationStart >= 0, '应有 tryActivateGrid');
   assert.ok(enterGridStart >= 0, '应有 enterGrid');
-  assert.ok(
-    focusSearchInputStart < enterGridStart,
-    'enterGrid 的依赖 focusSearchInput 必须先声明,否则首次渲染会触发 TDZ ReferenceError'
-  );
+  assert.ok(activationStart < enterGridStart, 'tryActivateGrid 必须先于 enterGrid 声明');
 });

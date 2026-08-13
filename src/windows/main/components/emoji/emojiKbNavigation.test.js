@@ -7,6 +7,7 @@ import {
   resolveOutsideAppAction,
   shouldForwardNavToEmoji,
   resolveZoneNav,
+  resolveGridActivation,
   isSidebarCategoryActive,
 } from './emojiKbNavigation.js';
 
@@ -45,6 +46,16 @@ describe('resolveSidebarCategoryId', () => {
   });
 });
 
+describe('resolveGridActivation', () => {
+  it('内容尚未加载时等待，不把第一次方向键降级到旧搜索区', () => {
+    assert.deepEqual(resolveGridActivation(0), { type: 'pending' });
+  });
+
+  it('内容已加载时一次激活第一个网格项', () => {
+    assert.deepEqual(resolveGridActivation(3), { type: 'activate', index: 0 });
+  });
+});
+
 describe('resolveOutsideAppAction', () => {
   it('↓ 激活', () => {
     assert.equal(resolveOutsideAppAction('navigate-down'), 'activate');
@@ -73,49 +84,44 @@ describe('shouldForwardNavToEmoji', () => {
 });
 
 describe('resolveZoneNav', () => {
-  it('outside 仅 down 激活 search', () => {
-    assert.deepEqual(resolveZoneNav('outside', 'navigate-down'), { type: 'activate-search' });
+  it('outside 按一次 down 直接进入 grid', () => {
+    assert.deepEqual(resolveZoneNav('outside', 'navigate-down'), { type: 'enter-grid' });
     assert.deepEqual(resolveZoneNav('outside', 'tab-left'), { type: 'none' });
   });
-  it('search: down/right→grid left→sidebar up→deactivate', () => {
-    assert.deepEqual(resolveZoneNav('search', 'navigate-down'), { type: 'enter-grid' });
-    assert.deepEqual(resolveZoneNav('search', 'tab-right'), { type: 'enter-grid' });
-    assert.deepEqual(resolveZoneNav('search', 'tab-left'), { type: 'enter-sidebar' });
-    assert.deepEqual(resolveZoneNav('search', 'navigate-up'), { type: 'deactivate' });
+  it('已取消的 search zone 不再参与导航', () => {
+    for (const action of ['navigate-up', 'navigate-down', 'tab-left', 'tab-right']) {
+      assert.deepEqual(resolveZoneNav('search', action), { type: 'none' });
+    }
   });
   it('grid 移动与越界回退', () => {
     assert.deepEqual(resolveZoneNav('grid', 'navigate-down'), { type: 'grid-move', dRow: 1, dCol: 0 });
     assert.deepEqual(resolveZoneNav('grid', 'navigate-up'), {
-      type: 'grid-move', dRow: -1, dCol: 0, onFail: 'enter-search',
+      type: 'grid-move', dRow: -1, dCol: 0, onFail: 'deactivate',
     });
     assert.deepEqual(resolveZoneNav('grid', 'tab-left'), {
-      type: 'grid-move', dRow: 0, dCol: -1, onFail: 'enter-sidebar',
+      type: 'grid-move', dRow: 0, dCol: -1, onFail: 'switch-tab-left',
     });
-    // 最右列 → 越界回到当前分类第一个格子(由组件 gridHome 执行)
     assert.deepEqual(resolveZoneNav('grid', 'tab-right'), {
-      type: 'grid-move', dRow: 0, dCol: 1, onFail: 'grid-home',
+      type: 'grid-move', dRow: 0, dCol: 1, onFail: 'switch-tab-right',
     });
   });
   it('sidebar 移动与回搜索', () => {
     assert.deepEqual(resolveZoneNav('sidebar', 'navigate-down'), { type: 'sidebar-move', delta: 1 });
     assert.deepEqual(resolveZoneNav('sidebar', 'navigate-up'), {
-      type: 'sidebar-move', delta: -1, onFail: 'enter-search',
+      type: 'sidebar-move', delta: -1, onFail: 'deactivate',
     });
     assert.deepEqual(resolveZoneNav('sidebar', 'tab-right'), { type: 'enter-grid' });
     assert.deepEqual(resolveZoneNav('sidebar', 'tab-left'), { type: 'prev-mode' });
   });
-  it('grid 首列 ← 越界进侧栏(不再是 tabbar)', () => {
+  it('grid 首列 ← 与最右列 → 都请求顶层标签切换', () => {
     assert.deepEqual(resolveZoneNav('grid', 'tab-left'), {
-      type: 'grid-move', dRow: 0, dCol: -1, onFail: 'enter-sidebar',
+      type: 'grid-move', dRow: 0, dCol: -1, onFail: 'switch-tab-left',
     });
-  });
-  it('grid 最右列 → 越界回到当前分类第一个格子(不切子模式)', () => {
     assert.deepEqual(resolveZoneNav('grid', 'tab-right'), {
-      type: 'grid-move', dRow: 0, dCol: 1, onFail: 'grid-home',
+      type: 'grid-move', dRow: 0, dCol: 1, onFail: 'switch-tab-right',
     });
   });
-  // F4: 5 个 zone 分支无一产出 enter-tabbar 意图(grid ← 是 enter-sidebar、→ 是 grid-home),
-  // kbZone='tabbar' 永远不可达,tabbar 分支本身是死码 → 删除后任何 action 都 none
+  // tabbar zone 不再参与 Emoji 网格导航,未知 zone 对任意动作均无操作
   it('tabbar zone 不可达:任何 action 返回 none(防死码复活)', () => {
     for (const a of ['navigate-up', 'navigate-down', 'tab-left', 'tab-right']) {
       assert.deepEqual(resolveZoneNav('tabbar', a), { type: 'none' });
@@ -139,30 +145,23 @@ describe('isSidebarCategoryActive', () => {
 });
 
 describe('端到端状态机路径(模拟用户)', () => {
-  it('outside→↓search→↓grid→←sidebar→←prev-mode(组件按 emojiMode 决定目标)', () => {
+  it('outside→↓grid→左右边界请求顶层切换', () => {
     let zone = 'outside';
     const step = (action) => {
       const intent = resolveZoneNav(zone, action);
-      if (intent.type === 'activate-search' || intent.type === 'enter-search') zone = 'search';
-      else if (intent.type === 'enter-grid') zone = 'grid';
-      else if (intent.type === 'enter-sidebar') zone = 'sidebar';
+      if (intent.type === 'enter-grid') zone = 'grid';
       else if (intent.type === 'deactivate') zone = 'outside';
-      else if (intent.type === 'prev-mode') zone = 'outside'; // 切子模式/主标签由组件执行,键盘导航退出
-      else if (intent.type === 'grid-move' && intent.onFail === 'enter-sidebar') {
-        zone = 'sidebar';
-      }
       return intent;
     };
     assert.equal(resolveOutsideAppAction('navigate-down'), 'activate');
     step('navigate-down');
-    assert.equal(zone, 'search');
-    step('navigate-down');
     assert.equal(zone, 'grid');
-    step('tab-left'); // grid 首列 ← 越界进侧栏(onFail enter-sidebar 由组件在 move 失败时触发)
-    assert.equal(zone, 'sidebar');
-    const last = step('tab-left'); // 侧栏再 ← 交给组件切上一个子模式/收藏
-    assert.equal(zone, 'outside');
-    assert.deepEqual(last, { type: 'prev-mode' });
+    assert.deepEqual(step('tab-left'), {
+      type: 'grid-move', dRow: 0, dCol: -1, onFail: 'switch-tab-left',
+    });
+    assert.deepEqual(step('tab-right'), {
+      type: 'grid-move', dRow: 0, dCol: 1, onFail: 'switch-tab-right',
+    });
     assert.equal(shouldForwardNavToEmoji(false, 'tab-left'), false);
     assert.equal(resolveOutsideAppAction('tab-left'), 'passthrough');
   });
@@ -181,7 +180,7 @@ describe('F3 resetKbToOutside 收敛(去重置四连重复)', () => {
     const count = (body.match(resetBody) || []).length;
     assert.equal(count, 1, '重置四连应只存在于 resetKbToOutside 定义处,其余调用点必须复用');
     assert.ok(body.includes('const resetKbToOutside = useCallback('), '缺共享重置函数 resetKbToOutside');
-    assert.ok(body.includes('const blurSearchInput = resetKbToOutside'), 'blurSearchInput 应复用共享函数,不再内联重复体');
+    assert.equal(body.includes('blurSearchInput'), false, '已取消的 search 退出别名不应残留');
     assert.ok(body.includes('const resetKbNav = resetKbToOutside'), 'resetKbNav 应复用共享函数,不再内联重复体');
   });
 });
@@ -238,54 +237,35 @@ describe('App 转发契约源码护栏', () => {
     assert.ok(body.includes('isSidebarCategoryActive'), '侧栏应受控高亮');
   });
 
-  it('ImageLibraryTab activateKb 走 resolveActivateKb', async () => {
+  it('ImageLibraryTab activateKb 只激活可执行图片并同步写 ref', async () => {
     const body = await readSource('ImageLibraryTab.jsx');
     assert.ok(body.includes('resolveActivateKb'), 'activateKb 必须用 resolveActivateKb');
-    assert.ok(body.includes('kbImageIndexRef.current = result.index'), '必须同步写 ref');
+    assert.ok(body.includes('getKeyboardItemIndexes'), 'activateKb 应复用可执行图片索引 helper');
+    assert.ok(body.includes('const targetIndex = indexes[result.index]'), 'activateKb 应把逻辑位置映射回图片原始索引');
+    assert.ok(body.includes('kbImageIndexRef.current = targetIndex'), '必须同步写 ref');
     assert.ok(body.includes('kbImageIndexRef.current = -1'), 'resetKbIndex 必须同步清 ref');
   });
 });
 
-// F5 gridHome 图片分支源码护栏
-describe('F5 gridHome 图片分支源码护栏', () => {
-  it('EmojiTab gridHome 不再引用未声明的 kbImageIndexRef', async () => {
-    // 回归:gridHome 图片分支读 kbImageIndexRef(仅 ImageLibraryTab 声明),
-    // → 后 navigateRight 越界 onFail grid-home 时直接 ReferenceError 崩溃
+// F5 图片网格边界现在由 EmojiTab 统一交给 App 切换顶层标签。
+describe('F5 图片网格边界契约', () => {
+  it('EmojiTab 网格边界分支调用相邻顶层切换方向', async () => {
     const body = await readSource('../EmojiTab.jsx');
-    const start = body.indexOf('const gridHome = useCallback');
-    assert.notEqual(start, -1, '缺 gridHome 函数');
-    const end = body.indexOf('}, [', start);
-    const fn = body.slice(start, end === -1 ? body.length : end);
-    assert.equal(fn.includes('kbImageIndexRef'), false, 'gridHome 不应引用未声明的 kbImageIndexRef');
+    const start = body.indexOf("if (!ok && intent.onFail === 'switch-tab-left')");
+    const end = body.indexOf("case 'sidebar-move':", start);
+    assert.notEqual(start, -1, '缺少左边界顶层切换分支');
+    assert.notEqual(end, -1, '缺少网格意图结束锚点');
+    const fn = body.slice(start, end);
+    assert.ok(fn.includes("onSwitchTab?.('previous')"), '左边界应请求上一个顶层标签');
+    assert.ok(fn.includes("onSwitchTab?.('next')"), '右边界应请求下一个顶层标签');
   });
 
-  it('ImageLibraryTab useImperativeHandle 暴露 getKbIndex', async () => {
-    // 契约:gridHome 图片分支经 api.getKbIndex 读当前 index,不依赖 EmojiTab 侧变量
-    const body = await readSource('ImageLibraryTab.jsx');
-    const start = body.indexOf('useImperativeHandle');
-    assert.notEqual(start, -1, '缺 useImperativeHandle');
-    assert.ok(body.includes('getKbIndex:'), 'useImperativeHandle 必须暴露 getKbIndex');
-    assert.ok(body.includes('kbImageIndexRef.current'), 'getKbIndex 应返回 kbImageIndexRef.current');
-  });
 
-  it('ImageLibraryTab goHome 用自身 imageCols 回到行首,EmojiTab 不再 navigateUp({rows})', async () => {
-    // 回归:navigateUp({rows}) 参数被忽略只上移 1 行;且行数用 EmojiTab 的 gridCols(表情列数)
-    // 计算与图片网格列数不符。goHome 用图片自身 imageCols 求行首,真正回当前分类第一格
-    const libBody = await readSource('ImageLibraryTab.jsx');
-    const start = libBody.indexOf('goHome:');
-    assert.notEqual(start, -1, 'useImperativeHandle 必须暴露 goHome');
-    assert.ok(
-      libBody.slice(start, start + 300).includes('Math.floor(current / imageCols) * imageCols'),
-      'goHome 必须用自身 imageCols 计算行首,不能靠调用方传行数'
-    );
-
+  it('旧 gridHome 回行首死链已删除', async () => {
     const emojiBody = await readSource('../EmojiTab.jsx');
-    const ghStart = emojiBody.indexOf('const gridHome = useCallback');
-    assert.notEqual(ghStart, -1, '缺 gridHome 函数');
-    const ghEnd = emojiBody.indexOf('}, [', ghStart);
-    const ghFn = emojiBody.slice(ghStart, ghEnd === -1 ? emojiBody.length : ghEnd);
-    assert.ok(ghFn.includes('goHome'), 'gridHome 图片分支应调 api.goHome()');
-    assert.equal(ghFn.includes('navigateUp({ rows'), false, 'gridHome 不应再调 navigateUp({rows})');
+    const imageBody = await readSource('ImageLibraryTab.jsx');
+    assert.equal(emojiBody.includes('const gridHome = useCallback'), false, 'EmojiTab 不应再保留 gridHome');
+    assert.equal(imageBody.includes('goHome:'), false, 'ImageLibraryTab 不应再暴露无调用方的 goHome');
   });
 });
 

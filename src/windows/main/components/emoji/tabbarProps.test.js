@@ -88,16 +88,19 @@ test('G4 dispatchEmojiNav 在 emojiTabRef null(lazy 挂载中)时不吞键,retur
 
 // G6: enterGrid 图片分支 activateKb() 返回 false(图库异步未就绪)时静默 return,
 // ↓ 键被吞无任何反馈。修复:失败时降级 focusSearchInput()(保持 search 态给视觉反馈)。
-test('G6 enterGrid 图片分支 activateKb 失败时降级 focusSearchInput', async () => {
+test('G6 enterGrid 图片分支等待数据后自动激活,不进入旧 search 区', async () => {
   const body = await readSource('../EmojiTab.jsx');
-  const enterGridStart = body.indexOf('const enterGrid');
-  const enterGridEnd = body.indexOf('const enterSidebar', enterGridStart);
-  const enterGrid = body.slice(enterGridStart, enterGridEnd);
-  // activateKb 失败分支必须调用 focusSearchInput 降级
-  assert.ok(
-    /activateKb[\s\S]*?focusSearchInput\(\)/.test(enterGrid),
-    'enterGrid 图片分支 activateKb 失败后必须降级 focusSearchInput'
+  const activationStart = body.indexOf('const tryActivateGrid');
+  const activationEnd = body.indexOf('const handleKeyboardGridReady', activationStart);
+  const activation = body.slice(activationStart, activationEnd);
+  assert.ok(activation.includes('resolveGridActivation'), '统一激活 helper 应使用网格激活决策');
+  assert.equal(
+    activation.includes('focusSearchInput()'),
+    false,
+    'activateKb 失败时不得降级到已取消的内部 search 区'
   );
+  assert.ok(body.includes('pendingGridActivationRef'), '未就绪时应记录一次待激活请求');
+  assert.ok(body.includes('onKeyboardGridReady'), '图片数据就绪后应通知 EmojiTab 重试激活');
 });
 
 test('App.jsx 不再直传 onEnterTabbar/onTabbarMove props,无注入 useEffect', async () => {
