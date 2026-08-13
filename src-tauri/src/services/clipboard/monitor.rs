@@ -50,9 +50,15 @@ pub struct ClipboardMonitorPauseGuard;
 
 impl Drop for ClipboardMonitorPauseGuard {
     fn drop(&mut self) {
-        let remaining = MONITOR_PAUSE_COUNT.fetch_sub(1, Ordering::SeqCst).saturating_sub(1);
-        if should_schedule_deferred_capture(remaining, is_monitor_running(), take_capture_pending()) {
-            schedule_capture_worker();
+        let remaining = MONITOR_PAUSE_COUNT.fetch_sub(1, Ordering::SeqCst);
+        // fetch_sub 返回减之前的旧值:最后一个 guard 是 1。
+        // 只有确认这是最后一个 guard 后才 take 待捕获标志,
+        // 避免嵌套暂停把标志提前清掉,也避免实参先求值吞掉事件。
+        if remaining == 1 {
+            let has_pending = take_capture_pending();
+            if should_schedule_deferred_capture(remaining, is_monitor_running(), has_pending) {
+                schedule_capture_worker();
+            }
         }
     }
 }
@@ -472,16 +478,24 @@ mod tests {
         let handle_start = stripped
             .find("fn handle_clipboard_change")
             .expect("handle_clipboard_change 必须存在");
-        let handle_body = &stripped[handle_start..];
+        let handle_end = stripped[handle_start + 1..]
+            .find("\nfn ")
+            .map(|i| handle_start + 1 + i)
+            .unwrap_or(stripped.len());
+        let handle_body = &stripped[handle_start..handle_end];
         assert!(
-            handle_body.contains("mark_capture_pending_during_pause()"),
+            handle_body.contains("CAPTURE_PENDING.store(true"),
             "暂停期内必须记录待捕获标志,禁止直接 return 吞掉事件"
         );
 
         let drop_start = stripped
             .find("impl Drop for ClipboardMonitorPauseGuard")
             .expect("Drop 实现必须存在");
-        let drop_body = &stripped[drop_start..];
+        let drop_end = stripped[drop_start + 1..]
+            .find("\npub fn ")
+            .map(|i| drop_start + 1 + i)
+            .unwrap_or(stripped.len());
+        let drop_body = &stripped[drop_start..drop_end];
         assert!(
             drop_body.contains("should_schedule_deferred_capture("),
             "Drop 末尾必须用决策函数判断是否启动延期 worker"
@@ -489,6 +503,26 @@ mod tests {
         assert!(
             drop_body.contains("schedule_capture_worker()"),
             "Drop 末尾必须真正触发延期 worker"
+        );
+        // fetch_sub 返回减之前的旧值:最后一个 guard Drop 时旧值==1。
+        // 再 saturating_sub(1) 会把 1 变成 0,决策函数永远不调度。
+        assert!(
+            !drop_body.contains("saturating_sub(1)"),
+            "Drop 必须把 fetch_sub 旧值直接交给决策函数,禁止再减一次"
+        );
+        // 函数实参会先求值:take_capture_pending() 若写在 should_schedule 参数里,
+        // 非最后一个 guard 也会把待捕获标志清掉,最后一个 guard 反而调度不了。
+        let schedule_call = drop_body
+            .find("should_schedule_deferred_capture(")
+            .expect("缺决策函数调用");
+        let schedule_line_end = drop_body[schedule_call..]
+            .find('\n')
+            .map(|i| schedule_call + i)
+            .unwrap_or(drop_body.len());
+        let schedule_line = &drop_body[schedule_call..schedule_line_end];
+        assert!(
+            !schedule_line.contains("take_capture_pending()"),
+            "take_capture_pending 不得作为 should_schedule 实参先求值"
         );
     }
 }
