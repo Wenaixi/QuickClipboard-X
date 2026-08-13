@@ -33,5 +33,5 @@ test('F1-2 EmojiTab 暴露 restoreKbNav 且 effect 按挂起意图恢复', async
   const effectEnd = body.indexOf('}, [emojiMode]);', effectStart);
   assert.notEqual(effectStart, -1, 'effect 应读挂起恢复意图 ref(pendingRestoreZoneRef)');
   const effect = body.slice(effectStart, effectEnd);
-  assert.ok(effect.includes('activateKb'), 'grid 恢复应重新激活(images 走 activateKb)');
+  assert.ok(effect.includes('tryActivateGrid'), 'grid 恢复应重新走统一网格激活 helper');
 });

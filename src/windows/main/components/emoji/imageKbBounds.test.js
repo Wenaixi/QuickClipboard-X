@@ -10,12 +10,13 @@ import { readSource } from './readSource.js';
 
 test('F1-4 activateKb 与 kbMove 用同一已加载数组口径', async () => {
   const body = await readSource('./ImageLibraryTab.jsx');
-  // activateKb 不再用 displayImageTotal clamp
+  // activateKb 不再把数组长度当作可执行图片数量,而是复用可执行索引 helper。
   const impStart = body.indexOf('useImperativeHandle(ref');
   const impEnd = body.indexOf('handleSelectionMouseDown', impStart);
   const imp = body.slice(impStart, impEnd);
-  assert.ok(imp.includes('displayImageItemsRef'), 'activateKb 应基于已加载数组 displayImageItemsRef');
-  assert.equal(imp.includes('displayImageTotal'), false, 'activateKb 不应再直接用 displayImageTotal');
+  assert.ok(imp.includes('getKeyboardItemIndexes'), 'activateKb 应复用可执行图片索引 helper');
+  assert.ok(imp.includes('const targetIndex = indexes[result.index]'), 'activateKb 应定位到真实图片索引');
+  assert.equal(imp.includes('displayImageTotal'), false, 'activateKb 不应直接使用视觉总数');
 });
 
 test('F1-4 searchQuery 过滤时重置/夹取 kbImageIndex(过滤计算处)', async () => {

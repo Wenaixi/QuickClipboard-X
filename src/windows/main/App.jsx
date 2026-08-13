@@ -399,11 +399,16 @@ function App() {
     if (outside === 'ignore') return true;
     return false;
   };
-  // EmojiTab 侧栏 ← 请求切主标签(收藏)
-  const handleEmojiSwitchTab = (tab) => {
-    if (isMainTabVisible(tab, settings.visibleOptionalTabs)) {
-      setActiveTab(tab);
-    }
+  // EmojiTab 在网格左右边界请求顶层标签相邻切换,由 App 统一按 visibleTabs 循环。
+  const handleEmojiSwitchTab = (direction) => {
+    if (direction !== 'previous' && direction !== 'next') return;
+    setActiveTab(currentTab => {
+      const tabs = visibleTabs;
+      const currentIndex = tabs.indexOf(currentTab);
+      if (tabs.length === 0) return currentTab;
+      if (currentIndex === -1) return direction === 'previous' ? tabs[tabs.length - 1] : tabs[0];
+      return tabs[(currentIndex + (direction === 'previous' ? -1 : 1) + tabs.length) % tabs.length];
+    });
   };
 
   // 表情页已激活时,←/→ 交给 dispatchEmojiNav 转发;outside 态 passthrough 切主标签

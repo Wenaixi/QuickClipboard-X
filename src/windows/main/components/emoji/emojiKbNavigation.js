@@ -12,6 +12,16 @@ export function resolveActivateKb(currentIndex, total) {
   return { ok: true, index: Math.min(currentIndex, total - 1) };
 }
 
+/**
+ * 首次进入内容网格时的激活决策。
+ * 数据尚未到达时返回 pending,调用方应等待数据变化后重试,不应切到已取消的搜索区。
+ */
+export function resolveGridActivation(total) {
+  return total > 0
+    ? { type: 'activate', index: 0 }
+    : { type: 'pending' };
+}
+
 /** 进侧栏时保留当前分类,没有则用第一个 */
 export function resolveSidebarCategoryId(categories, activeId) {
   if (!categories || categories.length === 0) return null;
@@ -51,30 +61,23 @@ export function shouldForwardNavToEmoji(emojiKbActive, action) {
  */
 export function resolveZoneNav(kbZone, action) {
   if (kbZone === 'outside') {
-    if (action === 'navigate-down') return { type: 'activate-search' };
-    return { type: 'none' };
-  }
-
-  if (kbZone === 'search') {
-    if (action === 'navigate-down' || action === 'tab-right') return { type: 'enter-grid' };
-    if (action === 'tab-left') return { type: 'enter-sidebar' };
-    if (action === 'navigate-up') return { type: 'deactivate' };
+    if (action === 'navigate-down') return { type: 'enter-grid' };
     return { type: 'none' };
   }
 
   if (kbZone === 'grid') {
     if (action === 'navigate-down') return { type: 'grid-move', dRow: 1, dCol: 0 };
-    if (action === 'navigate-up') return { type: 'grid-move', dRow: -1, dCol: 0, onFail: 'enter-search' };
-    // 最右列 → 越界回到当前分类第一个格子(由组件 gridHome 执行,不切子模式)
-    if (action === 'tab-right') return { type: 'grid-move', dRow: 0, dCol: 1, onFail: 'grid-home' };
-    // grid 首列 ← 越界进侧栏(与搜索框 ← 同一目的地)
-    if (action === 'tab-left') return { type: 'grid-move', dRow: 0, dCol: -1, onFail: 'enter-sidebar' };
+    if (action === 'navigate-up') return { type: 'grid-move', dRow: -1, dCol: 0, onFail: 'deactivate' };
+    // grid 首列 ← 越界切换上一个顶层标签
+    if (action === 'tab-left') return { type: 'grid-move', dRow: 0, dCol: -1, onFail: 'switch-tab-left' };
+    // grid 最右列 → 越界切换下一个顶层标签
+    if (action === 'tab-right') return { type: 'grid-move', dRow: 0, dCol: 1, onFail: 'switch-tab-right' };
     return { type: 'none' };
   }
 
   if (kbZone === 'sidebar') {
     if (action === 'navigate-down') return { type: 'sidebar-move', delta: 1 };
-    if (action === 'navigate-up') return { type: 'sidebar-move', delta: -1, onFail: 'enter-search' };
+    if (action === 'navigate-up') return { type: 'sidebar-move', delta: -1, onFail: 'deactivate' };
     if (action === 'tab-right') return { type: 'enter-grid' };
     // 侧栏再 ← 切上一个子模式(图片→符号→表情),表情(最左)再 ← 切收藏主标签。
     // 目标由组件按当前 emojiMode 决定(prev-mode 意图)。
