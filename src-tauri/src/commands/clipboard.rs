@@ -169,13 +169,6 @@ pub async fn paste_content(params: PasteParams, app: tauri::AppHandle) -> Result
         _ => None,
     };
 
-    // 先隐藏窗口，让用户感知粘贴是即时的
-    if !crate::get_window_state().is_pinned {
-        if let Some(window) = crate::get_main_window(&app) {
-            crate::hide_main_window(&window);
-        }
-    }
-
     let params_for_task = params;
     tokio::task::spawn_blocking(move || -> Result<(), String> {
         // 根据参数类型处理粘贴
@@ -226,6 +219,12 @@ pub async fn paste_content(params: PasteParams, app: tauri::AppHandle) -> Result
     })
     .await
     .map_err(|e| format!("粘贴任务执行失败: {}", e))??;
+
+    if !crate::get_window_state().is_pinned {
+        if let Some(window) = crate::get_main_window(&app) {
+            crate::hide_main_window(&window);
+        }
+    }
 
     Ok(())
 }
@@ -446,15 +445,15 @@ pub async fn merge_paste_clipboard_items(ids: Vec<i64>, app: tauri::AppHandle) -
 pub async fn paste_text_direct(text: String, app: tauri::AppHandle) -> Result<(), String> {
     use crate::services::paste::paste_handler::paste_text_direct as do_paste;
 
+    tokio::task::spawn_blocking(move || do_paste(&text))
+        .await
+        .map_err(|e| format!("粘贴文本任务执行失败: {}", e))??;
+
     if !crate::get_window_state().is_pinned {
         if let Some(window) = crate::get_main_window(&app) {
             crate::hide_main_window(&window);
         }
     }
-
-    tokio::task::spawn_blocking(move || do_paste(&text))
-        .await
-        .map_err(|e| format!("粘贴文本任务执行失败: {}", e))??;
 
     Ok(())
 }
@@ -464,15 +463,15 @@ pub async fn paste_text_direct(text: String, app: tauri::AppHandle) -> Result<()
 pub async fn paste_image_file(file_path: String, app: tauri::AppHandle) -> Result<(), String> {
     use crate::services::paste::paste_handler::paste_image_file as do_paste;
 
+    tokio::task::spawn_blocking(move || do_paste(&file_path))
+        .await
+        .map_err(|e| format!("粘贴图片任务执行失败: {}", e))??;
+
     if !crate::get_window_state().is_pinned {
         if let Some(window) = crate::get_main_window(&app) {
             crate::hide_main_window(&window);
         }
     }
-
-    tokio::task::spawn_blocking(move || do_paste(&file_path))
-        .await
-        .map_err(|e| format!("粘贴图片任务执行失败: {}", e))??;
 
     Ok(())
 }
@@ -485,5 +484,39 @@ pub fn resolve_image_path(stored_path: String) -> Result<String, String> {
 fn notify_lan_change(reason: &'static str) {
     if let Some(app) = crate::services::clipboard::get_app_handle() {
         crate::services::sync_transfer::lan_notify_local_change(app, reason);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::services::system::hotkey::test_utils::{source_file, strip_line_comments};
+
+    fn command_body(name: &str) -> String {
+        let source = source_file("src/commands/clipboard.rs");
+        let start = source
+            .find(&format!("pub async fn {name}("))
+            .unwrap_or_else(|| panic!("缺少异步命令 {name}"));
+        let after = &source[start..];
+        let end = after
+            .find("\n#[tauri::command]")
+            .unwrap_or(after.len());
+        strip_line_comments(&after[..end]).to_string()
+    }
+
+    #[test]
+    fn paste_commands_hide_only_after_successful_task() {
+        for name in ["paste_content", "paste_text_direct", "paste_image_file"] {
+            let body = command_body(name);
+            let task_result = body
+                .find("??;")
+                .unwrap_or_else(|| panic!("{name} 必须传播 spawn_blocking 任务错误"));
+            let hide = body
+                .find("hide_main_window")
+                .unwrap_or_else(|| panic!("{name} 必须保留成功后的窗口收回"));
+            assert!(
+                task_result < hide,
+                "{name} 必须在粘贴任务成功返回后再收回窗口"
+            );
+        }
     }
 }
