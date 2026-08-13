@@ -50,7 +50,10 @@ pub struct ClipboardMonitorPauseGuard;
 
 impl Drop for ClipboardMonitorPauseGuard {
     fn drop(&mut self) {
-        MONITOR_PAUSE_COUNT.fetch_sub(1, Ordering::SeqCst);
+        let remaining = MONITOR_PAUSE_COUNT.fetch_sub(1, Ordering::SeqCst).saturating_sub(1);
+        if should_schedule_deferred_capture(remaining, is_monitor_running(), take_capture_pending()) {
+            schedule_capture_worker();
+        }
     }
 }
 
@@ -75,6 +78,22 @@ pub fn pause_clipboard_monitor_for(duration_ms: u64) -> ClipboardMonitorPauseGua
 pub fn is_clipboard_monitor_paused() -> bool {
     MONITOR_PAUSE_COUNT.load(Ordering::SeqCst) > 0
         || current_time_ms() < MONITOR_SUPPRESS_UNTIL_MS.load(Ordering::SeqCst)
+}
+
+/// 决定是否可以在 Drop 末尾启动一次延期 worker：
+/// 1) 仅剩一个活跃的暂停 guard (pause_count == 1)；
+/// 2) 监听器仍在运行；
+/// 3) 期间至少记录过一次待捕获事件。
+pub(crate) fn should_schedule_deferred_capture(
+    remaining_pause_guards: u64,
+    monitor_running: bool,
+    has_pending_capture: bool,
+) -> bool {
+    remaining_pause_guards == 1 && monitor_running && has_pending_capture
+}
+
+pub fn take_capture_pending() -> bool {
+    CAPTURE_PENDING.swap(false, Ordering::SeqCst)
 }
 
 fn hash_clipboard_content(content: &RsClipboardContent) -> String {
@@ -190,6 +209,8 @@ pub fn stop_clipboard_monitor() -> Result<(), String> {
         // 停止剪贴板来源监控
         #[cfg(target_os = "windows")]
         crate::services::system::stop_clipboard_source_monitor();
+
+        let _ = CAPTURE_PENDING.swap(false, Ordering::SeqCst);
 
         let mut state = MONITOR_STATE.lock();
         state.watcher_handle = None;
@@ -334,6 +355,11 @@ fn process_clipboard_change_once() {
 
 fn handle_clipboard_change() -> Result<(), String> {
     if is_clipboard_monitor_paused() {
+        // 暂停期内不能立即捕获(目标应用会回写剪贴板,会导致自粘贴重复),
+        // 但也不能静默 return 丢弃外部复制事件——标记待捕获,
+        // 让最后一个暂停 guard Drop 时按 should_schedule_deferred_capture 决定
+        // 是否启动延期 worker 重新拉取剪贴板。
+        CAPTURE_PENDING.store(true, Ordering::SeqCst);
         return Ok(());
     }
     // 检查应用过滤
@@ -417,6 +443,53 @@ mod tests {
             created_at: 1,
             updated_at: 1,
         }
+    }
+
+    #[test]
+    fn deferred_capture_starts_only_after_last_pause_guard() {
+        assert!(should_schedule_deferred_capture(1, true, true));
+        assert!(!should_schedule_deferred_capture(2, true, true));
+        assert!(!should_schedule_deferred_capture(1, false, true));
+        assert!(!should_schedule_deferred_capture(1, true, false));
+    }
+
+    // §10.3 源码护栏:暂停期间必须把待捕获事件记下,Drop 末尾必须按决策函数
+    // 触发延期 worker。否则用户后续复制会永久丢失,等价于把 “暂停时直接
+    // return” 重新引入。
+    #[test]
+    fn pause_handler_marks_pending_and_drop_dispatches_deferred_worker() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/clipboard/monitor.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 monitor.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let handle_start = stripped
+            .find("fn handle_clipboard_change")
+            .expect("handle_clipboard_change 必须存在");
+        let handle_body = &stripped[handle_start..];
+        assert!(
+            handle_body.contains("mark_capture_pending_during_pause()"),
+            "暂停期内必须记录待捕获标志,禁止直接 return 吞掉事件"
+        );
+
+        let drop_start = stripped
+            .find("impl Drop for ClipboardMonitorPauseGuard")
+            .expect("Drop 实现必须存在");
+        let drop_body = &stripped[drop_start..];
+        assert!(
+            drop_body.contains("should_schedule_deferred_capture("),
+            "Drop 末尾必须用决策函数判断是否启动延期 worker"
+        );
+        assert!(
+            drop_body.contains("schedule_capture_worker()"),
+            "Drop 末尾必须真正触发延期 worker"
+        );
     }
 }
 
