@@ -642,8 +642,12 @@ pub fn hide_snapped_window(window: &WebviewWindow) -> Result<(), String> {
     }
 
     crate::services::memory::schedule_cleanup_after_main_window_hide();
-    crate::input_monitor::disable_mouse_monitoring();
-    crate::input_monitor::disable_navigation_keys();
+    // 动画/refresh 期间并发 show 可能已把窗口写回 Visible 并重新打开热键。
+    // 关热键前再读一次 is_hidden,避免留下"窗还在、回车全死"的假死。
+    if super::state::get_window_state().is_hidden {
+        crate::input_monitor::disable_mouse_monitoring();
+        crate::input_monitor::disable_navigation_keys();
+    }
 
     Ok(())
 }
@@ -1321,6 +1325,27 @@ mod tests {
              当前 show={}, ignore=true={}",
             pos_show,
             pos_ignore_true
+        );
+    }
+
+    // hide 先记账 is_hidden=true,再异步动画,最后才关导航热键。
+    // 若动画期间并发 show 已把窗口写回 Visible 并重新 enable 热键,
+    // 无条件 disable 会留下"窗还在、回车全死"的假死。
+    // 关热键前必须再读一次 is_hidden。
+    #[test]
+    fn hide_rechecks_hidden_before_disabling_navigation_keys() {
+        let body = strip_line_comments(fn_body(snap_source(), "hide_snapped_window"));
+        let cleanup = body
+            .find("schedule_cleanup_after_main_window_hide()")
+            .expect("hide 末尾必须先调度清理");
+        let disable = body
+            .find("disable_navigation_keys()")
+            .expect("hide 必须关闭导航热键");
+        assert!(cleanup < disable, "清理必须早于关热键");
+        let after_cleanup = &body[cleanup..disable];
+        assert!(
+            after_cleanup.contains("get_window_state()") && after_cleanup.contains("is_hidden"),
+            "关热键前必须再读 is_hidden,避免并发 show 后把刚恢复的导航键关掉"
         );
     }
 }
