@@ -143,6 +143,31 @@ impl ScreenshotSessionManager {
         session_id: &str,
         current_visibility_revision: MainWindowVisibilityRevision,
     ) -> Result<CleanupPlan, SessionError> {
+        self.take_cleanup(session_id, current_visibility_revision)
+    }
+
+    pub fn finish(
+        &mut self,
+        session_id: &str,
+        current_visibility_revision: MainWindowVisibilityRevision,
+    ) -> Result<CleanupPlan, SessionError> {
+        let session = self.current.as_ref().ok_or(SessionError::NoActiveSession)?;
+        ensure_current_session(&session.session_id, session_id)?;
+        if session.phase != SessionPhase::Processing {
+            return Err(SessionError::InvalidTransition {
+                session_id: session.session_id.clone(),
+                from: session.phase,
+                to: SessionPhase::Selecting,
+            });
+        }
+        self.take_cleanup(session_id, current_visibility_revision)
+    }
+
+    fn take_cleanup(
+        &mut self,
+        session_id: &str,
+        current_visibility_revision: MainWindowVisibilityRevision,
+    ) -> Result<CleanupPlan, SessionError> {
         let session = self.current.as_ref().ok_or(SessionError::NoActiveSession)?;
         ensure_current_session(&session.session_id, session_id)?;
         let session = self.current.take().expect("active session checked");
@@ -283,6 +308,35 @@ mod tests {
             })
         );
         assert_eq!(manager.phase(), Some(SessionPhase::Selecting));
+    }
+
+    #[test]
+    fn finishing_processing_session_returns_cleanup_and_idle() {
+        let mut manager = ScreenshotSessionManager::default();
+        let monitor = MonitorRect::new(0, 0, 3840, 2160).unwrap();
+        let session_id = match manager.start(monitor, false) {
+            StartSessionResult::Started(session) => session.session_id().to_string(),
+            other => panic!("首次启动应创建会话，实际为 {other:?}"),
+        };
+
+        manager.begin_processing(&session_id).unwrap();
+        manager
+            .register_temp_file(&session_id, PathBuf::from("temporary/final.png"))
+            .unwrap();
+        manager
+            .mark_main_window_hidden(&session_id, MainWindowVisibilityRevision(12))
+            .unwrap();
+
+        let cleanup = manager
+            .finish(&session_id, MainWindowVisibilityRevision(12))
+            .unwrap();
+
+        assert_eq!(cleanup.session_id, session_id);
+        assert_eq!(cleanup.temp_files, vec![PathBuf::from("temporary/final.png")]);
+        assert!(cleanup.hide_overlay);
+        assert!(cleanup.restore_main_window);
+        assert_eq!(manager.phase(), None);
+        assert!(manager.current().is_none());
     }
 }
 
