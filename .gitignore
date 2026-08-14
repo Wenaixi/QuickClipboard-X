@@ -112,8 +112,8 @@ src-tauri/plugins/gpu-image-viewer/
 src-tauri/plugins/screenshot-suite/
 
 # === 项目本地临时目录(不参与版本控制) ===
-# 截图模块原型的本地副本
-/src/windows/screenshot
+# 截图模块正式页面，随项目版本控制
+
 # Konva 截图实验目录
 screenshot_Konva
 # 前端独立子项目(若有)
