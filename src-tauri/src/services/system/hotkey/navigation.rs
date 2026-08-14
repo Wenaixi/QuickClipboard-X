@@ -122,7 +122,6 @@ fn register_navigation_hotkeys_from_settings() -> Result<(), String> {
     let app = get_app()?;
     let configs = navigation_shortcut_configs();
     let mut registrations = Vec::new();
-    let mut has_failure = false;
 
     for config in configs {
         if config.shortcut.trim().is_empty() {
@@ -186,7 +185,6 @@ fn register_navigation_hotkeys_from_settings() -> Result<(), String> {
                 // F7(单键失败治理):仅记录该键失败状态,不整体置 REGISTERED=false——
                 // 避免一个键配错让全部导航键失效并清空其余成功注册;
                 // 失败键由下次 reload 重试,其余成功键保持可用。
-                has_failure = true;
             }
         }
     }
