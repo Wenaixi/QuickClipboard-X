@@ -1,4 +1,5 @@
 pub mod clipboard;
+pub mod screenshot;
 pub mod database;
 pub mod data_management;
 pub mod notification;
