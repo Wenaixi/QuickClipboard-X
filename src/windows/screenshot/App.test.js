@@ -1,6 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { normalizeBootstrap } from './screenshotModel.js';
+
+test('截图浮窗中英文语言包完整提供动作和状态文案', () => {
+  for (const locale of ['zh-CN', 'en-US']) {
+    const messages = JSON.parse(readFileSync(new URL(`../../shared/locales/${locale}.json`, import.meta.url)));
+    const screenshot = messages.screenshot;
+    assert.deepEqual(Object.keys(screenshot.actions).sort(), ['ai', 'copy', 'pin', 'save']);
+    for (const key of ['processing', 'selectionLabel', 'cancelLabel', 'cancelFailed', 'sessionNotReady', 'actionFailed', 'shortcutHint']) {
+      assert.equal(typeof screenshot[key], 'string', `${locale} 缺少 screenshot.${key}`);
+    }
+  }
+});
 
 test('normalizeBootstrap 使用显式显示器物理尺寸与逻辑尺寸', () => {
   const result = normalizeBootstrap({
