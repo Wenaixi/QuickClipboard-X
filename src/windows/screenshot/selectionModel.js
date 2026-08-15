@@ -35,6 +35,60 @@ export function normalizeSelection(start, end, bounds) {
   return { left, top, right, bottom, width: right - left, height: bottom - top };
 }
 
+export function isClickGesture(start, end, threshold = 4) {
+  assertFiniteNumber(start?.x, '起点 x');
+  assertFiniteNumber(start?.y, '起点 y');
+  assertFiniteNumber(end?.x, '终点 x');
+  assertFiniteNumber(end?.y, '终点 y');
+  assertFiniteNumber(threshold, '单击阈值');
+  if (threshold < 0) {
+    throw new RangeError('单击阈值不能为负数');
+  }
+  return Math.hypot(end.x - start.x, end.y - start.y) <= threshold;
+}
+
+export function selectionFromPhysical(selection, devicePixelRatio, bounds) {
+  if (!bounds || bounds.width <= 0 || bounds.height <= 0) {
+    throw new RangeError('边界尺寸必须为正数');
+  }
+  assertFiniteNumber(devicePixelRatio, 'devicePixelRatio');
+  if (devicePixelRatio <= 0) {
+    throw new RangeError('devicePixelRatio 必须为正数');
+  }
+  for (const key of ['left', 'top', 'right', 'bottom']) {
+    assertFiniteNumber(selection?.[key], `selection.${key}`);
+  }
+  return normalizeSelection(
+    { x: selection.left / devicePixelRatio, y: selection.top / devicePixelRatio },
+    { x: selection.right / devicePixelRatio, y: selection.bottom / devicePixelRatio },
+    bounds
+  );
+}
+
+export function isCurrentGesture(expectedId, currentId) {
+  return expectedId === currentId;
+}
+
+export function selectionForPointerGesture(start, end, bounds, windowSelections = []) {
+  if (isClickGesture(start, end)) {
+    const selectedWindow = windowSelections.find((selection) => (
+      selection
+      && start.x >= selection.left
+      && start.x < selection.right
+      && start.y >= selection.top
+      && start.y < selection.bottom
+    ));
+    if (selectedWindow) {
+      return normalizeSelection(
+        { x: selectedWindow.left, y: selectedWindow.top },
+        { x: selectedWindow.right, y: selectedWindow.bottom },
+        bounds
+      );
+    }
+  }
+  return normalizeSelection(start, end, bounds);
+}
+
 export function selectionToPhysical(selection, devicePixelRatio, physicalBounds) {
   if (!physicalBounds || physicalBounds.width <= 0 || physicalBounds.height <= 0) {
     throw new RangeError('边界尺寸必须为正数');

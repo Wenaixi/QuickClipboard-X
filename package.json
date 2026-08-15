@@ -9,12 +9,11 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:dev:no-watch": "tauri dev --no-watch",
-    "tauri:dev:community": "node scripts/community-build.js --dev",
     "tauri:build": "tauri build",
-    "tauri:build:community": "node scripts/community-build.js",
-    "check:community": "node scripts/community-check.js check",
-    "clippy:community": "node scripts/community-check.js clippy",
-    "test:rust": "node scripts/community-check.js test",
+    "check:rust": "cargo check --manifest-path src-tauri/Cargo.toml --no-default-features",
+    "clippy:rust": "cargo clippy --manifest-path src-tauri/Cargo.toml --no-default-features",
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml --lib --no-default-features",
+    "test:screenshot": "node --test src/windows/screenshot/*.test.js",
     "test:emoji-kb": "node --test src/windows/main/components/emoji/*.test.js"
   },
   "devDependencies": {

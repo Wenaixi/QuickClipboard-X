@@ -14,6 +14,8 @@ export function normalizeBootstrap(payload = {}, viewport = {}) {
     sessionId: typeof payload.sessionId === 'string' ? payload.sessionId : '',
     bounds: { width: logicalWidth, height: logicalHeight },
     physicalBounds: { width: physicalWidth, height: physicalHeight },
+    monitorLeft: Number.isFinite(monitor.left) ? monitor.left / dpr : 0,
+    monitorTop: Number.isFinite(monitor.top) ? monitor.top / dpr : 0,
     dpr,
     initialAction: typeof payload.initialAction === 'string' ? payload.initialAction : '',
     screenshotAiEnabled: payload.screenshotAiEnabled !== false,

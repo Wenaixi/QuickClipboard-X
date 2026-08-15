@@ -256,24 +256,18 @@ npm run tauri dev
 # 릴리스 빌드
 npm run tauri:build
 
-# 커뮤니티 에디션 개발 모드 (비공개 플러그인 제외)
-npm run tauri:dev:community
-
-# 커뮤니티 에디션 빌드 (비공개 플러그인 제외)
-npm run tauri:build:community
+# Rust 검사 및 테스트
+npm run check:rust
+npm run clippy:rust
+npm run test:rust
 ```
 
-### 비공개 플러그인 정보
+### 배포
 
-본 프로젝트의 **공식 릴리스 버전**에는 다음 비공개 플러그인이 포함되어 있습니다 (오픈소스 범위 제외):
-
-- `gpu-image-viewer` (GPU 가속 이미지 뷰어): 이미지 고정 및 미리보기 성능 향상, 여러 개의 고정 창이 열려 있을 때 메모리 사용량을 크게 절감.
-- `screenshot-suite` (스크린샷 제품군): 자유형 스크린샷, 스크린샷 후 고정, 스크린샷 OCR, 스크롤 스크린샷 등 관련 기능 포함.
+이 프로젝트는 비공개 플러그인 저장소에 의존하지 않는 단일 표준 빌드 및 릴리스 흐름을 유지합니다. 스크린샷, 고정, OCR, 이미지 미리보기는 모두 이 저장소의 공개 코드로 구현됩니다.
 
 ---
 
 ## 라이선스
 
 본 프로젝트는 [Apache License 2.0](LICENSE) 하에 공개되었습니다.
-
-> 비공개 플러그인 `gpu-image-viewer`, `screenshot-suite`는 오픈소스 범위에 포함되지 않으며, 공식 릴리스 버전에만 포함됩니다.
