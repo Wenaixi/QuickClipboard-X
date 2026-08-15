@@ -6,7 +6,7 @@ use windows::Foundation::TypedEventHandler;
 use windows::Graphics::Capture::{Direct3D11CaptureFrame, Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession};
 use windows::Graphics::DirectX::{Direct3D11::IDirect3DDevice, DirectXPixelFormat};
 use windows::Graphics::SizeInt32;
-use windows::Win32::Foundation::POINT;
+use windows::Win32::Foundation::{POINT, RPC_E_CHANGED_MODE};
 use windows::Win32::Graphics::Gdi::{HMONITOR, MonitorFromPoint, MONITOR_DEFAULTTONEAREST};
 use windows::Win32::Graphics::Direct3D::{
     D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_10_1,
@@ -246,11 +246,15 @@ pub fn get_monitor_handle(x: i32, y: i32) -> HMONITOR {
     unsafe { MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST) }
 }
 
+fn is_acceptable_com_initialization_result(result: windows::core::HRESULT) -> bool {
+    result.is_ok() || result == RPC_E_CHANGED_MODE
+}
+
 pub fn ensure_com_initialized() -> Result<(), CaptureError> {
     unsafe {
         let result = CoInitializeEx(None, COINIT_MULTITHREADED);
-        if result.is_ok() || result.0 == 0x80010106u32 as i32 {
-            // S_OK or RPC_E_CHANGED_MODE (already initialized) are both fine
+        if is_acceptable_com_initialization_result(result) {
+            // 当前线程已采用其他 COM 公寓模型时可继续使用 WGC 捕获。
             Ok(())
         } else {
             Err(CaptureError::Win32(format!(
@@ -288,6 +292,15 @@ pub fn capture_monitor(monitor: HMONITOR, selection: CaptureRect) -> Result<Capt
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn com_initialization_accepts_success_and_changed_apartment_mode_only() {
+        assert!(is_acceptable_com_initialization_result(windows::core::HRESULT(0)));
+        assert!(is_acceptable_com_initialization_result(
+            windows::Win32::Foundation::RPC_E_CHANGED_MODE,
+        ));
+        assert!(!is_acceptable_com_initialization_result(windows::core::HRESULT(0x80004005u32 as i32)));
+    }
 
     #[test]
     fn capture_rect_right_and_bottom_are_saturating() {
