@@ -16,6 +16,8 @@ const JPEG_MIN_QUALITY: u8 = 45;
 const JPEG_QUALITY_STEP: u8 = 15;
 const MAX_RECOGNITION_ATTEMPTS: usize = 2;
 const DEFAULT_PROMPT: &str = "请完整转写图片中的文字，保留段落、换行和原有顺序；不要翻译、总结或补充图片中没有的信息；无法辨认的位置使用 [无法辨认] 标记。只返回 JSON，格式为 {\"text\":\"完整识别文本\",\"blocks\":[{\"type\":\"paragraph\",\"text\":\"段落文本\"}]}。";
+const CONFIGURATION_TEST_PROMPT: &str = "请确认你可以读取这张测试图片。只返回 JSON，格式为 {\"text\":\"ok\",\"blocks\":[]}。";
+const CONFIGURATION_TEST_IMAGE_URL: &str = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL9VwAAAABJRU5ErkJggg==";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AiVisionError {
@@ -145,6 +147,45 @@ pub fn validate_configuration(
     }
     normalized_base_url(base_url)?;
     ensure_vision_model(model)
+}
+
+pub async fn test_configuration(
+    api_key: &str,
+    base_url: &str,
+    model: &str,
+) -> Result<(), AiVisionError> {
+    validate_configuration(api_key, base_url, model)?;
+    let base_url = normalized_base_url(base_url)?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|_| AiVisionError::Request(String::new()))?;
+
+    test_configuration_at_endpoint(
+        &client,
+        &format!("{base_url}/chat/completions"),
+        api_key,
+        model,
+    )
+    .await
+}
+
+async fn test_configuration_at_endpoint(
+    client: &reqwest::Client,
+    endpoint: &str,
+    api_key: &str,
+    model: &str,
+) -> Result<(), AiVisionError> {
+    recognize_encoded_image(
+        client,
+        endpoint,
+        api_key,
+        model,
+        CONFIGURATION_TEST_PROMPT,
+        CONFIGURATION_TEST_IMAGE_URL,
+    )
+    .await
+    .map(|_| ())
 }
 
 fn classify_http_status(status: StatusCode) -> AiVisionError {
@@ -368,6 +409,31 @@ mod tests {
             validate_configuration("test-key", "https://api.example.com", "Qwen/Qwen2-7B-Instruct"),
             Err(AiVisionError::UnsupportedVisionModel)
         );
+    }
+
+    #[tokio::test]
+    async fn configuration_test_uses_a_fixed_tiny_image_and_does_not_read_user_files() {
+        let server = MockServer::start().await;
+        let guard = Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "choices": [{ "message": { "content": "{\"text\":\"ok\",\"blocks\":[]}" } }]
+            })))
+            .mount_as_scoped(&server)
+            .await;
+
+        test_configuration_at_endpoint(
+            &reqwest::Client::new(),
+            &format!("{}/v1/chat/completions", server.uri()),
+            "test-key",
+            "vision-model",
+        )
+        .await
+        .unwrap();
+
+        let requests = guard.received_requests().await;
+        let body: serde_json::Value = requests[0].body_json().unwrap();
+        assert_eq!(body["messages"][0]["content"][1]["image_url"]["url"], CONFIGURATION_TEST_IMAGE_URL);
     }
 
     #[test]

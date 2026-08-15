@@ -279,6 +279,8 @@ pub fn run() {
                 commands::dm_list_backups,
                 commands::screenshot::set_mouse_position,
                 commands::screenshot::get_mouse_position,
+                commands::screenshot::get_screenshot_ai_config_status,
+                commands::screenshot::test_screenshot_ai_config,
                 #[cfg(target_os = "windows")]
                 commands::screenshot::start_screenshot,
                 #[cfg(target_os = "windows")]
