@@ -119,6 +119,21 @@ mod source_guards {
     }
 
     #[test]
+    fn cancelled_ai_session_cannot_write_recognized_text_to_clipboard() {
+        let source = source_file("windows/screenshot_window/mod.rs");
+        let ai_start = source.find("\"ai\" => {").expect("缺少 AI 截图动作");
+        let ai_body = &source[ai_start..];
+        let ai_body = &ai_body[..ai_body.find("        other =>").expect("缺少动作兜底")];
+        let result_guard = ai_body
+            .rfind("if !is_current_processing_session(session_id) {")
+            .expect("AI 动作缺少结果返回后的取消守卫");
+        let copy_text = ai_body
+            .find("copy_screenshot_text(&result.text)")
+            .expect("AI 动作缺少文本复制");
+        assert!(result_guard < copy_text, "取消检查必须先于 AI 文本写入剪贴板");
+    }
+
+    #[test]
     fn screenshot_capability_has_no_private_or_global_filesystem_scope() {
         let source = source_file("../capabilities/screenshot.json");
         assert!(!source.contains("screenshot-suite:default"));
@@ -449,6 +464,9 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
             if !settings.screenshot_ai_enabled {
                 Err("截图 AI 识别已关闭".to_string())
             } else {
+                if !is_current_processing_session(session_id) {
+                    return Err("截图会话已取消".to_string());
+                }
                 let result = recognize_image(
                     &stored.absolute_path,
                     &settings.ai_api_key,
@@ -458,6 +476,9 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
                 )
                 .await
                 .map_err(|e| e.to_string());
+                if !is_current_processing_session(session_id) {
+                    return Err("截图会话已取消".to_string());
+                }
                 match result {
                     Ok(result) if !result.text.trim().is_empty() => {
                         match copy_screenshot_text(&result.text) {

@@ -166,11 +166,7 @@ fn encode_jpeg(image: &image::DynamicImage, quality: u8) -> Result<Vec<u8>, AiVi
     Ok(bytes)
 }
 
-fn encode_image(path: &Path) -> Result<(String, String), AiVisionError> {
-    let image = ImageReader::open(path)
-        .map_err(|error| AiVisionError::InvalidImage(error.to_string()))?
-        .decode()
-        .map_err(|error| AiVisionError::InvalidImage(error.to_string()))?;
+fn encode_dynamic_image(image: image::DynamicImage) -> Result<(String, String), AiVisionError> {
     let image = if image.width() > MAX_IMAGE_DIMENSION || image.height() > MAX_IMAGE_DIMENSION {
         image.thumbnail(MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION)
     } else {
@@ -194,6 +190,14 @@ fn encode_image(path: &Path) -> Result<(String, String), AiVisionError> {
     Err(AiVisionError::InvalidImage("图片超过 8 MB 限制".to_string()))
 }
 
+fn encode_image(path: &Path) -> Result<(String, String), AiVisionError> {
+    let image = ImageReader::open(path)
+        .map_err(|error| AiVisionError::InvalidImage(error.to_string()))?
+        .decode()
+        .map_err(|error| AiVisionError::InvalidImage(error.to_string()))?;
+    encode_dynamic_image(image)
+}
+
 fn parse_result(content: &str) -> Result<AiVisionResult, AiVisionError> {
     if let Ok(result) = serde_json::from_str::<AiVisionResult>(content) {
         return Ok(result);
@@ -205,29 +209,14 @@ fn parse_result(content: &str) -> Result<AiVisionResult, AiVisionError> {
         .map_err(|error| AiVisionError::InvalidResponse(error.to_string()))
 }
 
-pub async fn recognize_image(
-    path: &Path,
+async fn recognize_encoded_image(
+    client: &reqwest::Client,
+    endpoint: &str,
     api_key: &str,
-    base_url: &str,
     model: &str,
-    prompt: Option<&str>,
+    prompt: &str,
+    image_url: &str,
 ) -> Result<AiVisionResult, AiVisionError> {
-    if api_key.trim().is_empty() || model.trim().is_empty() {
-        return Err(AiVisionError::NotConfigured);
-    }
-    ensure_vision_model(model)?;
-    let base_url = normalized_base_url(base_url)?;
-    let image_path = path.to_path_buf();
-    let (mime, encoded) = tokio::task::spawn_blocking(move || encode_image(&image_path))
-        .await
-        .map_err(|_| AiVisionError::Request(String::new()))??;
-    let image_url = format!("data:{mime};base64,{encoded}");
-    let prompt = prompt.filter(|value| !value.trim().is_empty()).unwrap_or(DEFAULT_PROMPT);
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .map_err(|_| AiVisionError::Request(String::new()))?;
-
     for attempt in 0..MAX_RECOGNITION_ATTEMPTS {
         let retry_hint = if attempt == 0 {
             ""
@@ -251,7 +240,7 @@ pub async fn recognize_image(
         };
 
         let response = client
-            .post(format!("{base_url}/chat/completions"))
+            .post(endpoint)
             .bearer_auth(api_key)
             .json(&request)
             .send()
@@ -289,9 +278,49 @@ pub async fn recognize_image(
     Err(AiVisionError::InvalidResponse("响应无法解析".to_string()))
 }
 
+pub async fn recognize_image(
+    path: &Path,
+    api_key: &str,
+    base_url: &str,
+    model: &str,
+    prompt: Option<&str>,
+) -> Result<AiVisionResult, AiVisionError> {
+    if api_key.trim().is_empty() || model.trim().is_empty() {
+        return Err(AiVisionError::NotConfigured);
+    }
+    ensure_vision_model(model)?;
+
+    let base_url = normalized_base_url(base_url)?;
+    let image_path = path.to_path_buf();
+    let (mime, encoded) = tokio::task::spawn_blocking(move || encode_image(&image_path))
+        .await
+        .map_err(|_| AiVisionError::Request(String::new()))??;
+    let image_url = format!("data:{mime};base64,{encoded}");
+    let prompt = prompt.filter(|value| !value.trim().is_empty()).unwrap_or(DEFAULT_PROMPT);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|_| AiVisionError::Request(String::new()))?;
+
+    recognize_encoded_image(
+        &client,
+        &format!("{base_url}/chat/completions"),
+        api_key,
+        model,
+        prompt,
+        &image_url,
+    )
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+    use wiremock::{
+        matchers::{bearer_token, method, path},
+        Mock, MockServer, ResponseTemplate,
+    };
 
     #[test]
     fn base_url_is_normalized_to_openai_compatible_v1_endpoint() {
@@ -315,11 +344,181 @@ mod tests {
     }
 
     #[test]
+    fn small_images_use_png_data_before_jpeg_fallback() {
+        let image = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            1,
+            1,
+            image::Rgba([1, 2, 3, 255]),
+        ));
+        let (mime, encoded) = encode_dynamic_image(image).unwrap();
+        let bytes = BASE64.decode(encoded).unwrap();
+
+        assert_eq!(mime, "image/png");
+        assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n");
+    }
+
+    #[test]
+    fn oversized_png_falls_back_to_jpeg_before_rejecting_image() {
+        let width = 2_048;
+        let height = 2_048;
+        let mut state = 0x1234_5678_u32;
+        let pixels = (0..(width * height * 4))
+            .map(|_| {
+                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                (state >> 24) as u8
+            })
+            .collect();
+        let image = image::DynamicImage::ImageRgba8(
+            image::RgbaImage::from_raw(width, height, pixels).unwrap(),
+        );
+        let (mime, encoded) = encode_dynamic_image(image).unwrap();
+        let bytes = BASE64.decode(encoded).unwrap();
+
+        assert_eq!(mime, "image/jpeg");
+        assert_eq!(&bytes[..2], b"\xff\xd8");
+    }
+
+    #[test]
     fn http_statuses_are_classified_without_response_body() {
         assert_eq!(classify_http_status(StatusCode::UNAUTHORIZED), AiVisionError::Unauthorized);
         assert_eq!(classify_http_status(StatusCode::TOO_MANY_REQUESTS), AiVisionError::RateLimited);
         assert_eq!(classify_http_status(StatusCode::BAD_GATEWAY), AiVisionError::Server(502));
         assert_eq!(classify_http_status(StatusCode::BAD_REQUEST), AiVisionError::HttpStatus(400));
+    }
+
+    #[tokio::test]
+    async fn ai_request_sends_bearer_model_prompt_and_png_data_url_to_local_mock() {
+        let server = MockServer::start().await;
+        let guard = Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .and(bearer_token("test-key"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "choices": [{
+                    "message": {
+                        "content": "{\"text\":\"识别结果\",\"blocks\":[]}"
+                    }
+                }]
+            })))
+            .mount_as_scoped(&server)
+            .await;
+        let client = reqwest::Client::new();
+
+        let result = recognize_encoded_image(
+            &client,
+            &format!("{}/v1/chat/completions", server.uri()),
+            "test-key",
+            "vision-model",
+            "请转写",
+            "data:image/png;base64,AAAA",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.text, "识别结果");
+        let requests = guard.received_requests().await;
+        assert_eq!(requests.len(), 1);
+        let body: serde_json::Value = requests[0].body_json().unwrap();
+        assert_eq!(body["model"], "vision-model");
+        assert_eq!(body["messages"][0]["content"][0]["text"], "请转写");
+        assert_eq!(body["messages"][0]["content"][1]["image_url"]["url"], "data:image/png;base64,AAAA");
+    }
+
+    #[tokio::test]
+    async fn ai_request_retries_once_with_format_correction_after_invalid_json() {
+        let server = MockServer::start().await;
+        let first = Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "choices": [{ "message": { "content": "不是 JSON" } }]
+            })))
+            .up_to_n_times(1)
+            .mount_as_scoped(&server)
+            .await;
+        let second = Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "choices": [{
+                    "message": { "content": "{\"text\":\"重试成功\",\"blocks\":[]}" }
+                }]
+            })))
+            .mount_as_scoped(&server)
+            .await;
+
+        let result = recognize_encoded_image(
+            &reqwest::Client::new(),
+            &format!("{}/v1/chat/completions", server.uri()),
+            "test-key",
+            "vision-model",
+            "请转写",
+            "data:image/png;base64,AAAA",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.text, "重试成功");
+        assert_eq!(first.received_requests().await.len(), 1);
+        let retried_requests = second.received_requests().await;
+        assert_eq!(retried_requests.len(), 1);
+        let body: serde_json::Value = retried_requests[0].body_json().unwrap();
+        assert_eq!(body["messages"][0]["content"][2]["type"], "text");
+        assert!(body["messages"][0]["content"][2]["text"]
+            .as_str()
+            .unwrap()
+            .contains("不是合法 JSON"));
+    }
+
+    #[tokio::test]
+    async fn ai_request_maps_local_auth_rate_limit_and_server_failures() {
+        for (status, expected) in [
+            (401, AiVisionError::Unauthorized),
+            (429, AiVisionError::RateLimited),
+            (502, AiVisionError::Server(502)),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/v1/chat/completions"))
+                .respond_with(ResponseTemplate::new(status))
+                .mount(&server)
+                .await;
+            let error = recognize_encoded_image(
+                &reqwest::Client::new(),
+                &format!("{}/v1/chat/completions", server.uri()),
+                "test-key",
+                "vision-model",
+                "请转写",
+                "data:image/png;base64,AAAA",
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(error, expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn ai_request_maps_local_delayed_response_to_timeout() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_millis(50)))
+            .mount(&server)
+            .await;
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_millis(1))
+            .build()
+            .unwrap();
+
+        let error = recognize_encoded_image(
+            &client,
+            &format!("{}/v1/chat/completions", server.uri()),
+            "test-key",
+            "vision-model",
+            "请转写",
+            "data:image/png;base64,AAAA",
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error, AiVisionError::Timeout);
     }
 
     #[test]
