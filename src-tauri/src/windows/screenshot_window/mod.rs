@@ -4,7 +4,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 use crate::services::screenshot::capture::{capture_monitor, ensure_com_initialized, get_monitor_handle, CaptureRect};
-use crate::services::screenshot::{choose_and_save_screenshot, copy_screenshot, copy_screenshot_text, emit_screenshot_history_update, encode_and_store_png, prepare_pin_path, recognize_image, MainWindowVisibilityRevision, MonitorRect, SessionPhase, ScreenshotSessionManager, StartSessionResult};
+use crate::services::screenshot::{choose_screenshot_save_destination, copy_screenshot, copy_screenshot_text, emit_screenshot_history_update, encode_and_store_png, prepare_pin_path, recognize_image, save_screenshot, MainWindowVisibilityRevision, MonitorRect, SessionPhase, ScreenshotSessionManager, StartSessionResult};
 use crate::services::settings::get_settings;
 use crate::windows::main_window::{get_main_window, hide_main_window, is_main_window_visible, show_main_window};
 
@@ -131,6 +131,22 @@ mod source_guards {
             .find("copy_screenshot_text(&result.text)")
             .expect("AI 动作缺少文本复制");
         assert!(result_guard < copy_text, "取消检查必须先于 AI 文本写入剪贴板");
+    }
+
+    #[test]
+    fn save_and_pin_actions_keep_dialogs_on_ui_path_and_file_work_off_runtime() {
+        let source = source_file("windows/screenshot_window/mod.rs");
+        let save_start = source.find("\"save\" => {").expect("缺少保存截图动作");
+        let pin_start = source.find("\"pin\" => {").expect("缺少贴图截图动作");
+        let ai_start = source.find("\"ai\" => {").expect("缺少 AI 截图动作");
+        let save_body = &source[save_start..pin_start];
+        let pin_body = &source[pin_start..ai_start];
+
+        assert!(save_body.contains("choose_screenshot_save_destination(&stored, app)"));
+        assert!(save_body.contains("spawn_blocking(move || save_screenshot(&stored, &destination))"));
+        assert!(save_body.rfind("if !is_current_processing_session(session_id) {").is_some());
+        assert!(pin_body.contains("spawn_blocking(move || prepare_pin_path(&stored))"));
+        assert!(pin_body.rfind("if !is_current_processing_session(session_id) {").is_some());
     }
 
     #[test]
@@ -438,9 +454,20 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
                 finish_failed_screenshot(app, session_id);
                 return Err("截图会话已取消".to_string());
             }
-            match choose_and_save_screenshot(&stored, app) {
-                Ok(_) => Ok(()),
-                Err(error) => Err(error.to_string()),
+            let destination = match choose_screenshot_save_destination(&stored, app) {
+                Ok(Some(destination)) => destination,
+                Ok(None) => return Ok(()),
+                Err(error) => return Err(error.to_string()),
+            };
+            if !is_current_processing_session(session_id) {
+                finish_failed_screenshot(app, session_id);
+                return Err("截图会话已取消".to_string());
+            }
+            let stored = stored.clone();
+            match tokio::task::spawn_blocking(move || save_screenshot(&stored, &destination)).await {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(error)) => Err(error.to_string()),
+                Err(error) => Err(format!("保存截图线程失败: {error}")),
             }
         }
         "pin" => {
@@ -448,16 +475,23 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
                 finish_failed_screenshot(app, session_id);
                 return Err("截图会话已取消".to_string());
             }
-            match prepare_pin_path(&stored) {
-                Ok(pin_path) => crate::windows::pin_image_window::pin_image_from_file(
-                    app.clone(),
-                    pin_path.to_string_lossy().to_string(),
-                    None, None, None, None, None, None, None, None, None, None, None,
-                )
-                .await
-                .map_err(|e| format!("贴图失败: {e}")),
-                Err(error) => Err(error.to_string()),
+            let stored = stored.clone();
+            let pin_path = match tokio::task::spawn_blocking(move || prepare_pin_path(&stored)).await {
+                Ok(Ok(pin_path)) => pin_path,
+                Ok(Err(error)) => return Err(error.to_string()),
+                Err(error) => return Err(format!("贴图文件准备线程失败: {error}")),
+            };
+            if !is_current_processing_session(session_id) {
+                finish_failed_screenshot(app, session_id);
+                return Err("截图会话已取消".to_string());
             }
+            crate::windows::pin_image_window::pin_image_from_file(
+                app.clone(),
+                pin_path.to_string_lossy().to_string(),
+                None, None, None, None, None, None, None, None, None, None, None,
+            )
+            .await
+            .map_err(|e| format!("贴图失败: {e}"))
         },
         "ai" => {
             let settings = get_settings();
