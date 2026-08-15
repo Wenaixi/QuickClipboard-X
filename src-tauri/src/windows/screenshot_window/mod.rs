@@ -136,6 +136,18 @@ fn validate_screenshot_action(action: &str) -> Option<String> {
     }
 }
 
+fn validate_ai_screenshot_action(
+    settings: &crate::services::settings::AppSettings,
+) -> Result<(), String> {
+    if !settings.screenshot_ai_enabled {
+        return Err("截图 AI 识别已关闭".to_string());
+    }
+    if !screenshot_ai_is_configured(settings) {
+        return Err("截图 AI 识别尚未完成配置".to_string());
+    }
+    Ok(())
+}
+
 fn validate_initial_screenshot_action(
     initial_action: Option<&str>,
     settings: &crate::services::settings::AppSettings,
@@ -147,18 +159,15 @@ fn validate_initial_screenshot_action(
     if let Some(error) = validate_screenshot_action(action) {
         return Err(error);
     }
-    if action == "ai" && !settings.screenshot_ai_enabled {
-        return Err("截图 AI 识别已关闭".to_string());
-    }
-    if action == "ai" && !screenshot_ai_is_configured(settings) {
-        return Err("截图 AI 识别尚未完成配置".to_string());
+    if action == "ai" {
+        validate_ai_screenshot_action(settings)?;
     }
     Ok(())
 }
 
 #[cfg(test)]
 mod source_guards {
-    use super::validate_initial_screenshot_action;
+    use super::{validate_ai_screenshot_action, validate_initial_screenshot_action};
 
     fn source_file(relative: &str) -> String {
         std::fs::read_to_string(format!("{}/src/{relative}", env!("CARGO_MANIFEST_DIR")))
@@ -185,6 +194,14 @@ mod source_guards {
 
         settings.screenshot_ai_enabled = true;
         assert!(validate_initial_screenshot_action(Some("ai"), &settings).is_ok());
+
+        settings.screenshot_ai_enabled = false;
+        assert_eq!(
+            validate_ai_screenshot_action(&settings),
+            Err("截图 AI 识别已关闭".to_string()),
+        );
+        settings.screenshot_ai_enabled = true;
+        assert!(validate_ai_screenshot_action(&settings).is_ok());
     }
 
     #[test]
@@ -218,8 +235,8 @@ mod source_guards {
         let ai_body = &source[ai_start..];
         let ai_body = &ai_body[..ai_body.find("        other =>").expect("缺少动作兜底")];
         let config_check = ai_body
-            .find("if !screenshot_ai_is_configured(&settings)")
-            .expect("AI 动作缺少配置校验");
+            .find("validate_ai_screenshot_action(&settings)")
+            .expect("AI 动作缺少可用性校验");
         let confirmation = ai_body
             .find("confirm_screenshot_ai_cloud_access(app)?")
             .expect("AI 动作缺少云端发送确认");
@@ -593,8 +610,8 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
         },
         "ai" => {
             let settings = get_settings();
-            if !screenshot_ai_is_configured(&settings) {
-                Err("截图 AI 识别尚未完成配置".to_string())
+            if let Err(error) = validate_ai_screenshot_action(&settings) {
+                Err(error)
             } else if !confirm_screenshot_ai_cloud_access(app)? {
                 Err("已取消云端 AI 识别".to_string())
             } else {
