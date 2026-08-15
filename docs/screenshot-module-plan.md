@@ -2,7 +2,7 @@
 
 ## 1. 目标
 
-在开发主分支 `mine` 自研 Windows 截图模块，替代上游已删除的私有 `screenshot-suite`。第一期仅支持 Windows，提供单显示器矩形选区及四种动作：复制、另存为、贴图、AI 视觉识别。
+在开发主分支 `mine` 自研 Windows 截图模块。第一期仅支持 Windows，提供单显示器矩形选区及四种动作：复制、另存为、贴图、AI 视觉识别。
 
 截图本地交互与屏幕捕获优先保证流畅。AI 只在用户明确选择“AI 识别”后异步调用，绝不参与鼠标拖拽、选区绘制或截图首帧链路。
 
@@ -25,7 +25,7 @@
 - 滚动截图、窗口或控件识别、录屏。
 - 箭头、画笔、文字、马赛克等标注编辑。
 - 将本地 `qcocr` 作为截图 AI 识别的回退。
-- 恢复 `screenshot-suite`、`gpu-image-viewer` 或私有依赖。
+- 引入任何私有截图依赖。
 
 单显示器边界用于优先保证混合 DPI 和多显示器负坐标下的正确性。跨屏选区应在本期实机验证和 DPI 自动化通过后独立设计。
 
@@ -94,7 +94,7 @@ Windows 使用 `Windows.Graphics.Capture` 与 D3D11：
 - 有效选区出现后显示轻量工具栏：复制、另存为、贴图、AI 识别；默认复制，Enter 确认。
 - 提交时将 CSS 像素乘以 `devicePixelRatio`，转换为目标显示器内的物理像素。
 
-新增最小 `screenshot` capability，只授予事件、窗口和保存对话框所需权限；不恢复旧的全盘 `fs:scope` 或 `screenshot-suite:default` 权限。
+新增最小 `screenshot` capability，只授予事件、窗口和保存对话框所需权限；不授予全盘 `fs:scope`。
 
 ## 6. 图片交付
 

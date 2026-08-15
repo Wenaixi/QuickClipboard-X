@@ -256,24 +256,18 @@ npm run tauri dev
 # Build release
 npm run tauri:build
 
-# Community edition dev mode (without private plugins)
-npm run tauri:dev:community
-
-# Community edition build (without private plugins)
-npm run tauri:build:community
+# Rust checks and tests
+npm run check:rust
+npm run clippy:rust
+npm run test:rust
 ```
 
-### About Private Plugins
+### Distribution
 
-The **official release** of this project includes the following private plugins (not included in the open-source scope):
-
-- `gpu-image-viewer` (GPU-accelerated image viewer): Enhances pin-to-screen and image preview performance, significantly reducing memory usage when multiple pinned image windows are open.
-- `screenshot-suite` (Screenshot suite): Includes free-form screenshot, screenshot-to-pin, screenshot OCR, scrolling screenshot, and related capabilities.
+The project maintains one standard build and release flow with no private plugin repositories. Screenshot capture, pinning, OCR, and image preview are implemented by the public code in this repository.
 
 ---
 
 ## License
 
 This project is licensed under the [Apache License 2.0](LICENSE).
-
-> Private plugins `gpu-image-viewer` and `screenshot-suite` are not included in the open-source scope and are only available in the official release.

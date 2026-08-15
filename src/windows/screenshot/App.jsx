@@ -6,7 +6,11 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { normalizeBootstrap } from './screenshotModel.js';
 import {
   createRafWriter,
+  isClickGesture,
+  isCurrentGesture,
   normalizeSelection,
+  selectionForPointerGesture,
+  selectionFromPhysical,
   selectionToPhysical,
 } from './selectionModel.js';
 
@@ -14,6 +18,7 @@ const CONFIGURE_EVENT = 'screenshot:configure';
 const VIEWPORT_READY_COMMAND = 'screenshot_window_ready';
 const COMPLETE_COMMAND = 'complete_screenshot';
 const CANCEL_COMMAND = 'cancel_screenshot';
+const FIND_WINDOW_COMMAND = 'find_screenshot_window_at_point';
 
 const ACTIONS = [
   { id: 'copy', shortcut: 'Enter' },
@@ -68,6 +73,7 @@ function App() {
   const draftRef = useRef(null);
   const selectionRef = useRef(null);
   const pointerIdRef = useRef(null);
+  const gestureIdRef = useRef(0);
   const [bootstrap, setBootstrap] = useState(() => normalizeBootstrap(globalThis.__QC_SCREENSHOT_BOOT__ || {}, {
     width: globalThis.innerWidth,
     height: globalThis.innerHeight,
@@ -113,6 +119,7 @@ function App() {
       });
       setBootstrap(nextBootstrap);
       initialActionRef.current = nextBootstrap.initialAction;
+      gestureIdRef.current += 1;
       draftRef.current = null;
       selectionRef.current = null;
       setSelection(null);
@@ -145,6 +152,7 @@ function App() {
 
   const cancelScreenshot = async () => {
     const sessionId = bootstrap.sessionId;
+    gestureIdRef.current += 1;
     draftRef.current = null;
     selectionRef.current = null;
     rafWriterRef.current?.cancel();
@@ -185,6 +193,7 @@ function App() {
     const root = rootRef.current;
     if (!root) return;
     const start = pointFromPointerEvent(event, root);
+    gestureIdRef.current += 1;
     draftRef.current = { start, end: start };
     pointerIdRef.current = event.pointerId;
     root.setPointerCapture?.(event.pointerId);
@@ -202,15 +211,37 @@ function App() {
     rafWriterRef.current?.schedule(normalizeSelection(draft.start, draft.end, bootstrap.bounds));
   };
 
-  const handlePointerUp = (event) => {
+  const handlePointerUp = async (event) => {
     const draft = draftRef.current;
     const root = rootRef.current;
     if (!draft || !root || event.pointerId !== pointerIdRef.current) return;
     event.preventDefault();
-    const finalSelection = normalizeSelection(draft.start, pointFromPointerEvent(event, root), bootstrap.bounds);
+    const end = pointFromPointerEvent(event, root);
+    const clicked = isClickGesture(draft.start, end);
+    const gestureId = gestureIdRef.current;
     draftRef.current = null;
     pointerIdRef.current = null;
     rafWriterRef.current?.cancel();
+    root.releasePointerCapture?.(event.pointerId);
+
+    let finalSelection = selectionForPointerGesture(draft.start, end, bootstrap.bounds);
+    if (clicked && bootstrap.sessionId) {
+      try {
+        const physicalSelection = await invoke(FIND_WINDOW_COMMAND, {
+          sessionId: bootstrap.sessionId,
+          x: Math.round((bootstrap.monitorLeft + draft.start.x) * bootstrap.dpr),
+          y: Math.round((bootstrap.monitorTop + draft.start.y) * bootstrap.dpr),
+        });
+        if (!isCurrentGesture(gestureId, gestureIdRef.current)) return;
+        if (physicalSelection) {
+          finalSelection = selectionFromPhysical(physicalSelection, bootstrap.dpr, bootstrap.bounds);
+        }
+      } catch {
+        // 未命中可截图窗口时保留 1×1 的单击选区，用户仍可继续拖动选择。
+      }
+    }
+
+    if (!isCurrentGesture(gestureId, gestureIdRef.current)) return;
     applySelectionStyle(root, finalSelection);
     selectionRef.current = finalSelection;
     setSelection(finalSelection);
@@ -220,7 +251,6 @@ function App() {
       initialActionRef.current = '';
       void completeScreenshot(action);
     }
-    root.releasePointerCapture?.(event.pointerId);
   };
 
   useEffect(() => {

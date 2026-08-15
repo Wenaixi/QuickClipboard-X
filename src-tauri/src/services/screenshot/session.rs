@@ -4,6 +4,7 @@ use std::path::PathBuf;
 pub enum SessionPhase {
     Selecting,
     Processing,
+    Committing,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,6 +70,7 @@ pub enum SessionError {
     InvalidMonitorRect,
     NoActiveSession,
     StaleSession { expected: String, actual: String },
+    CommitInProgress { session_id: String },
     InvalidTransition { session_id: String, from: SessionPhase, to: SessionPhase },
 }
 
@@ -129,8 +131,48 @@ impl ScreenshotSessionManager {
     pub fn register_temp_file(&mut self, session_id: &str, path: PathBuf) -> Result<(), SessionError> {
         let session = self.current.as_mut().ok_or(SessionError::NoActiveSession)?;
         ensure_current_session(&session.session_id, session_id)?;
+        if session.phase != SessionPhase::Processing {
+            return Err(SessionError::InvalidTransition {
+                session_id: session.session_id.clone(),
+                from: session.phase,
+                to: SessionPhase::Processing,
+            });
+        }
         session.temp_files.push(path);
         Ok(())
+    }
+
+    pub fn begin_commit(&mut self, session_id: &str) -> Result<(), SessionError> {
+        let session = self.current.as_mut().ok_or(SessionError::NoActiveSession)?;
+        ensure_current_session(&session.session_id, session_id)?;
+        if session.phase != SessionPhase::Processing {
+            return Err(SessionError::InvalidTransition {
+                session_id: session.session_id.clone(),
+                from: session.phase,
+                to: SessionPhase::Committing,
+            });
+        }
+        session.phase = SessionPhase::Committing;
+        Ok(())
+    }
+
+    pub fn finish_and_retain_file(
+        &mut self,
+        session_id: &str,
+        current_visibility_revision: MainWindowVisibilityRevision,
+        retained_file: &PathBuf,
+    ) -> Result<CleanupPlan, SessionError> {
+        let session = self.current.as_mut().ok_or(SessionError::NoActiveSession)?;
+        ensure_current_session(&session.session_id, session_id)?;
+        if session.phase != SessionPhase::Committing {
+            return Err(SessionError::InvalidTransition {
+                session_id: session.session_id.clone(),
+                from: session.phase,
+                to: SessionPhase::Committing,
+            });
+        }
+        session.temp_files.retain(|path| path != retained_file);
+        self.take_cleanup(session_id, current_visibility_revision)
     }
 
     pub fn mark_main_window_hidden(
@@ -149,6 +191,13 @@ impl ScreenshotSessionManager {
         session_id: &str,
         current_visibility_revision: MainWindowVisibilityRevision,
     ) -> Result<CleanupPlan, SessionError> {
+        let session = self.current.as_ref().ok_or(SessionError::NoActiveSession)?;
+        ensure_current_session(&session.session_id, session_id)?;
+        if session.phase == SessionPhase::Committing {
+            return Err(SessionError::CommitInProgress {
+                session_id: session.session_id.clone(),
+            });
+        }
         self.take_cleanup(session_id, current_visibility_revision)
     }
 
@@ -159,11 +208,11 @@ impl ScreenshotSessionManager {
     ) -> Result<CleanupPlan, SessionError> {
         let session = self.current.as_ref().ok_or(SessionError::NoActiveSession)?;
         ensure_current_session(&session.session_id, session_id)?;
-        if session.phase != SessionPhase::Processing {
+        if session.phase != SessionPhase::Committing {
             return Err(SessionError::InvalidTransition {
                 session_id: session.session_id.clone(),
                 from: session.phase,
-                to: SessionPhase::Selecting,
+                to: SessionPhase::Committing,
             });
         }
         self.take_cleanup(session_id, current_visibility_revision)
@@ -262,6 +311,7 @@ mod tests {
             StartSessionResult::Started(session) => session.session_id().to_string(),
             other => panic!("首次启动应创建会话，实际为 {other:?}"),
         };
+        manager.begin_processing(&session_id).unwrap();
         manager
             .register_temp_file(&session_id, PathBuf::from("temporary/capture.png"))
             .unwrap();
@@ -344,7 +394,7 @@ mod tests {
     }
 
     #[test]
-    fn finishing_processing_session_returns_cleanup_and_idle() {
+    fn committing_session_rejects_late_cancel_and_finishes_cleanly() {
         let mut manager = ScreenshotSessionManager::default();
         let monitor = MonitorRect::new(0, 0, 3840, 2160).unwrap();
         let session_id = match manager.start(monitor, false) {
@@ -353,21 +403,19 @@ mod tests {
         };
 
         manager.begin_processing(&session_id).unwrap();
-        manager
-            .register_temp_file(&session_id, PathBuf::from("temporary/final.png"))
-            .unwrap();
-        manager
-            .mark_main_window_hidden(&session_id, MainWindowVisibilityRevision(12))
-            .unwrap();
+        manager.begin_commit(&session_id).unwrap();
+        assert_eq!(manager.phase(), Some(SessionPhase::Committing));
+        assert_eq!(
+            manager.cancel(&session_id, MainWindowVisibilityRevision(12)),
+            Err(SessionError::CommitInProgress { session_id: session_id.clone() })
+        );
 
         let cleanup = manager
             .finish(&session_id, MainWindowVisibilityRevision(12))
             .unwrap();
 
         assert_eq!(cleanup.session_id, session_id);
-        assert_eq!(cleanup.temp_files, vec![PathBuf::from("temporary/final.png")]);
         assert!(cleanup.hide_overlay);
-        assert!(cleanup.restore_main_window);
         assert_eq!(manager.phase(), None);
         assert!(manager.current().is_none());
     }

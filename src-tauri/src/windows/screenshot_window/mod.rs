@@ -129,6 +129,41 @@ fn session_monitor_rect(monitor: &ScreenshotMonitorInfo) -> Result<MonitorRect, 
     MonitorRect::new(monitor.left, monitor.top, monitor.physical_width, monitor.physical_height).map_err(|error| format!("截图显示器区域无效: {error:?}"))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PhysicalWindowRect {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
+fn window_selection_from_rect(
+    monitor: MonitorRect,
+    rect: PhysicalWindowRect,
+) -> Option<crate::commands::screenshot::ScreenshotSelection> {
+    let monitor_right = monitor.left.checked_add(i32::try_from(monitor.width).ok()?)?;
+    let monitor_bottom = monitor.top.checked_add(i32::try_from(monitor.height).ok()?)?;
+    let left = rect.left.max(monitor.left);
+    let top = rect.top.max(monitor.top);
+    let right = rect.right.min(monitor_right);
+    let bottom = rect.bottom.min(monitor_bottom);
+    if right <= left || bottom <= top {
+        return None;
+    }
+    let left = u32::try_from(left - monitor.left).ok()?;
+    let top = u32::try_from(top - monitor.top).ok()?;
+    let right = u32::try_from(right - monitor.left).ok()?;
+    let bottom = u32::try_from(bottom - monitor.top).ok()?;
+    Some(crate::commands::screenshot::ScreenshotSelection {
+        left,
+        top,
+        right,
+        bottom,
+        width: right - left,
+        height: bottom - top,
+    })
+}
+
 fn validate_screenshot_action(action: &str) -> Option<String> {
     match action {
         "copy" | "save" | "pin" | "ai" => None,
@@ -205,6 +240,19 @@ mod source_guards {
     }
 
     #[test]
+    fn window_selection_is_clamped_to_the_active_monitor() {
+        let monitor = crate::services::screenshot::MonitorRect::new(-1920, 0, 1920, 1080).unwrap();
+        let selection = super::window_selection_from_rect(
+            monitor,
+            super::PhysicalWindowRect { left: -3000, top: -40, right: -100, bottom: 1200 },
+        )
+        .expect("跨边界窗口应保留当前显示器内的可截图区域");
+
+        assert_eq!((selection.left, selection.top, selection.right, selection.bottom), (0, 0, 1820, 1080));
+        assert_eq!((selection.width, selection.height), (1820, 1080));
+    }
+
+    #[test]
     fn screenshot_lifecycle_uses_unified_failure_cleanup() {
         let source = source_file("windows/screenshot_window/mod.rs");
         assert!(source.contains("fn finish_failed_screenshot"));
@@ -258,7 +306,7 @@ mod source_guards {
         assert!(save_body.contains("choose_screenshot_save_destination(&stored, app)"));
         assert!(save_body.contains("spawn_blocking(move || save_screenshot(&stored, &destination))"));
         assert!(save_body.rfind("if !is_current_processing_session(session_id) {").is_some());
-        assert!(pin_body.contains("spawn_blocking(move || prepare_pin_path(&stored))"));
+        assert!(pin_body.contains("spawn_blocking(move || prepare_pin_path(&stored_for_pin))"));
         assert!(pin_body.rfind("if !is_current_processing_session(session_id) {").is_some());
     }
 
@@ -295,11 +343,36 @@ fn is_current_processing_session(session_id: &str) -> bool {
         .is_current_phase(session_id, SessionPhase::Processing)
 }
 
+fn begin_screenshot_commit(session_id: &str) -> Result<(), String> {
+    let mut state = STATE.lock();
+    state
+        .sessions
+        .begin_commit(session_id)
+        .map_err(|error| format!("截图会话无法提交结果: {error:?}"))
+}
+
+fn register_screenshot_temp_file(session_id: &str, path: std::path::PathBuf) -> Result<(), String> {
+    let mut state = STATE.lock();
+    state
+        .sessions
+        .register_temp_file(session_id, path)
+        .map_err(|error| format!("登记截图临时文件失败: {error:?}"))
+}
+
 fn finish_failed_screenshot(app: &AppHandle, session_id: &str) {
     let plan = {
         let mut state = STATE.lock();
         let revision = MainWindowVisibilityRevision(state.visibility_revision);
-        match state.sessions.cancel(session_id, revision) {
+        let plan = state
+            .sessions
+            .cancel(session_id, revision)
+            .or_else(|error| match error {
+                crate::services::screenshot::SessionError::CommitInProgress { .. } => {
+                    state.sessions.finish(session_id, revision)
+                }
+                other => Err(other),
+            });
+        match plan {
             Ok(plan) => {
                 if plan.session_id == session_id {
                     state.pending_bootstrap = None;
@@ -446,6 +519,32 @@ pub fn cancel_screenshot(app: &AppHandle, session_id: &str) -> Result<(), String
     cleanup_plan(plan, app)
 }
 
+pub fn find_window_selection(
+    session_id: &str,
+    x: i32,
+    y: i32,
+) -> Result<Option<crate::commands::screenshot::ScreenshotSelection>, String> {
+    let monitor = {
+        let state = STATE.lock();
+        let session = state
+            .sessions
+            .current()
+            .ok_or_else(|| "截图会话已结束".to_string())?;
+        if session.session_id() != session_id || !state.sessions.is_current_phase(session_id, SessionPhase::Selecting) {
+            return Err("截图会话状态无效".to_string());
+        }
+        session.monitor()
+    };
+
+    Ok(crate::services::screenshot::capture::find_window_rect_at_point(x, y)
+        .and_then(|rect| window_selection_from_rect(monitor, PhysicalWindowRect {
+            left: rect.left,
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom,
+        })))
+}
+
 pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: crate::commands::screenshot::ScreenshotSelection, action: &str) -> Result<(), String> {
     if selection.width == 0 || selection.height == 0 {
         finish_failed_screenshot(app, session_id);
@@ -491,7 +590,7 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
     // 后台线程执行 WGC 捕获（需要 COM MTA 初始化）
     let captured_result = match tokio::task::spawn_blocking(move || -> Result<_, String> {
         let hmonitor = windows::Win32::Graphics::Gdi::HMONITOR(hmonitor_raw as *mut std::ffi::c_void);
-        ensure_com_initialized().map_err(|e| e.to_string())?;
+        let _com_initialization = ensure_com_initialized().map_err(|e| e.to_string())?;
         capture_monitor(hmonitor, capture_rect).map_err(|e| e.to_string())
     })
     .await
@@ -547,8 +646,13 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
     };
 
     if !is_current_processing_session(session_id) {
+        let _ = std::fs::remove_file(&stored.absolute_path);
         finish_failed_screenshot(app, session_id);
         return Err("截图会话已取消".to_string());
+    }
+    if let Err(error) = register_screenshot_temp_file(session_id, stored.absolute_path.clone()) {
+        let _ = std::fs::remove_file(&stored.absolute_path);
+        return Err(error);
     }
 
     // 根据动作执行
@@ -558,6 +662,7 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
                 finish_failed_screenshot(app, session_id);
                 return Err("截图会话已取消".to_string());
             }
+            begin_screenshot_commit(session_id)?;
             let copy_result = copy_screenshot(&stored).map_err(|e| e.to_string());
             match copy_result {
                 Ok(clipboard_id) => emit_screenshot_history_update(app, clipboard_id).map_err(|e| e.to_string()),
@@ -578,6 +683,7 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
                 finish_failed_screenshot(app, session_id);
                 return Err("截图会话已取消".to_string());
             }
+            begin_screenshot_commit(session_id)?;
             let stored = stored.clone();
             match tokio::task::spawn_blocking(move || save_screenshot(&stored, &destination)).await {
                 Ok(Ok(())) => Ok(()),
@@ -590,8 +696,8 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
                 finish_failed_screenshot(app, session_id);
                 return Err("截图会话已取消".to_string());
             }
-            let stored = stored.clone();
-            let pin_path = match tokio::task::spawn_blocking(move || prepare_pin_path(&stored)).await {
+            let stored_for_pin = stored.clone();
+            let pin_path = match tokio::task::spawn_blocking(move || prepare_pin_path(&stored_for_pin)).await {
                 Ok(Ok(pin_path)) => pin_path,
                 Ok(Err(error)) => return Err(error.to_string()),
                 Err(error) => return Err(format!("贴图文件准备线程失败: {error}")),
@@ -600,6 +706,7 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
                 finish_failed_screenshot(app, session_id);
                 return Err("截图会话已取消".to_string());
             }
+            begin_screenshot_commit(session_id)?;
             crate::windows::pin_image_window::pin_image_from_file(
                 app.clone(),
                 pin_path.to_string_lossy().to_string(),
@@ -632,6 +739,7 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
                 }
                 match result {
                     Ok(result) if !result.text.trim().is_empty() => {
+                        begin_screenshot_commit(session_id)?;
                         match copy_screenshot_text(&result.text) {
                             Ok(clipboard_id) => emit_screenshot_history_update(app, clipboard_id).map_err(|e| e.to_string()),
                             Err(error) => Err(error.to_string()),
@@ -650,18 +758,13 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
         return Err(error);
     }
 
-    if !is_current_processing_session(session_id) {
-        finish_failed_screenshot(app, session_id);
-        return Err("截图会话已取消".to_string());
-    }
-
-    // 正常完成：清理会话并恢复主窗口
+    // 正常完成：清理会话并恢复主窗口。动作在最后一刻已切换到 Committing。
     let plan = {
         let mut state = STATE.lock();
         let revision = MainWindowVisibilityRevision(state.visibility_revision);
         state
             .sessions
-            .finish(session_id, revision)
+            .finish_and_retain_file(session_id, revision, &stored.absolute_path)
             .map_err(|e| format!("完成截图会话失败: {e:?}"))?
     };
     cleanup_plan(plan, app)

@@ -296,6 +296,8 @@ pub fn run() {
                 #[cfg(target_os = "windows")]
                 commands::screenshot::cancel_screenshot,
                 #[cfg(target_os = "windows")]
+                commands::screenshot::find_screenshot_window_at_point,
+                #[cfg(target_os = "windows")]
                 commands::screenshot::complete_screenshot,
                 #[cfg(target_os = "windows")]
                 commands::screenshot::close_screenshot_window,

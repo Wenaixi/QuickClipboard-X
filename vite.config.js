@@ -1,13 +1,14 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import UnoCSS from 'unocss/vite'
-import { resolve } from 'path'
+import { resolve, dirname } from 'path'
 import { existsSync } from 'fs'
+import { fileURLToPath } from 'url'
 import wasm from 'vite-plugin-wasm'
 
+const __dirname = dirname(fileURLToPath(import.meta.url))
 const isDev = process.env.NODE_ENV === 'development'
 const isTauriDebug = process.env.TAURI_DEBUG === 'true'
-const isCommunity = process.env.QC_COMMUNITY === '1'
 
 export default defineConfig({
   root: 'src',
@@ -87,7 +88,7 @@ export default defineConfig({
           updater: resolve(__dirname, 'src/windows/updater/index.html'),
         }
         const screenshotPath = resolve(__dirname, 'src/windows/screenshot/index.html')
-        if (!isCommunity && existsSync(screenshotPath)) {
+        if (existsSync(screenshotPath)) {
           inputs.screenshot = screenshotPath
         }
         return inputs

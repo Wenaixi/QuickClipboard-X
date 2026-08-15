@@ -31,11 +31,6 @@ export async function startScreenshotQuickOcr() {
   return await invoke('start_screenshot_quick_ocr')
 }
 
-// 取消当前截图会话。新截图窗口会话需要显式传入 sessionId。
-export async function cancelScreenshotSession(sessionId) {
-  return await invoke('cancel_screenshot', { sessionId })
-}
-
 // 检查 AI 翻译配置
 export async function checkAiTranslationConfig() {
   return await invoke('check_ai_translation_config')

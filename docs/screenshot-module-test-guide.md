@@ -2,7 +2,7 @@
 
 ## 1. 目的与适用范围
 
-本文用于验收 QuickClipboard Windows 截图模块。测试对象应为同一次 CI 生成的社区版便携程序或 NSIS 安装包。社区版不包含私有截图插件，截图功能使用项目内置的 Windows.Graphics.Capture 实现。
+本文用于验收 QuickClipboard Windows 截图模块。测试对象应为同一次 CI 或发布流程生成的标准便携程序或 NSIS 安装包；截图功能统一使用项目内置的 Windows.Graphics.Capture 实现。
 
 覆盖范围：多 DPI、多显示器负坐标、4K、普通截图、复制、保存、贴图、AI 识别、入口、快捷键冲突、取消、显示器移除和历史去重。
 

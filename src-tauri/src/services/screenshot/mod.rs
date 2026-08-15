@@ -14,6 +14,7 @@ pub use session::{
     CleanupPlan,
     MainWindowVisibilityRevision,
     MonitorRect,
+    SessionError,
     SessionPhase,
     ScreenshotSessionManager,
     StartSessionResult,

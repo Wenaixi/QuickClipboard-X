@@ -256,24 +256,18 @@ npm run tauri dev
 # 建置發行版
 npm run tauri:build
 
-# 社群版開發模式（不含私有插件）
-npm run tauri:dev:community
-
-# 社群版建置（不含私有插件）
-npm run tauri:build:community
+# Rust 檢查與測試
+npm run check:rust
+npm run clippy:rust
+npm run test:rust
 ```
 
-### 關於私有元件
+### 發行說明
 
-本專案的**官方發行版**包含以下私有插件（不在開源範圍內）：
-
-- `gpu-image-viewer`（GPU 加速圖片視窗）：提升貼圖和圖片預覽效能，在多個貼圖視窗情況下顯著降低記憶體佔用。
-- `screenshot-suite`（截圖套件）：包含自由截圖、截圖貼圖、截圖 OCR、長截圖等相關能力。
+本專案只維護一套標準建置與發行流程，不依賴私有插件儲存庫。截圖、貼圖、OCR 與圖片預覽均由此儲存庫中的公開程式碼實作。
 
 ---
 
 ## 授權條款
 
- 本專案基於 [Apache License 2.0](LICENSE) 開源。
-
-> 私有插件 `gpu-image-viewer`、`screenshot-suite` 不在開源範圍內，僅官方發行版包含。
+本專案基於 [Apache License 2.0](LICENSE) 開源。

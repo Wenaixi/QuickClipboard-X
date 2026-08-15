@@ -106,11 +106,6 @@ CLAUDE.md
 .claude/commands/local/
 .claude/agents/local/
 
-# === Tauri 私有依赖克隆(SSH git 仓库) ===
-# 详见 CLAUDE.md §15(本机 cargo check/test 需注释掉这两个 dep)
-src-tauri/plugins/gpu-image-viewer/
-src-tauri/plugins/screenshot-suite/
-
 # === 项目本地临时目录(不参与版本控制) ===
 # 截图模块正式页面，随项目版本控制
 

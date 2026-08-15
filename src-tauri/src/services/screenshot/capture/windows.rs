@@ -1,12 +1,12 @@
 use std::sync::{Condvar, Mutex as StdMutex};
 use std::time::Duration;
 
-use windows::core::Interface;
-use windows::Foundation::TypedEventHandler;
+use windows::core::{HSTRING, Interface};
+use windows::Foundation::{Metadata::ApiInformation, TypedEventHandler};
 use windows::Graphics::Capture::{Direct3D11CaptureFrame, Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession};
 use windows::Graphics::DirectX::{Direct3D11::IDirect3DDevice, DirectXPixelFormat};
 use windows::Graphics::SizeInt32;
-use windows::Win32::Foundation::{POINT, RPC_E_CHANGED_MODE};
+use windows::Win32::Foundation::{POINT, RECT, RPC_E_CHANGED_MODE};
 use windows::Win32::Graphics::Gdi::{HMONITOR, MonitorFromPoint, MONITOR_DEFAULTTONEAREST};
 use windows::Win32::Graphics::Direct3D::{
     D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_10_1,
@@ -24,8 +24,13 @@ use windows::Win32::Graphics::Dxgi::IDXGIDevice;
 use windows::Win32::System::WinRT::Direct3D11::{
     CreateDirect3D11DeviceFromDXGIDevice, IDirect3DDxgiInterfaceAccess,
 };
-use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
+use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
 use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetTopWindow, GetWindow, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId, IsIconic,
+    IsWindowVisible, GW_HWNDNEXT, GWL_EXSTYLE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_EX_TRANSPARENT,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CaptureRect {
@@ -50,6 +55,20 @@ impl CaptureRect {
             return Err(CaptureError::InvalidSelection);
         }
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WindowRect {
+    pub left: i32,
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
+}
+
+impl WindowRect {
+    fn is_non_empty(self) -> bool {
+        self.right > self.left && self.bottom > self.top
     }
 }
 
@@ -134,8 +153,12 @@ fn create_capture_session(monitor: HMONITOR) -> Result<(Direct3D11CaptureFramePo
         SizeInt32 { Width: size.Width, Height: size.Height },
     ).map_err(win32_error)?;
     let session = pool.CreateCaptureSession(&item).map_err(win32_error)?;
-    session.SetIsCursorCaptureEnabled(false).map_err(win32_error)?;
-    session.SetIsBorderRequired(false).map_err(win32_error)?;
+    if supports_capture_session_property("IsCursorCaptureEnabled") {
+        session.SetIsCursorCaptureEnabled(false).map_err(win32_error)?;
+    }
+    if supports_capture_session_property("IsBorderRequired") {
+        session.SetIsBorderRequired(false).map_err(win32_error)?;
+    }
     session.StartCapture().map_err(win32_error)?;
     Ok((pool, session, device, context, size))
 }
@@ -246,22 +269,100 @@ pub fn get_monitor_handle(x: i32, y: i32) -> HMONITOR {
     unsafe { MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST) }
 }
 
-fn is_acceptable_com_initialization_result(result: windows::core::HRESULT) -> bool {
-    result.is_ok() || result == RPC_E_CHANGED_MODE
+fn is_capture_candidate(hwnd: windows::Win32::Foundation::HWND, current_process_id: u32) -> bool {
+    if !unsafe { IsWindowVisible(hwnd) }.as_bool() || unsafe { IsIconic(hwnd) }.as_bool() {
+        return false;
+    }
+
+    let mut process_id = 0;
+    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut process_id)); }
+    if process_id == 0 || process_id == current_process_id {
+        return false;
+    }
+
+    let extended_style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } as u32;
+    let is_transparent = extended_style & WS_EX_TRANSPARENT.0 != 0;
+    let is_non_activatable_tool = extended_style & WS_EX_TOOLWINDOW.0 != 0
+        && extended_style & WS_EX_NOACTIVATE.0 != 0;
+    !is_transparent && !is_non_activatable_tool
 }
 
-pub fn ensure_com_initialized() -> Result<(), CaptureError> {
+pub fn find_window_rect_at_point(x: i32, y: i32) -> Option<WindowRect> {
+    let current_process_id = std::process::id();
+    // GetTopWindow(NULL) 与 GW_HWNDNEXT 是 Win32 明确公开的顶层窗口 Z 序遍历。
+    // 从最高层向下取第一个命中的可截图窗口，避免依赖未承诺的枚举顺序。
+    let Ok(mut hwnd) = (unsafe { GetTopWindow(None) }) else {
+        return None;
+    };
+    while !hwnd.0.is_null() {
+        if is_capture_candidate(hwnd, current_process_id) {
+            let mut rect = RECT::default();
+            if unsafe { GetWindowRect(hwnd, &mut rect) }.is_ok() {
+                let rect = WindowRect {
+                    left: rect.left,
+                    top: rect.top,
+                    right: rect.right,
+                    bottom: rect.bottom,
+                };
+                if rect.is_non_empty()
+                    && x >= rect.left
+                    && x < rect.right
+                    && y >= rect.top
+                    && y < rect.bottom
+                {
+                    return Some(rect);
+                }
+            }
+        }
+        let Ok(next) = (unsafe { GetWindow(hwnd, GW_HWNDNEXT) }) else {
+            break;
+        };
+        hwnd = next;
+    }
+    None
+}
+
+const GRAPHICS_CAPTURE_SESSION_TYPE: &str = "Windows.Graphics.Capture.GraphicsCaptureSession";
+
+fn supports_capture_session_property(property_name: &str) -> bool {
+    ApiInformation::IsPropertyPresent(
+        &HSTRING::from(GRAPHICS_CAPTURE_SESSION_TYPE),
+        &HSTRING::from(property_name),
+    )
+    .unwrap_or(false)
+}
+
+#[must_use]
+pub struct ComInitialization {
+    should_uninitialize: bool,
+}
+
+impl Drop for ComInitialization {
+    fn drop(&mut self) {
+        if self.should_uninitialize {
+            unsafe { CoUninitialize(); }
+        }
+    }
+}
+
+fn com_initialization_requires_uninitialize(result: windows::core::HRESULT) -> bool {
+    result.is_ok()
+}
+
+pub fn ensure_com_initialized() -> Result<ComInitialization, CaptureError> {
     unsafe {
         let result = CoInitializeEx(None, COINIT_MULTITHREADED);
-        if is_acceptable_com_initialization_result(result) {
-            // 当前线程已采用其他 COM 公寓模型时可继续使用 WGC 捕获。
-            Ok(())
-        } else {
-            Err(CaptureError::Win32(format!(
-                "COM 初始化失败: {}",
-                result.to_string()
-            )))
+        if com_initialization_requires_uninitialize(result) {
+            return Ok(ComInitialization { should_uninitialize: true });
         }
+        if result == RPC_E_CHANGED_MODE {
+            // 当前线程已采用其他 COM 公寓模型；不得解除调用方持有的初始化计数。
+            return Ok(ComInitialization { should_uninitialize: false });
+        }
+        Err(CaptureError::Win32(format!(
+            "COM 初始化失败: {}",
+            result.to_string()
+        )))
     }
 }
 
@@ -294,12 +395,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn com_initialization_accepts_success_and_changed_apartment_mode_only() {
-        assert!(is_acceptable_com_initialization_result(windows::core::HRESULT(0)));
-        assert!(is_acceptable_com_initialization_result(
+    fn only_successful_com_initialization_requires_matching_uninitialization() {
+        assert!(com_initialization_requires_uninitialize(windows::core::HRESULT(0)));
+        assert!(com_initialization_requires_uninitialize(windows::core::HRESULT(1)));
+        assert!(!com_initialization_requires_uninitialize(
             windows::Win32::Foundation::RPC_E_CHANGED_MODE,
         ));
-        assert!(!is_acceptable_com_initialization_result(windows::core::HRESULT(0x80004005u32 as i32)));
+        assert!(!com_initialization_requires_uninitialize(windows::core::HRESULT(0x80004005u32 as i32)));
     }
 
     #[test]
@@ -320,5 +422,25 @@ mod tests {
         let rect = CaptureRect { left: 1919, top: 0, width: 2, height: 10 };
         assert!(matches!(rect.validate(1920, 1080), Err(CaptureError::InvalidSelection)));
         assert!(rect.validate(3840, 2160).is_ok());
+    }
+
+    #[test]
+    fn window_selection_walks_documented_top_level_z_order() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/screenshot/capture/windows.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读取 Windows 窗口选择源码失败");
+        let body_start = source
+            .find("pub fn find_window_rect_at_point")
+            .expect("缺少窗口选择函数");
+        let body_end = source[body_start..]
+            .find("const GRAPHICS_CAPTURE_SESSION_TYPE")
+            .map(|offset| body_start + offset)
+            .expect("窗口选择函数后缺少下一模块锚点");
+        let body = &source[body_start..body_end];
+        assert!(body.contains("GetTopWindow(None)"));
+        assert!(body.contains("GetWindow(hwnd, GW_HWNDNEXT)"));
+        assert!(!body.contains("EnumWindows("));
     }
 }
