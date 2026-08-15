@@ -277,9 +277,7 @@ pub fn run() {
                 commands::dm_import_data_zip,
                 commands::dm_reset_all_data,
                 commands::dm_list_backups,
-                #[cfg(target_os = "windows")]
                 commands::screenshot::set_mouse_position,
-                #[cfg(target_os = "windows")]
                 commands::screenshot::get_mouse_position,
                 #[cfg(target_os = "windows")]
                 commands::screenshot::start_screenshot,

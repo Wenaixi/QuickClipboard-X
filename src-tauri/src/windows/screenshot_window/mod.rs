@@ -4,7 +4,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 use crate::services::screenshot::capture::{capture_monitor, ensure_com_initialized, get_monitor_handle, CaptureRect};
-use crate::services::screenshot::{choose_and_save_screenshot, copy_screenshot, copy_screenshot_text, emit_screenshot_history_update, prepare_pin_path, recognize_image, store_png, MainWindowVisibilityRevision, MonitorRect, SessionPhase, ScreenshotSessionManager, StartSessionResult};
+use crate::services::screenshot::{choose_and_save_screenshot, copy_screenshot, copy_screenshot_text, emit_screenshot_history_update, encode_and_store_png, prepare_pin_path, recognize_image, MainWindowVisibilityRevision, MonitorRect, SessionPhase, ScreenshotSessionManager, StartSessionResult};
 use crate::services::settings::get_settings;
 use crate::windows::main_window::{get_main_window, hide_main_window, is_main_window_visible, show_main_window};
 
@@ -380,12 +380,23 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
         return Err("截图会话已取消".to_string());
     }
 
-    // 编码并内容寻址存储 PNG
-    let stored = match store_png(captured.width, captured.height, &captured.rgba) {
-        Ok(stored) => stored,
-        Err(error) => {
+    // PNG 编码与文件写入放在线程池，避免占用异步运行时线程。
+    let captured_width = captured.width;
+    let captured_height = captured.height;
+    let captured_rgba = captured.rgba;
+    let stored = match tokio::task::spawn_blocking(move || {
+        encode_and_store_png(captured_width, captured_height, &captured_rgba)
+    })
+    .await
+    {
+        Ok(Ok(stored)) => stored,
+        Ok(Err(error)) => {
             finish_failed_screenshot(app, session_id);
             return Err(format!("存储截图失败: {error}"));
+        }
+        Err(error) => {
+            finish_failed_screenshot(app, session_id);
+            return Err(format!("截图存储线程失败: {error}"));
         }
     };
 

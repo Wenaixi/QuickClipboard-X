@@ -2,13 +2,19 @@ use std::path::Path;
 use std::time::Duration;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use image::{codecs::jpeg::JpegEncoder, ImageReader};
+use image::{
+    codecs::{jpeg::JpegEncoder, png::PngEncoder},
+    ColorType, ImageReader, ImageEncoder,
+};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 
 const MAX_IMAGE_DIMENSION: u32 = 4096;
 const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 const JPEG_QUALITY: u8 = 90;
+const JPEG_MIN_QUALITY: u8 = 45;
+const JPEG_QUALITY_STEP: u8 = 15;
+const MAX_RECOGNITION_ATTEMPTS: usize = 2;
 const DEFAULT_PROMPT: &str = "请完整转写图片中的文字，保留段落、换行和原有顺序；不要翻译、总结或补充图片中没有的信息；无法辨认的位置使用 [无法辨认] 标记。只返回 JSON，格式为 {\"text\":\"完整识别文本\",\"blocks\":[{\"type\":\"paragraph\",\"text\":\"段落文本\"}]}。";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,7 +91,7 @@ struct ChatCompletionRequest<'a> {
 #[derive(Debug, Serialize)]
 struct ChatMessageRequest<'a> {
     role: &'a str,
-    content: [ChatContent<'a>; 2],
+    content: Vec<ChatContent<'a>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -114,6 +120,21 @@ fn normalized_base_url(base_url: &str) -> Result<String, AiVisionError> {
     })
 }
 
+fn ensure_vision_model(model: &str) -> Result<(), AiVisionError> {
+    let normalized = model.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return Err(AiVisionError::NotConfigured);
+    }
+    let clearly_text_only = normalized.contains("instruct")
+        && !normalized.contains("vision")
+        && !normalized.contains("vl")
+        && !normalized.contains("qwen2.5-vl");
+    if clearly_text_only {
+        return Err(AiVisionError::UnsupportedVisionModel);
+    }
+    Ok(())
+}
+
 fn classify_http_status(status: StatusCode) -> AiVisionError {
     match status {
         StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => AiVisionError::Unauthorized,
@@ -121,6 +142,28 @@ fn classify_http_status(status: StatusCode) -> AiVisionError {
         status if status.is_server_error() => AiVisionError::Server(status.as_u16()),
         status => AiVisionError::HttpStatus(status.as_u16()),
     }
+}
+
+fn encode_png(image: &image::DynamicImage) -> Result<Vec<u8>, AiVisionError> {
+    let rgba = image.to_rgba8();
+    let mut bytes = Vec::new();
+    PngEncoder::new(&mut bytes)
+        .write_image(
+            rgba.as_raw(),
+            image.width(),
+            image.height(),
+            ColorType::Rgba8.into(),
+        )
+        .map_err(|error| AiVisionError::Encode(error.to_string()))?;
+    Ok(bytes)
+}
+
+fn encode_jpeg(image: &image::DynamicImage, quality: u8) -> Result<Vec<u8>, AiVisionError> {
+    let mut bytes = Vec::new();
+    JpegEncoder::new_with_quality(&mut bytes, quality)
+        .encode_image(image)
+        .map_err(|error| AiVisionError::Encode(error.to_string()))?;
+    Ok(bytes)
 }
 
 fn encode_image(path: &Path) -> Result<(String, String), AiVisionError> {
@@ -134,14 +177,21 @@ fn encode_image(path: &Path) -> Result<(String, String), AiVisionError> {
         image
     };
 
-    let mut bytes = Vec::new();
-    JpegEncoder::new_with_quality(&mut bytes, JPEG_QUALITY)
-        .encode_image(&image)
-        .map_err(|error| AiVisionError::Encode(error.to_string()))?;
-    if bytes.len() > MAX_IMAGE_BYTES {
-        return Err(AiVisionError::InvalidImage("图片超过 8 MB 限制".to_string()));
+    let png_bytes = encode_png(&image)?;
+    if png_bytes.len() <= MAX_IMAGE_BYTES {
+        return Ok(("image/png".to_string(), BASE64.encode(png_bytes)));
     }
-    Ok(("image/jpeg".to_string(), BASE64.encode(bytes)))
+
+    let mut quality = JPEG_QUALITY;
+    while quality >= JPEG_MIN_QUALITY {
+        let jpeg_bytes = encode_jpeg(&image, quality)?;
+        if jpeg_bytes.len() <= MAX_IMAGE_BYTES {
+            return Ok(("image/jpeg".to_string(), BASE64.encode(jpeg_bytes)));
+        }
+        quality = quality.saturating_sub(JPEG_QUALITY_STEP);
+    }
+
+    Err(AiVisionError::InvalidImage("图片超过 8 MB 限制".to_string()))
 }
 
 fn parse_result(content: &str) -> Result<AiVisionResult, AiVisionError> {
@@ -165,59 +215,78 @@ pub async fn recognize_image(
     if api_key.trim().is_empty() || model.trim().is_empty() {
         return Err(AiVisionError::NotConfigured);
     }
-    let model_name = model.to_ascii_lowercase();
-    if model_name.contains("instruct") && !model_name.contains("vision") {
-        return Err(AiVisionError::UnsupportedVisionModel);
-    }
+    ensure_vision_model(model)?;
     let base_url = normalized_base_url(base_url)?;
-    let (mime, encoded) = encode_image(path)?;
+    let image_path = path.to_path_buf();
+    let (mime, encoded) = tokio::task::spawn_blocking(move || encode_image(&image_path))
+        .await
+        .map_err(|_| AiVisionError::Request(String::new()))??;
     let image_url = format!("data:{mime};base64,{encoded}");
-    let request = ChatCompletionRequest {
-        model,
-        messages: [ChatMessageRequest {
-            role: "user",
-            content: [
-                ChatContent::Text { text: prompt.filter(|value| !value.trim().is_empty()).unwrap_or(DEFAULT_PROMPT) },
-                ChatContent::ImageUrl { image_url: ImageUrl { url: &image_url } },
-            ],
-        }],
-        temperature: 0.0,
-    };
-
+    let prompt = prompt.filter(|value| !value.trim().is_empty()).unwrap_or(DEFAULT_PROMPT);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
         .map_err(|_| AiVisionError::Request(String::new()))?;
-    let response = client
-        .post(format!("{base_url}/chat/completions"))
-        .bearer_auth(api_key)
-        .json(&request)
-        .send()
-        .await
-        .map_err(|error| {
-            if error.is_timeout() {
-                AiVisionError::Timeout
-            } else {
-                AiVisionError::Request(String::new())
-            }
-        })?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(classify_http_status(status));
+
+    for attempt in 0..MAX_RECOGNITION_ATTEMPTS {
+        let retry_hint = if attempt == 0 {
+            ""
+        } else {
+            "上一条回复不是合法 JSON。请重新识别，并且只返回合法 JSON 对象，不要添加 Markdown、解释或代码围栏。"
+        };
+        let mut contents = vec![
+            ChatContent::Text { text: prompt },
+            ChatContent::ImageUrl { image_url: ImageUrl { url: &image_url } },
+        ];
+        if !retry_hint.is_empty() {
+            contents.push(ChatContent::Text { text: retry_hint });
+        }
+        let request = ChatCompletionRequest {
+            model,
+            messages: [ChatMessageRequest {
+                role: "user",
+                content: contents,
+            }],
+            temperature: 0.0,
+        };
+
+        let response = client
+            .post(format!("{base_url}/chat/completions"))
+            .bearer_auth(api_key)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|error| {
+                if error.is_timeout() {
+                    AiVisionError::Timeout
+                } else {
+                    AiVisionError::Request(String::new())
+                }
+            })?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(classify_http_status(status));
+        }
+        let response = response
+            .json::<ChatCompletionResponse>()
+            .await
+            .map_err(|_| AiVisionError::InvalidResponse("响应 JSON 无法解析".to_string()))?;
+        let content = response
+            .choices
+            .first()
+            .ok_or_else(|| AiVisionError::InvalidResponse("响应没有 choices".to_string()))?
+            .message
+            .content
+            .trim()
+            .to_string();
+        match parse_result(&content) {
+            Ok(result) => return Ok(result),
+            Err(_error) if attempt + 1 < MAX_RECOGNITION_ATTEMPTS => continue,
+            Err(error) => return Err(error),
+        }
     }
-    let response = response
-        .json::<ChatCompletionResponse>()
-        .await
-        .map_err(|_| AiVisionError::InvalidResponse("响应 JSON 无法解析".to_string()))?;
-    let content = response
-        .choices
-        .first()
-        .ok_or_else(|| AiVisionError::InvalidResponse("响应没有 choices".to_string()))?
-        .message
-        .content
-        .trim()
-        .to_string();
-    parse_result(&content)
+
+    Err(AiVisionError::InvalidResponse("响应无法解析".to_string()))
 }
 
 #[cfg(test)]
@@ -233,9 +302,9 @@ mod tests {
 
     #[test]
     fn clearly_non_vision_models_are_rejected_before_network_request() {
-        let model = "Qwen/Qwen2-7B-Instruct";
-        assert!(model.to_ascii_lowercase().contains("instruct"));
-        assert!(!model.to_ascii_lowercase().contains("vision"));
+        assert_eq!(ensure_vision_model("Qwen/Qwen2-7B-Instruct"), Err(AiVisionError::UnsupportedVisionModel));
+        assert!(ensure_vision_model("Qwen/Qwen2.5-VL-7B-Instruct").is_ok());
+        assert!(ensure_vision_model("gpt-4o").is_ok());
     }
 
     #[test]

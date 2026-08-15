@@ -153,7 +153,7 @@ export const defaultSettings = {
   // AI 配置
   aiTranslationEnabled: false,
   aiApiKey: '',
-  aiModel: 'Qwen/Qwen2-7B-Instruct',
+  aiModel: 'Qwen/Qwen2.5-VL-7B-Instruct',
   aiBaseUrl: 'https://api.siliconflow.cn/v1',
   aiTargetLanguage: 'auto',
   aiTranslateOnCopy: false,
