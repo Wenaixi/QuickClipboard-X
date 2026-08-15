@@ -19,6 +19,8 @@ test('normalizeBootstrap 使用显式显示器物理尺寸与逻辑尺寸', () =
     bounds: { width: 1536, height: 864 },
     physicalBounds: { width: 1920, height: 1080 },
     dpr: 1.25,
+    initialAction: '',
+    screenshotAiEnabled: true,
   });
 });
 
@@ -36,6 +38,8 @@ test('normalizeBootstrap 缺失尺寸时以视口和 DPR 推导安全默认值',
       bounds: { width: 1200, height: 700 },
       physicalBounds: { width: 1800, height: 1050 },
       dpr: 1.5,
+      initialAction: '',
+      screenshotAiEnabled: true,
     });
   } finally {
     Object.defineProperty(globalThis, 'innerWidth', { configurable: true, value: oldWidth });

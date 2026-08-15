@@ -75,6 +75,8 @@ pub struct AppSettings {
     pub screenshot_color_include_format: bool,
     pub screenshot_window_lifecycle_mode: String,
     pub screenshot_auto_dispose_minutes: u32,
+    pub screenshot_ai_enabled: bool,
+    pub screenshot_ai_prompt: String,
 
     // 预览窗口设置
     pub quickpaste_enabled: bool,
@@ -278,6 +280,8 @@ impl Default for AppSettings {
             screenshot_color_include_format: true,
             screenshot_window_lifecycle_mode: "quick".to_string(),
             screenshot_auto_dispose_minutes: 10,
+            screenshot_ai_enabled: true,
+            screenshot_ai_prompt: String::new(),
 
             quickpaste_enabled: true,
             quickpaste_shortcut: "Ctrl+`".to_string(),

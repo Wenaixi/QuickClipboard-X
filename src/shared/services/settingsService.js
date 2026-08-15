@@ -147,6 +147,8 @@ export const defaultSettings = {
   screenshotColorIncludeFormat: true,
   screenshotWindowLifecycleMode: 'quick',
   screenshotAutoDisposeMinutes: 10,
+  screenshotAiEnabled: true,
+  screenshotAiPrompt: '',
   
   // AI 配置
   aiTranslationEnabled: false,

@@ -15,5 +15,7 @@ export function normalizeBootstrap(payload = {}, viewport = {}) {
     bounds: { width: logicalWidth, height: logicalHeight },
     physicalBounds: { width: physicalWidth, height: physicalHeight },
     dpr,
+    initialAction: typeof payload.initialAction === 'string' ? payload.initialAction : '',
+    screenshotAiEnabled: payload.screenshotAiEnabled !== false,
   };
 }

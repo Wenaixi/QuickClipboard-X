@@ -145,9 +145,7 @@ pub fn run() {
     #[cfg(feature = "gpu-image-viewer")]
     let builder = builder.plugin(gpu_image_viewer::init());
 
-    #[cfg(feature = "screenshot-suite")]
-    let builder = builder.plugin(screenshot_suite::init());
-        
+
     let app = builder.invoke_handler(tauri::generate_handler![
                 commands::start_custom_drag,
                 commands::stop_custom_drag,
@@ -283,12 +281,17 @@ pub fn run() {
                 commands::dm_import_data_zip,
                 commands::dm_reset_all_data,
                 commands::dm_list_backups,
-                commands::set_mouse_position,
-                commands::get_mouse_position,
-                commands::start_screenshot,
-                commands::start_screenshot_quick_save,
-                commands::start_screenshot_quick_pin,
-                commands::start_screenshot_quick_ocr,
+                commands::screenshot::set_mouse_position,
+                commands::screenshot::get_mouse_position,
+                commands::screenshot::start_screenshot,
+                commands::screenshot::start_normal_screenshot,
+                commands::screenshot::start_screenshot_quick_save,
+                commands::screenshot::start_screenshot_quick_pin,
+                commands::screenshot::start_screenshot_quick_ocr,
+                commands::screenshot::screenshot_window_ready,
+                commands::screenshot::cancel_screenshot,
+                commands::screenshot::complete_screenshot,
+                commands::screenshot::close_screenshot_window,
                 commands::copy_text_to_clipboard,
                 commands::check_ai_translation_config,
                 commands::enable_ai_translation_cancel_shortcut,
@@ -468,13 +471,6 @@ pub fn run() {
                 #[cfg(feature = "gpu-image-viewer")]
                 windows::native_pin_window::setup_event_listener(app.handle());
                 focus::start_focus_listener(app.handle().clone());
-
-                #[cfg(feature = "screenshot-suite")]
-                {
-                    if let Ok(json) = serde_json::to_value(&settings) {
-                        screenshot_suite::config::update_config(json);
-                    }
-                }
 
                 if settings.webdav_enabled {
                     services::webdav_sync::start_scheduler();

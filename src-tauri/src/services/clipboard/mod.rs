@@ -10,4 +10,7 @@ pub use monitor::{
     set_last_hash_text, start_clipboard_monitor, stop_clipboard_monitor,
 };
 
+pub(crate) use processor::ProcessedContent;
+pub(crate) use storage::store_clipboard_item;
+
 pub const INTERNAL_IMAGE_PATH_FORMAT: &str = "__QC_IMAGE_PNG_PATH__";
