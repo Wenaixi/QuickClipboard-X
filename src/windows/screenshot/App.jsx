@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -15,10 +16,10 @@ const COMPLETE_COMMAND = 'complete_screenshot';
 const CANCEL_COMMAND = 'cancel_screenshot';
 
 const ACTIONS = [
-  { id: 'copy', label: '复制', shortcut: 'Enter' },
-  { id: 'save', label: '另存为', shortcut: 'Ctrl+S' },
-  { id: 'pin', label: '贴图', shortcut: 'Ctrl+P' },
-  { id: 'ai', label: 'AI 识别', shortcut: '' },
+  { id: 'copy', shortcut: 'Enter' },
+  { id: 'save', shortcut: 'Ctrl+S' },
+  { id: 'pin', shortcut: 'Ctrl+P' },
+  { id: 'ai', shortcut: '' },
 ];
 
 function pointFromPointerEvent(event, element) {
@@ -48,8 +49,8 @@ function applySelectionStyle(element, selection) {
   element.style.setProperty('--selection-height', `${selection.height}px`);
 }
 
-function actionLabel(action) {
-  return ACTIONS.find((item) => item.id === action)?.label || action;
+function actionLabel(action, t) {
+  return t(`screenshot.actions.${action}`, { defaultValue: action });
 }
 
 function actionIsEnabled(action, bootstrap) {
@@ -61,6 +62,7 @@ function isPrimaryPointer(event) {
 }
 
 function App() {
+  const { t } = useTranslation();
   const rootRef = useRef(null);
   const rafWriterRef = useRef(null);
   const draftRef = useRef(null);
@@ -143,7 +145,7 @@ function App() {
     setActionError('');
     if (sessionId) {
       try { await invoke(CANCEL_COMMAND, { sessionId }); }
-      catch (error) { setActionError(`取消截图失败：${String(error)}`); return; }
+      catch (error) { setActionError(t('screenshot.cancelFailed', { error: String(error) })); return; }
     }
     try { await getCurrentWindow().close(); } catch {}
   };
@@ -152,7 +154,7 @@ function App() {
     const currentSelection = selectionRef.current;
     if (!currentSelection || busyAction || !actionIsEnabled(action, bootstrap)) return;
     if (!bootstrap.sessionId) {
-      setActionError('截图会话尚未准备好，请重新启动截图。');
+      setActionError(t('screenshot.sessionNotReady'));
       return;
     }
     setBusyAction(action);
@@ -161,7 +163,7 @@ function App() {
       const physicalSelection = selectionToPhysical(currentSelection, bootstrap.dpr, bootstrap.physicalBounds);
       await invoke(COMPLETE_COMMAND, { sessionId: bootstrap.sessionId, selection: physicalSelection, action });
     } catch (error) {
-      setActionError(`${actionLabel(action)}失败：${String(error)}`);
+      setActionError(t('screenshot.actionFailed', { action: actionLabel(action, t), error: String(error) }));
       setBusyAction('');
     }
   };
@@ -230,15 +232,15 @@ function App() {
   }, [bootstrap.sessionId, busyAction]);
 
   return (
-    <main ref={rootRef} className="screenshot-root" data-selection-active="false" data-selecting={selecting ? 'true' : 'false'} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={cancelScreenshot} onContextMenu={(event) => { event.preventDefault(); void cancelScreenshot(); }} aria-label="截图选区">
+    <main ref={rootRef} className="screenshot-root" data-selection-active="false" data-selecting={selecting ? 'true' : 'false'} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={cancelScreenshot} onContextMenu={(event) => { event.preventDefault(); void cancelScreenshot(); }} aria-label={t('screenshot.selectionLabel')}>
       <div className="screenshot-mask screenshot-mask-top" aria-hidden="true" />
       <div className="screenshot-mask screenshot-mask-left" aria-hidden="true" />
       <div className="screenshot-mask screenshot-mask-right" aria-hidden="true" />
       <div className="screenshot-mask screenshot-mask-bottom" aria-hidden="true" />
       <div className="screenshot-selection" aria-hidden="true"><span className="screenshot-selection-size">{selection ? `${Math.round(selection.width)} × ${Math.round(selection.height)}` : ''}</span></div>
-      {selection && <div className="screenshot-toolbar" style={toolbarStyle} data-screenshot-control onPointerDown={(event) => event.stopPropagation()}>{ACTIONS.map((action) => <button key={action.id} type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction) || !actionIsEnabled(action.id, bootstrap)} onClick={() => void completeScreenshot(action.id)} title={action.shortcut ? `${action.label}（${action.shortcut}）` : action.label}>{busyAction === action.id ? '处理中' : action.label}</button>)}</div>}
+      {selection && <div className="screenshot-toolbar" style={toolbarStyle} data-screenshot-control onPointerDown={(event) => event.stopPropagation()}>{ACTIONS.map((action) => { const label = actionLabel(action.id, t); return <button key={action.id} type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction) || !actionIsEnabled(action.id, bootstrap)} onClick={() => void completeScreenshot(action.id)} title={action.shortcut ? t('screenshot.shortcutHint', { label, shortcut: action.shortcut }) : label}>{busyAction === action.id ? t('screenshot.processing') : label}</button>; })}</div>}
       {actionError && <div className="screenshot-error" role="alert" data-screenshot-control>{actionError}</div>}
-      <button type="button" className="screenshot-cancel" data-screenshot-control onPointerDown={(event) => event.stopPropagation()} onClick={() => void cancelScreenshot()} aria-label="取消截图" title="取消截图（Esc）">取消</button>
+      <button type="button" className="screenshot-cancel" data-screenshot-control onPointerDown={(event) => event.stopPropagation()} onClick={() => void cancelScreenshot()} aria-label={t('screenshot.cancelLabel')} title={t('screenshot.shortcutHint', { label: t('screenshot.cancelLabel'), shortcut: 'Esc' })}>{t('screenshot.cancel')}</button>
     </main>
   );
 }

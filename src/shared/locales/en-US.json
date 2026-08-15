@@ -242,7 +242,20 @@
     "take": "Take Screenshot",
     "edit": "Edit",
     "save": "Save",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "actions": {
+      "copy": "Copy",
+      "save": "Save As",
+      "pin": "Pin",
+      "ai": "AI Recognition"
+    },
+    "processing": "Processing",
+    "selectionLabel": "Screenshot selection",
+    "cancelLabel": "Cancel screenshot",
+    "cancelFailed": "Failed to cancel screenshot: {{error}}",
+    "sessionNotReady": "The screenshot session is not ready. Please start it again.",
+    "actionFailed": "Failed to {{action}}: {{error}}",
+    "shortcutHint": "{{label}} ({{shortcut}})"
   },
   "settings": {
     "title": "Settings",
