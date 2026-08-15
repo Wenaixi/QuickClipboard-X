@@ -91,6 +91,7 @@ pub fn copy_screenshot(stored: &StoredScreenshot) -> Result<i64, ScreenshotActio
         .ok_or_else(|| ScreenshotActionError::Clipboard("截图路径无效".to_string()))?;
     crate::services::paste::clipboard_content::set_clipboard_image_file(path)
         .map_err(ScreenshotActionError::Clipboard)?;
+    crate::services::clipboard::set_last_hash_file(path);
     store_screenshot_history(stored)
 }
 
@@ -141,6 +142,24 @@ mod tests {
         };
         let error = save_screenshot(&stored, Path::new(""));
         assert!(matches!(error, Err(ScreenshotActionError::Save(_))));
+    }
+
+    #[test]
+    fn screenshot_copy_preloads_monitor_hash_only_after_clipboard_write() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/screenshot/actions.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读取截图动作源码失败");
+        let copy_start = source.find("pub fn copy_screenshot").expect("缺少截图复制动作");
+        let copy_body = &source[copy_start..source.find("pub fn save_screenshot").expect("缺少截图保存动作")];
+        let write_index = copy_body
+            .find("set_clipboard_image_file(path)")
+            .expect("截图复制必须写入图片剪贴板");
+        let hash_index = copy_body
+            .find("set_last_hash_file(path)")
+            .expect("截图复制必须预置监听器哈希");
+        assert!(write_index < hash_index, "只有成功写入剪贴板后才能预置监听器去重哈希");
     }
 
     #[test]
