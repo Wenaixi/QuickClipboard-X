@@ -102,7 +102,7 @@ pub fn save_screenshot(stored: &StoredScreenshot, destination: &Path) -> Result<
         .map_err(|error| ScreenshotActionError::Save(error.to_string()))
 }
 
-pub fn choose_and_save_screenshot(
+pub fn choose_screenshot_save_destination(
     stored: &StoredScreenshot,
     app: &tauri::AppHandle,
 ) -> Result<Option<PathBuf>, ScreenshotActionError> {
@@ -116,11 +116,11 @@ pub fn choose_and_save_screenshot(
         return Ok(None);
     };
 
-    let destination = save_path
+    save_path
         .as_path()
-        .ok_or_else(|| ScreenshotActionError::Save("无效的文件路径".to_string()))?;
-    save_screenshot(stored, destination)?;
-    Ok(Some(destination.to_path_buf()))
+        .map(Path::to_path_buf)
+        .map(Some)
+        .ok_or_else(|| ScreenshotActionError::Save("无效的文件路径".to_string()))
 }
 
 #[cfg(test)]
