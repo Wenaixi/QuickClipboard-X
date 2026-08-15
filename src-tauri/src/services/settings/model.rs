@@ -294,7 +294,7 @@ impl Default for AppSettings {
 
             ai_translation_enabled: false,
             ai_api_key: String::new(),
-            ai_model: "Qwen/Qwen2-7B-Instruct".to_string(),
+            ai_model: "Qwen/Qwen2.5-VL-7B-Instruct".to_string(),
             ai_base_url: "https://api.siliconflow.cn/v1".to_string(),
             ai_target_language: "auto".to_string(),
             ai_translate_on_copy: false,
@@ -523,7 +523,24 @@ mod tests {
         );
     }
 
-    // 归一化方向:hide=true 不蕴含 hover=true,保留用户偏好
+    #[test]
+    fn screenshot_default_uses_a_vision_capable_model() {
+        let settings = AppSettings::default();
+        assert!(settings.ai_model.to_ascii_lowercase().contains("vl"));
+        assert!(settings.ai_model.to_ascii_lowercase().contains("vision") || settings.ai_model.to_ascii_lowercase().contains("vl"));
+    }
+
+    #[test]
+    fn screenshot_settings_round_trip_preserves_ai_fields() {
+        let mut settings = AppSettings::default();
+        settings.screenshot_ai_enabled = false;
+        settings.screenshot_ai_prompt = "只返回文字".to_string();
+        let encoded = serde_json::to_string(&settings).unwrap();
+        let decoded: AppSettings = serde_json::from_str(&encoded).unwrap();
+        assert!(!decoded.screenshot_ai_enabled);
+        assert_eq!(decoded.screenshot_ai_prompt, "只返回文字");
+    }
+
     #[test]
     fn edge_hover_invariant_keeps_hover_off_when_hide_enabled() {
         let mut settings = AppSettings::default();

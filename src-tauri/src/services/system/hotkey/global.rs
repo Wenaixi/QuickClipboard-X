@@ -427,22 +427,27 @@ pub fn register_webdav_pull_hotkey(shortcut_str: &str) -> Result<(), String> {
     })
 }
 
+#[cfg(target_os = "windows")]
 pub fn register_screenshot_hotkey(shortcut_str: &str) -> Result<(), String> {
     register_screenshot_shortcut("screenshot", shortcut_str, "启动截图", crate::commands::screenshot::start_screenshot)
 }
 
+#[cfg(target_os = "windows")]
 pub fn register_screenshot_quick_save_hotkey(shortcut_str: &str) -> Result<(), String> {
     register_screenshot_shortcut("screenshot_quick_save", shortcut_str, "启动快速保存截图", crate::commands::screenshot::start_screenshot_quick_save)
 }
 
+#[cfg(target_os = "windows")]
 pub fn register_screenshot_quick_pin_hotkey(shortcut_str: &str) -> Result<(), String> {
     register_screenshot_shortcut("screenshot_quick_pin", shortcut_str, "启动快速贴图截图", crate::commands::screenshot::start_screenshot_quick_pin)
 }
 
+#[cfg(target_os = "windows")]
 pub fn register_screenshot_quick_ocr_hotkey(shortcut_str: &str) -> Result<(), String> {
     register_screenshot_shortcut("screenshot_quick_ocr", shortcut_str, "启动快速 OCR 截图", crate::commands::screenshot::start_screenshot_quick_ocr)
 }
 
+#[cfg(target_os = "windows")]
 fn register_screenshot_shortcut(
     id: &str,
     shortcut_str: &str,
@@ -919,27 +924,30 @@ fn reload_from_settings_inner() -> Result<(), String> {
             }
         }
         
-        if settings.screenshot_enabled && !settings.screenshot_shortcut.is_empty() {
-            if let Err(e) = register_screenshot_hotkey(&settings.screenshot_shortcut) {
-                eprintln!("注册截图快捷键失败: {}", e);
+        #[cfg(target_os = "windows")]
+        {
+            if settings.screenshot_enabled && !settings.screenshot_shortcut.is_empty() {
+                if let Err(e) = register_screenshot_hotkey(&settings.screenshot_shortcut) {
+                    eprintln!("注册截图快捷键失败: {}", e);
+                }
             }
-        }
-        
-        if settings.screenshot_enabled && !settings.screenshot_quick_save_shortcut.is_empty() {
-            if let Err(e) = register_screenshot_quick_save_hotkey(&settings.screenshot_quick_save_shortcut) {
-                eprintln!("注册快速保存截图快捷键失败: {}", e);
+
+            if settings.screenshot_enabled && !settings.screenshot_quick_save_shortcut.is_empty() {
+                if let Err(e) = register_screenshot_quick_save_hotkey(&settings.screenshot_quick_save_shortcut) {
+                    eprintln!("注册快速保存截图快捷键失败: {}", e);
+                }
             }
-        }
-        
-        if settings.screenshot_enabled && !settings.screenshot_quick_pin_shortcut.is_empty() {
-            if let Err(e) = register_screenshot_quick_pin_hotkey(&settings.screenshot_quick_pin_shortcut) {
-                eprintln!("注册快速贴图截图快捷键失败: {}", e);
+
+            if settings.screenshot_enabled && !settings.screenshot_quick_pin_shortcut.is_empty() {
+                if let Err(e) = register_screenshot_quick_pin_hotkey(&settings.screenshot_quick_pin_shortcut) {
+                    eprintln!("注册快速贴图截图快捷键失败: {}", e);
+                }
             }
-        }
-        
-        if settings.screenshot_enabled && !settings.screenshot_quick_ocr_shortcut.is_empty() {
-            if let Err(e) = register_screenshot_quick_ocr_hotkey(&settings.screenshot_quick_ocr_shortcut) {
-                eprintln!("注册快速OCR截图快捷键失败: {}", e);
+
+            if settings.screenshot_enabled && !settings.screenshot_quick_ocr_shortcut.is_empty() {
+                if let Err(e) = register_screenshot_quick_ocr_hotkey(&settings.screenshot_quick_ocr_shortcut) {
+                    eprintln!("注册快速 OCR 截图快捷键失败: {}", e);
+                }
             }
         }
         

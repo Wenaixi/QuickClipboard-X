@@ -33,7 +33,7 @@ fn stored_absolute_path(stored: &StoredScreenshot) -> &Path {
     &stored.absolute_path
 }
 
-fn build_clipboard_content(stored: &StoredScreenshot) -> ProcessedContent {
+pub fn prepare_clipboard_content(stored: &StoredScreenshot) -> ProcessedContent {
     ProcessedContent {
         content: format!("files:[{{\"path\":\"{}\",\"name\":\"{}.png\",\"size\":{},\"is_directory\":false,\"file_type\":\"image/png\"}}]", stored.relative_path, stored.image_id, stored.png_bytes),
         html_content: None,
@@ -46,7 +46,7 @@ fn build_clipboard_content(stored: &StoredScreenshot) -> ProcessedContent {
 }
 
 fn store_screenshot_history(stored: &StoredScreenshot) -> Result<i64, ScreenshotActionError> {
-    store_clipboard_item(build_clipboard_content(stored)).map_err(ScreenshotActionError::Clipboard)
+    store_clipboard_item(prepare_clipboard_content(stored)).map_err(ScreenshotActionError::Clipboard)
 }
 
 pub fn copy_screenshot_text(text: &str) -> Result<i64, ScreenshotActionError> {
@@ -85,6 +85,7 @@ pub fn emit_screenshot_history_update(app: &tauri::AppHandle, clipboard_id: i64)
 }
 
 pub fn copy_screenshot(stored: &StoredScreenshot) -> Result<i64, ScreenshotActionError> {
+    let _monitor_guard = crate::services::clipboard::pause_clipboard_monitor_for(500);
     let path = stored_absolute_path(stored)
         .to_str()
         .ok_or_else(|| ScreenshotActionError::Clipboard("截图路径无效".to_string()))?;
@@ -152,7 +153,7 @@ mod tests {
             height: 8,
             png_bytes: 70,
         };
-        let content = build_clipboard_content(&stored);
+        let content = prepare_clipboard_content(&stored);
         assert_eq!(content.content_type, "image");
         assert_eq!(content.image_id.as_deref(), Some("0123456789abcdef"));
         assert!(content.content.contains("clipboard_images/0123456789abcdef.png"));

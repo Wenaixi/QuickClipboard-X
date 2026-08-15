@@ -116,16 +116,10 @@ pub async fn show_tray_menu(app: AppHandle) -> Result<(), String> {
     let hotkeys_label = if settings.hotkeys_enabled { "禁用快捷键" } else { "启用快捷键" };
     let monitor_label = if settings.clipboard_monitor { "禁用剪贴板监听" } else { "启用剪贴板监听" };
     
-    let items = vec![
+    let mut items = vec![
         menu_item_with_state("toggle", "显示/隐藏", Some("ti ti-app-window"), is_force_update),
         separator_item(),
         menu_item_with_state("settings", "设置", Some("ti ti-settings"), is_force_update),
-        menu_item_with_state(
-            "screenshot",
-            "截屏",
-            Some("ti ti-screenshot"),
-            is_force_update || !settings.screenshot_enabled,
-        ),
         CtxMenuItem::submenu(
             "pin-images",
             "贴图",
@@ -163,7 +157,15 @@ pub async fn show_tray_menu(app: AppHandle) -> Result<(), String> {
         menu_item("restart", "重启程序", Some("ti ti-refresh")),
         menu_item("quit", "退出", Some("ti ti-power")),
     ];
-    
+
+    #[cfg(target_os = "windows")]
+    items.insert(3, menu_item_with_state(
+        "screenshot",
+        "截屏",
+        Some("ti ti-screenshot"),
+        is_force_update || !settings.screenshot_enabled,
+    ));
+
     let (cursor_x, cursor_y) = crate::mouse::get_cursor_position();
     let theme = if settings.theme.is_empty() { "auto".to_string() } else { settings.theme };
     
@@ -223,6 +225,7 @@ fn handle_tray_menu_selection(app: &AppHandle, selected_id: &str) {
         "settings" => {
             let _ = crate::windows::settings_window::open_settings_window(app);
         }
+        #[cfg(target_os = "windows")]
         "screenshot" => {
             let app = app.clone();
             std::thread::spawn(move || {

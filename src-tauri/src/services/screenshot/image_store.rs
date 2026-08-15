@@ -140,12 +140,20 @@ fn atomic_write(
     }
 }
 
-pub fn store_png(
+pub fn encode_and_store_png(
     width: u32,
     height: u32,
     rgba: &[u8],
 ) -> Result<StoredScreenshot, ImageStoreError> {
     let png_bytes = encode_png(width, height, rgba)?;
+    store_png_bytes(width, height, png_bytes)
+}
+
+fn store_png_bytes(
+    width: u32,
+    height: u32,
+    png_bytes: Vec<u8>,
+) -> Result<StoredScreenshot, ImageStoreError> {
     let image_id = content_image_id(&png_bytes);
     let data_directory =
         crate::services::get_data_directory().map_err(ImageStoreError::DataDirectory)?;
