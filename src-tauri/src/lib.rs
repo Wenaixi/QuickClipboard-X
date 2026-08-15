@@ -142,10 +142,6 @@ pub fn run() {
         .plugin(tauri_plugin_drag::init())
         .plugin(tauri_plugin_store::Builder::new().build());
     
-    #[cfg(feature = "gpu-image-viewer")]
-    let builder = builder.plugin(gpu_image_viewer::init());
-
-
     let app = builder.invoke_handler(tauri::generate_handler![
                 commands::start_custom_drag,
                 commands::stop_custom_drag,
@@ -281,16 +277,27 @@ pub fn run() {
                 commands::dm_import_data_zip,
                 commands::dm_reset_all_data,
                 commands::dm_list_backups,
+                #[cfg(target_os = "windows")]
                 commands::screenshot::set_mouse_position,
+                #[cfg(target_os = "windows")]
                 commands::screenshot::get_mouse_position,
+                #[cfg(target_os = "windows")]
                 commands::screenshot::start_screenshot,
+                #[cfg(target_os = "windows")]
                 commands::screenshot::start_normal_screenshot,
+                #[cfg(target_os = "windows")]
                 commands::screenshot::start_screenshot_quick_save,
+                #[cfg(target_os = "windows")]
                 commands::screenshot::start_screenshot_quick_pin,
+                #[cfg(target_os = "windows")]
                 commands::screenshot::start_screenshot_quick_ocr,
+                #[cfg(target_os = "windows")]
                 commands::screenshot::screenshot_window_ready,
+                #[cfg(target_os = "windows")]
                 commands::screenshot::cancel_screenshot,
+                #[cfg(target_os = "windows")]
                 commands::screenshot::complete_screenshot,
+                #[cfg(target_os = "windows")]
                 commands::screenshot::close_screenshot_window,
                 commands::copy_text_to_clipboard,
                 commands::check_ai_translation_config,
@@ -375,18 +382,6 @@ pub fn run() {
                 commands::il_delete_group,
                 commands::recognize_image_ocr,
                 commands::recognize_file_ocr,
-                #[cfg(feature = "gpu-image-viewer")]
-                windows::native_pin_window::create_native_pin_window,
-                #[cfg(feature = "gpu-image-viewer")]
-                windows::native_pin_window::confirm_native_pin_edit,
-                #[cfg(feature = "gpu-image-viewer")]
-                windows::native_pin_window::cancel_native_pin_edit,
-                #[cfg(feature = "gpu-image-viewer")]
-                windows::native_pin_window::show_native_image_preview,
-                #[cfg(feature = "gpu-image-viewer")]
-                windows::native_pin_window::close_native_image_preview,
-                #[cfg(feature = "gpu-image-viewer")]
-                windows::native_pin_window::create_native_pin_from_file,
             ])
         
     .setup(|app| {
@@ -468,8 +463,6 @@ pub fn run() {
                 services::webdav_sync::sync_scheduler::set_app_handle(app.handle().clone());
 
                 windows::pin_image_window::init_pin_image_window();
-                #[cfg(feature = "gpu-image-viewer")]
-                windows::native_pin_window::setup_event_listener(app.handle());
                 focus::start_focus_listener(app.handle().clone());
 
                 if settings.webdav_enabled {
