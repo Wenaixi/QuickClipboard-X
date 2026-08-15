@@ -2,10 +2,11 @@ use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 use crate::services::screenshot::capture::{capture_monitor, ensure_com_initialized, get_monitor_handle, CaptureRect};
-use crate::services::screenshot::{choose_screenshot_save_destination, copy_screenshot, copy_screenshot_text, emit_screenshot_history_update, encode_and_store_png, prepare_pin_path, recognize_image, save_screenshot, MainWindowVisibilityRevision, MonitorRect, SessionPhase, ScreenshotSessionManager, StartSessionResult};
-use crate::services::settings::get_settings;
+use crate::services::screenshot::{choose_screenshot_save_destination, copy_screenshot, copy_screenshot_text, emit_screenshot_history_update, encode_and_store_png, prepare_pin_path, recognize_image, save_screenshot, validate_configuration, MainWindowVisibilityRevision, MonitorRect, SessionPhase, ScreenshotSessionManager, StartSessionResult};
+use crate::services::settings::{get_settings, update_with};
 use crate::windows::main_window::{get_main_window, hide_main_window, is_main_window_visible, show_main_window};
 
 pub const SCREENSHOT_WINDOW_LABEL: &str = "screenshot";
@@ -32,6 +33,7 @@ pub struct ScreenshotBootstrap {
     pub quick_action: bool,
     pub initial_action: Option<String>,
     pub screenshot_ai_enabled: bool,
+    pub screenshot_ai_configured: bool,
 }
 
 #[derive(Default)]
@@ -70,6 +72,7 @@ fn bootstrap_for_session(
     monitor: ScreenshotMonitorInfo,
     initial_action: Option<&str>,
     screenshot_ai_enabled: bool,
+    screenshot_ai_configured: bool,
 ) -> ScreenshotBootstrap {
     ScreenshotBootstrap {
         device_pixel_ratio: monitor.scale_factor,
@@ -78,7 +81,38 @@ fn bootstrap_for_session(
         quick_action: initial_action.is_some(),
         initial_action: initial_action.map(str::to_string),
         screenshot_ai_enabled,
+        screenshot_ai_configured,
     }
+}
+
+fn screenshot_ai_is_configured(settings: &crate::services::settings::AppSettings) -> bool {
+    settings.screenshot_ai_enabled
+        && validate_configuration(&settings.ai_api_key, &settings.ai_base_url, &settings.ai_model).is_ok()
+}
+
+fn confirm_screenshot_ai_cloud_access(app: &AppHandle) -> Result<bool, String> {
+    let settings = get_settings();
+    if settings.screenshot_ai_cloud_confirmed {
+        return Ok(true);
+    }
+
+    let message = if settings.language.starts_with("zh") {
+        "AI 识别会将当前截图选区发送至你配置的 AI 服务进行处理。图片不会使用本地 OCR 静默替代。\n\n是否继续？"
+    } else {
+        "AI recognition sends the current screenshot selection to your configured AI service. It will not silently fall back to local OCR.\n\nContinue?"
+    };
+    if !app
+        .dialog()
+        .message(message)
+        .buttons(MessageDialogButtons::OkCancel)
+        .blocking_show()
+    {
+        return Ok(false);
+    }
+
+    update_with(|settings| settings.screenshot_ai_cloud_confirmed = true)
+        .map_err(|error| format!("保存截图 AI 隐私确认失败: {error}"))?;
+    Ok(true)
 }
 
 fn configure_window(window: &WebviewWindow, monitor: &ScreenshotMonitorInfo) -> Result<(), String> {
@@ -131,6 +165,24 @@ mod source_guards {
             .find("copy_screenshot_text(&result.text)")
             .expect("AI 动作缺少文本复制");
         assert!(result_guard < copy_text, "取消检查必须先于 AI 文本写入剪贴板");
+    }
+
+    #[test]
+    fn ai_action_requires_valid_configuration_and_cloud_confirmation_before_request() {
+        let source = source_file("windows/screenshot_window/mod.rs");
+        let ai_start = source.find("\"ai\" => {").expect("缺少 AI 截图动作");
+        let ai_body = &source[ai_start..];
+        let ai_body = &ai_body[..ai_body.find("        other =>").expect("缺少动作兜底")];
+        let config_check = ai_body
+            .find("if !screenshot_ai_is_configured(&settings)")
+            .expect("AI 动作缺少配置校验");
+        let confirmation = ai_body
+            .find("confirm_screenshot_ai_cloud_access(app)?")
+            .expect("AI 动作缺少云端发送确认");
+        let request = ai_body
+            .find("recognize_image(")
+            .expect("AI 动作缺少识别请求");
+        assert!(config_check < confirmation && confirmation < request, "必须先校验配置、确认云端发送，再发起 AI 请求");
     }
 
     #[test]
@@ -265,6 +317,7 @@ pub fn start_screenshot(app: &AppHandle, initial_action: Option<&str>) -> Result
         monitor.clone(),
         if existing { None } else { initial_action },
         settings.screenshot_ai_enabled,
+        screenshot_ai_is_configured(&settings),
     );
     if let Err(error) = configure_window(&window, &monitor) {
         finish_failed_screenshot(app, &bootstrap.session_id);
@@ -495,8 +548,10 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
         },
         "ai" => {
             let settings = get_settings();
-            if !settings.screenshot_ai_enabled {
-                Err("截图 AI 识别已关闭".to_string())
+            if !screenshot_ai_is_configured(&settings) {
+                Err("截图 AI 识别尚未完成配置".to_string())
+            } else if !confirm_screenshot_ai_cloud_access(app)? {
+                Err("已取消云端 AI 识别".to_string())
             } else {
                 if !is_current_processing_session(session_id) {
                     return Err("截图会话已取消".to_string());

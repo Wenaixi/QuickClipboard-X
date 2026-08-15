@@ -76,6 +76,7 @@ pub struct AppSettings {
     pub screenshot_window_lifecycle_mode: String,
     pub screenshot_auto_dispose_minutes: u32,
     pub screenshot_ai_enabled: bool,
+    pub screenshot_ai_cloud_confirmed: bool,
     pub screenshot_ai_prompt: String,
 
     // 预览窗口设置
@@ -281,6 +282,7 @@ impl Default for AppSettings {
             screenshot_window_lifecycle_mode: "quick".to_string(),
             screenshot_auto_dispose_minutes: 10,
             screenshot_ai_enabled: true,
+            screenshot_ai_cloud_confirmed: false,
             screenshot_ai_prompt: String::new(),
 
             quickpaste_enabled: true,
@@ -534,10 +536,12 @@ mod tests {
     fn screenshot_settings_round_trip_preserves_ai_fields() {
         let mut settings = AppSettings::default();
         settings.screenshot_ai_enabled = false;
+        settings.screenshot_ai_cloud_confirmed = true;
         settings.screenshot_ai_prompt = "只返回文字".to_string();
         let encoded = serde_json::to_string(&settings).unwrap();
         let decoded: AppSettings = serde_json::from_str(&encoded).unwrap();
         assert!(!decoded.screenshot_ai_enabled);
+        assert!(decoded.screenshot_ai_cloud_confirmed, "隐私确认状态必须随设置持久化");
         assert_eq!(decoded.screenshot_ai_prompt, "只返回文字");
     }
 

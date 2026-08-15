@@ -148,6 +148,7 @@ export const defaultSettings = {
   screenshotWindowLifecycleMode: 'quick',
   screenshotAutoDisposeMinutes: 10,
   screenshotAiEnabled: true,
+  screenshotAiCloudConfirmed: false,
   screenshotAiPrompt: '',
   
   // AI 配置

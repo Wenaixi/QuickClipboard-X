@@ -7,8 +7,8 @@ test('截图浮窗中英文语言包完整提供动作和状态文案', () => {
   for (const locale of ['zh-CN', 'en-US']) {
     const messages = JSON.parse(readFileSync(new URL(`../../shared/locales/${locale}.json`, import.meta.url)));
     const screenshot = messages.screenshot;
-    assert.deepEqual(Object.keys(screenshot.actions).sort(), ['ai', 'copy', 'pin', 'save']);
-    for (const key of ['processing', 'selectionLabel', 'cancelLabel', 'cancelFailed', 'sessionNotReady', 'actionFailed', 'shortcutHint']) {
+    assert.deepEqual(Object.keys(screenshot.actions).sort(), ['ai', 'configureAi', 'copy', 'pin', 'save']);
+    for (const key of ['processing', 'selectionLabel', 'cancelLabel', 'cancelFailed', 'sessionNotReady', 'actionFailed', 'openAiSettingsFailed', 'shortcutHint']) {
       assert.equal(typeof screenshot[key], 'string', `${locale} 缺少 screenshot.${key}`);
     }
   }
@@ -33,6 +33,7 @@ test('normalizeBootstrap 使用显式显示器物理尺寸与逻辑尺寸', () =
     dpr: 1.25,
     initialAction: '',
     screenshotAiEnabled: true,
+    screenshotAiConfigured: false,
   });
 });
 
@@ -52,6 +53,7 @@ test('normalizeBootstrap 缺失尺寸时以视口和 DPR 推导安全默认值',
       dpr: 1.5,
       initialAction: '',
       screenshotAiEnabled: true,
+      screenshotAiConfigured: false,
     });
   } finally {
     Object.defineProperty(globalThis, 'innerWidth', { configurable: true, value: oldWidth });

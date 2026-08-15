@@ -247,7 +247,8 @@
       "copy": "Copy",
       "save": "Save As",
       "pin": "Pin",
-      "ai": "AI Recognition"
+      "ai": "AI Recognition",
+      "configureAi": "Configure AI"
     },
     "processing": "Processing",
     "selectionLabel": "Screenshot selection",
@@ -255,6 +256,7 @@
     "cancelFailed": "Failed to cancel screenshot: {{error}}",
     "sessionNotReady": "The screenshot session is not ready. Please start it again.",
     "actionFailed": "Failed to {{action}}: {{error}}",
+    "openAiSettingsFailed": "Failed to open AI settings: {{error}}",
     "shortcutHint": "{{label}} ({{shortcut}})"
   },
   "settings": {

@@ -54,7 +54,7 @@ function actionLabel(action, t) {
 }
 
 function actionIsEnabled(action, bootstrap) {
-  return action !== 'ai' || bootstrap.screenshotAiEnabled !== false;
+  return action !== 'ai' || (bootstrap.screenshotAiEnabled !== false && bootstrap.screenshotAiConfigured === true);
 }
 
 function isPrimaryPointer(event) {
@@ -133,6 +133,15 @@ function App() {
       unlisten?.();
     };
   }, []);
+
+  const openAiSettings = async () => {
+    try {
+      await cancelScreenshot();
+      await invoke('open_settings_window');
+    } catch (error) {
+      setActionError(t('screenshot.openAiSettingsFailed', { error: String(error) }));
+    }
+  };
 
   const cancelScreenshot = async () => {
     const sessionId = bootstrap.sessionId;
@@ -238,7 +247,7 @@ function App() {
       <div className="screenshot-mask screenshot-mask-right" aria-hidden="true" />
       <div className="screenshot-mask screenshot-mask-bottom" aria-hidden="true" />
       <div className="screenshot-selection" aria-hidden="true"><span className="screenshot-selection-size">{selection ? `${Math.round(selection.width)} × ${Math.round(selection.height)}` : ''}</span></div>
-      {selection && <div className="screenshot-toolbar" style={toolbarStyle} data-screenshot-control onPointerDown={(event) => event.stopPropagation()}>{ACTIONS.map((action) => { const label = actionLabel(action.id, t); return <button key={action.id} type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction) || !actionIsEnabled(action.id, bootstrap)} onClick={() => void completeScreenshot(action.id)} title={action.shortcut ? t('screenshot.shortcutHint', { label, shortcut: action.shortcut }) : label}>{busyAction === action.id ? t('screenshot.processing') : label}</button>; })}</div>}
+      {selection && <div className="screenshot-toolbar" style={toolbarStyle} data-screenshot-control onPointerDown={(event) => event.stopPropagation()}>{ACTIONS.map((action) => { const label = actionLabel(action.id, t); return <button key={action.id} type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction) || !actionIsEnabled(action.id, bootstrap)} onClick={() => void completeScreenshot(action.id)} title={action.shortcut ? t('screenshot.shortcutHint', { label, shortcut: action.shortcut }) : label}>{busyAction === action.id ? t('screenshot.processing') : label}</button>; })}{!bootstrap.screenshotAiConfigured && <button type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction)} onClick={() => void openAiSettings()}>{t('screenshot.actions.configureAi')}</button>}</div>}
       {actionError && <div className="screenshot-error" role="alert" data-screenshot-control>{actionError}</div>}
       <button type="button" className="screenshot-cancel" data-screenshot-control onPointerDown={(event) => event.stopPropagation()} onClick={() => void cancelScreenshot()} aria-label={t('screenshot.cancelLabel')} title={t('screenshot.shortcutHint', { label: t('screenshot.cancelLabel'), shortcut: 'Esc' })}>{t('screenshot.cancel')}</button>
     </main>

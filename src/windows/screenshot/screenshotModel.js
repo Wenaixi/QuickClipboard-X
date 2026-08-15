@@ -17,5 +17,6 @@ export function normalizeBootstrap(payload = {}, viewport = {}) {
     dpr,
     initialAction: typeof payload.initialAction === 'string' ? payload.initialAction : '',
     screenshotAiEnabled: payload.screenshotAiEnabled !== false,
+    screenshotAiConfigured: payload.screenshotAiConfigured === true,
   };
 }
