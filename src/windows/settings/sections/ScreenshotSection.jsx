@@ -11,7 +11,8 @@ import Input from '@shared/components/ui/Input';
 
 function ScreenshotSection({
   settings,
-  onSettingChange
+  onSettingChange,
+  onNavigateAiConfig
 }) {
   const {
     t
@@ -94,9 +95,11 @@ function ScreenshotSection({
       </SettingItem>
 
       <SettingItem label={t('settings.screenshot.aiConfigStatus')} description={aiConfigured ? t('settings.screenshot.aiConfigReady') : t('settings.screenshot.aiConfigMissing')}>
-        <Button variant="secondary" loading={testingAiConfig} disabled={!aiConfigured} onClick={testAiConfig} icon={<i className="ti ti-test-pipe" />}>
+        {aiConfigured ? <Button variant="secondary" loading={testingAiConfig} onClick={testAiConfig} icon={<i className="ti ti-test-pipe" />}>
           {t('settings.screenshot.testAiConfig')}
-        </Button>
+        </Button> : <Button variant="secondary" onClick={onNavigateAiConfig} icon={<i className="ti ti-settings" />}>
+          {t('settings.screenshot.configureAi')}
+        </Button>}
       </SettingItem>
 
       <SettingItem label={t('settings.screenshot.lifecycleMode')} description={t('settings.screenshot.lifecycleModeDesc')}>

@@ -938,6 +938,7 @@
       "aiConfigStatus": "视觉配置状态",
       "aiConfigReady": "已配置视觉模型",
       "aiConfigMissing": "请配置 API Key、HTTPS 服务地址和视觉模型",
+      "configureAi": "配置 AI",
       "testAiConfig": "测试 AI 配置",
       "testAiConfigSuccess": "AI 视觉配置测试成功",
       "testAiConfigFailed": "AI 视觉配置测试失败：{{error}}",

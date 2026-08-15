@@ -938,6 +938,7 @@
       "aiConfigStatus": "Vision Configuration Status",
       "aiConfigReady": "Vision model configured",
       "aiConfigMissing": "Configure an API key, HTTPS endpoint, and vision model",
+      "configureAi": "Configure AI",
       "testAiConfig": "Test AI Configuration",
       "testAiConfigSuccess": "AI vision configuration test succeeded",
       "testAiConfigFailed": "AI vision configuration test failed: {{error}}",

@@ -149,7 +149,7 @@ function App() {
         content = <PreviewSection settings={snap} onSettingChange={handleSettingChange} />;
         break;
       case 'screenshot':
-        content = <ScreenshotSection settings={snap} onSettingChange={handleSettingChange} />;
+        content = <ScreenshotSection settings={snap} onSettingChange={handleSettingChange} onNavigateAiConfig={() => setActiveSection('aiConfig')} />;
         break;
       case 'sound':
         content = <SoundSection settings={snap} onSettingChange={handleSettingChange} />;
