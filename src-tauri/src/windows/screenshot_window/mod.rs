@@ -136,11 +136,55 @@ fn validate_screenshot_action(action: &str) -> Option<String> {
     }
 }
 
+fn validate_initial_screenshot_action(
+    initial_action: Option<&str>,
+    settings: &crate::services::settings::AppSettings,
+) -> Result<(), String> {
+    let Some(action) = initial_action else {
+        return Ok(());
+    };
+
+    if let Some(error) = validate_screenshot_action(action) {
+        return Err(error);
+    }
+    if action == "ai" && !settings.screenshot_ai_enabled {
+        return Err("截图 AI 识别已关闭".to_string());
+    }
+    if action == "ai" && !screenshot_ai_is_configured(settings) {
+        return Err("截图 AI 识别尚未完成配置".to_string());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod source_guards {
+    use super::validate_initial_screenshot_action;
+
     fn source_file(relative: &str) -> String {
         std::fs::read_to_string(format!("{}/src/{relative}", env!("CARGO_MANIFEST_DIR")))
             .expect("读取截图源码失败")
+    }
+
+    #[test]
+    fn quick_ai_action_requires_enabled_and_configured_vision_settings() {
+        let mut settings = crate::services::settings::AppSettings::default();
+        assert!(validate_initial_screenshot_action(Some("copy"), &settings).is_ok());
+        assert_eq!(
+            validate_initial_screenshot_action(Some("ai"), &settings),
+            Err("截图 AI 识别尚未完成配置".to_string()),
+        );
+
+        settings.screenshot_ai_enabled = false;
+        settings.ai_api_key = "test-key".to_string();
+        settings.ai_base_url = "https://api.example.com/v1".to_string();
+        settings.ai_model = "Qwen/Qwen2.5-VL-7B-Instruct".to_string();
+        assert_eq!(
+            validate_initial_screenshot_action(Some("ai"), &settings),
+            Err("截图 AI 识别已关闭".to_string()),
+        );
+
+        settings.screenshot_ai_enabled = true;
+        assert!(validate_initial_screenshot_action(Some("ai"), &settings).is_ok());
     }
 
     #[test]
@@ -254,9 +298,10 @@ fn finish_failed_screenshot(app: &AppHandle, session_id: &str) {
 }
 
 pub fn start_screenshot(app: &AppHandle, initial_action: Option<&str>) -> Result<(), String> {
+    let settings = get_settings();
+    validate_initial_screenshot_action(initial_action, &settings)?;
     let monitor = monitor_for_cursor(app)?;
     let rect = session_monitor_rect(&monitor)?;
-    let settings = get_settings();
     let (session_id, existing) = {
         let mut state = STATE.lock();
         match state.sessions.start(rect, initial_action.is_some()) {
