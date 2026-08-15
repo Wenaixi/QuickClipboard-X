@@ -8,6 +8,8 @@ import {
 // 设置 Store
 export const settingsStore = proxy({
   ...defaultSettings,
+  // 后端原始设置快照：保存时作为底稿，防止当前版本不认识的字段被前端裁掉。
+  backendSettings: {},
   // UI 专属设置（localStorage）
   fontSize: 14,
   footerLeftRatio: 0.5,
@@ -24,9 +26,12 @@ export const settingsStore = proxy({
   async loadSettings() {
     const settings = await loadSettingsFromBackend()
     
+    // 以服务端原始设置为保存底稿，未来版本字段不参与页面状态但必须可回写。
+    this.backendSettings = { ...settings }
+
     // 更新所有设置到 store
     Object.keys(settings).forEach(key => {
-      if (key in this && key !== 'loadSettings' && key !== 'saveSetting' && key !== 'saveSettings' && key !== 'saveAllSettings' && key !== 'updateSettings') {
+      if (Object.prototype.hasOwnProperty.call(defaultSettings, key)) {
         this[key] = settings[key]
       }
     })
@@ -72,7 +77,7 @@ export const settingsStore = proxy({
   
   // 获取所有设置（排除方法）
   getAllSettings() {
-    const settings = {}
+    const settings = { ...this.backendSettings }
     Object.keys(defaultSettings).forEach(key => {
       if (key in this) {
         settings[key] = this[key]

@@ -42,7 +42,26 @@ test('保存设置时后端字段仍属于 defaultSettings 序列化集合', () 
   assert.deepEqual(payload, currentSettings);
   assert.match(
     settingsStoreSource,
-    /Object\.keys\(defaultSettings\)\.forEach\(key =>/,
-    'getAllSettings 应继续以 defaultSettings 作为保存字段集合'
+    /this\.backendSettings = \{ \...settings \}/,
+    '加载时必须保存服务端原始设置快照'
+  );
+  assert.match(
+    settingsStoreSource,
+    /Object\.prototype\.hasOwnProperty\.call\(defaultSettings, key\)/,
+    '加载时只能回填 defaultSettings 已声明的字段，未知字段不能覆盖 Store 内部状态或方法'
+  );
+  const loadStart = settingsStoreSource.indexOf('async loadSettings() {');
+  const loadEnd = settingsStoreSource.indexOf('// 保存单个设置项');
+  assert.ok(loadStart >= 0 && loadEnd > loadStart, 'loadSettings 函数边界必须存在');
+  const loadSettingsBody = settingsStoreSource.slice(loadStart, loadEnd);
+  assert.doesNotMatch(
+    loadSettingsBody,
+    /key in this/,
+    '加载时不能再按 Store 属性名回填，避免未来字段命名冲突'
+  );
+  assert.match(
+    settingsStoreSource,
+    /const settings = \{ \...this\.backendSettings \}/,
+    'getAllSettings 必须以原始后端设置为底稿，避免未知字段在前端保存时丢失'
   );
 });
