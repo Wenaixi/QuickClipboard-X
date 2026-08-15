@@ -34,16 +34,32 @@ pub fn get_mouse_position() -> (i32, i32) {
     crate::utils::mouse::get_cursor_position()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ai_configuration_status_is_independent_of_screenshot_action_toggle() {
+        assert!(screenshot_ai_config_is_valid(
+            "test-key",
+            "https://api.example.com/v1",
+            "Qwen/Qwen2.5-VL-7B-Instruct",
+        ));
+    }
+}
+
+fn screenshot_ai_config_is_valid(api_key: &str, base_url: &str, model: &str) -> bool {
+    crate::services::screenshot::validate_configuration(api_key, base_url, model).is_ok()
+}
+
 #[tauri::command]
 pub fn get_screenshot_ai_config_status() -> bool {
     let settings = crate::services::settings::get_settings();
-    settings.screenshot_ai_enabled
-        && crate::services::screenshot::validate_configuration(
-            &settings.ai_api_key,
-            &settings.ai_base_url,
-            &settings.ai_model,
-        )
-        .is_ok()
+    screenshot_ai_config_is_valid(
+        &settings.ai_api_key,
+        &settings.ai_base_url,
+        &settings.ai_model,
+    )
 }
 
 #[tauri::command]
