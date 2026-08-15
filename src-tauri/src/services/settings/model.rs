@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 pub const SETTINGS_MIGRATION_VERSION_V1: u32 = 1;
 pub const SETTINGS_MIGRATION_VERSION_V2: u32 = 2;
@@ -157,7 +158,7 @@ pub struct AppSettings {
     pub paste_with_format: bool,
     pub paste_shortcut_mode: String,
     pub modifier_click_multi_select: bool,
-    
+
     pub paste_to_top: bool,
     pub show_list_shortcuts: bool,
     pub show_list_index: bool,
@@ -211,6 +212,9 @@ pub struct AppSettings {
     pub webdav_sync_images: bool,
     pub sync_transfer_active_mode: String,
 
+    // 当前版本暂不认识的设置字段必须随读取和保存原样保留，避免降级或跨版本后丢失。
+    #[serde(flatten)]
+    pub extra_fields: Map<String, Value>,
 }
 
 impl Default for AppSettings {
@@ -396,6 +400,7 @@ impl Default for AppSettings {
             webdav_sync_images: false,
             sync_transfer_active_mode: "webdav".to_string(),
 
+            extra_fields: Map::new(),
         }
     }
 }

@@ -2,7 +2,9 @@ use super::model::{
     AppSettings, SETTINGS_MIGRATION_VERSION_V1, SETTINGS_MIGRATION_VERSION_V2,
     SETTINGS_MIGRATION_VERSION_V3,
 };
+use serde_json::{Map, Value};
 use std::{
+    collections::HashSet,
     env, fs,
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
@@ -16,6 +18,86 @@ use windows::Win32::Storage::FileSystem::{
 };
 
 static NEXT_SETTINGS_TEMP_FILE_ID: AtomicU64 = AtomicU64::new(0);
+
+fn deserialize_settings(document: &Map<String, Value>) -> Result<AppSettings, serde_json::Error> {
+    serde_json::from_value(Value::Object(document.clone()))
+}
+
+fn legacy_setting_alias_target(key: &str) -> Option<&'static str> {
+    match key {
+        "history_limit" => Some("historyLimit"),
+        "custom_storage_path" => Some("customStoragePath"),
+        "use_custom_storage" => Some("useCustomStorage"),
+        _ => None,
+    }
+}
+
+fn recover_settings_from_content(content: &str) -> Result<(AppSettings, bool, bool), String> {
+    let Value::Object(document) =
+        serde_json::from_str::<Value>(content).map_err(|error| error.to_string())?
+    else {
+        return Err("设置文件根节点必须是 JSON 对象".to_string());
+    };
+    let Value::Object(mut recovered) =
+        serde_json::to_value(AppSettings::default()).map_err(|error| error.to_string())?
+    else {
+        return Err("默认设置序列化结果不是 JSON 对象".to_string());
+    };
+
+    let known_keys: HashSet<String> = recovered.keys().cloned().collect();
+    let mut rejected_any_field = false;
+    let mut unknown_any_field = false;
+    for (key, value) in document {
+        let alias_target = legacy_setting_alias_target(&key);
+        if !known_keys.contains(&key) && alias_target.is_none() {
+            unknown_any_field = true;
+        }
+        let mut candidate = recovered.clone();
+        if let Some(canonical_key) = alias_target {
+            candidate.remove(canonical_key);
+        }
+        candidate.insert(key, value);
+        if deserialize_settings(&candidate).is_ok() {
+            recovered = candidate;
+        } else {
+            rejected_any_field = true;
+        }
+    }
+
+    deserialize_settings(&recovered)
+        .map(|settings| (settings, rejected_any_field, unknown_any_field))
+        .map_err(|error| error.to_string())
+}
+
+fn incompatible_settings_backup_path(path: &Path) -> PathBuf {
+    path.with_extension("json.incompatible.bak")
+}
+
+fn incompatible_settings_backup_path_at(path: &Path, index: usize) -> PathBuf {
+    if index == 0 {
+        incompatible_settings_backup_path(path)
+    } else {
+        path.with_extension(format!("json.incompatible.{index}.bak"))
+    }
+}
+
+fn preserve_incompatible_settings(path: &Path, content: &str) -> Result<(), String> {
+    for index in 0..=999 {
+        let backup = incompatible_settings_backup_path_at(path, index);
+        match fs::read_to_string(&backup) {
+            Ok(existing) if existing == content => return Ok(()),
+            Ok(_) => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return fs::write(&backup, content)
+                    .map_err(|error| format!("保留不兼容设置备份失败，已拒绝覆盖原设置: {error}"));
+            }
+            Err(error) => {
+                return Err(format!("读取不兼容设置备份失败，已拒绝覆盖原设置: {error}"));
+            }
+        }
+    }
+    Err("不兼容设置备份数量已达上限，已拒绝覆盖原设置".to_string())
+}
 
 pub struct SettingsStorage;
 
@@ -102,9 +184,17 @@ impl SettingsStorage {
         let mut last_error = None;
         if target.exists() {
             return match fs::read_to_string(target) {
-                Ok(content) => match serde_json::from_str(&content) {
-                    Ok(settings) => Ok(Some((settings, content))),
-                    Err(error) => Err(error.to_string()),
+                Ok(content) => match recover_settings_from_content(&content) {
+                    Ok((settings, rejected_any_field, unknown_any_field)) => {
+                        if rejected_any_field || unknown_any_field {
+                            preserve_incompatible_settings(target, &content)?;
+                        }
+                        if rejected_any_field {
+                            Self::save_to_path(target, &settings)?;
+                        }
+                        Ok(Some((settings, content)))
+                    }
+                    Err(error) => Err(error),
                 },
                 Err(error) => Err(error.to_string()),
             };
@@ -121,10 +211,15 @@ impl SettingsStorage {
                     continue;
                 }
             };
-            let settings = match serde_json::from_str::<AppSettings>(&content) {
-                Ok(settings) => settings,
+            let settings = match recover_settings_from_content(&content) {
+                Ok((settings, rejected_any_field, unknown_any_field)) => {
+                    if rejected_any_field || unknown_any_field {
+                        preserve_incompatible_settings(source, &content)?;
+                    }
+                    settings
+                }
                 Err(error) => {
-                    last_error = Some(error.to_string());
+                    last_error = Some(error);
                     continue;
                 }
             };
@@ -310,12 +405,15 @@ mod tests {
 
         SettingsStorage::save_to_path(&path, &settings).unwrap();
 
-        let loaded: AppSettings = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        let loaded: AppSettings =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(loaded.language, "persisted-language");
         assert!(
-            fs::read_dir(&dir)
+            fs::read_dir(&dir).unwrap().all(|entry| !entry
                 .unwrap()
-                .all(|entry| !entry.unwrap().file_name().to_string_lossy().ends_with(".tmp")),
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".tmp")),
             "成功写入后不应遗留临时设置文件"
         );
         fs::remove_dir_all(dir).unwrap();
@@ -362,6 +460,149 @@ mod tests {
         write_settings(&valid, "legacy");
 
         assert!(SettingsStorage::load_settings_from_paths(&target, &[valid]).is_err());
+        assert_eq!(fs::read_to_string(&target).unwrap(), original);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn incompatible_field_recovers_each_compatible_shortcut_instead_of_resetting_settings() {
+        let dir = test_dir();
+        let target = dir.join("settings.json");
+        fs::write(
+            &target,
+            r#"{
+                "toggleShortcut": "Ctrl+Alt+V",
+                "screenshotShortcut": "Ctrl+Shift+S",
+                "quickpasteShortcut": "Alt+Q",
+                "navigateUpShortcut": "W",
+                "screenshotQuality": "not-a-number",
+                "hotkeysEnabled": { "invalid": true },
+                "unknownFutureSetting": { "keepForFuture": true }
+            }"#,
+        )
+        .unwrap();
+
+        let loaded = SettingsStorage::load_settings_from_paths(&target, &[])
+            .expect("单个字段不兼容时仍应恢复其余设置")
+            .expect("存在设置文件时必须返回恢复结果");
+
+        assert_eq!(loaded.0.toggle_shortcut, "Ctrl+Alt+V");
+        assert_eq!(loaded.0.screenshot_shortcut, "Ctrl+Shift+S");
+        assert_eq!(loaded.0.quickpaste_shortcut, "Alt+Q");
+        assert_eq!(loaded.0.navigate_up_shortcut, "W");
+        assert_eq!(
+            loaded.0.screenshot_quality,
+            AppSettings::default().screenshot_quality
+        );
+        let backup = incompatible_settings_backup_path(&target);
+        assert!(backup.exists(), "不兼容配置必须先保留完整备份");
+        assert!(
+            fs::read_to_string(backup)
+                .unwrap()
+                .contains("unknownFutureSetting"),
+            "备份必须保留未知字段，避免未来版本设置被本版删除"
+        );
+        let repaired: AppSettings = serde_json::from_str(&fs::read_to_string(&target).unwrap())
+            .expect("恢复结果必须写回为下次可直接加载的有效配置");
+        assert_eq!(repaired.toggle_shortcut, "Ctrl+Alt+V");
+        assert_eq!(repaired.screenshot_shortcut, "Ctrl+Shift+S");
+        assert!(
+            !fs::read_to_string(&target)
+                .unwrap()
+                .contains("not-a-number"),
+            "不兼容字段只能留在备份，不能让每次启动反复触发恢复"
+        );
+        assert!(
+            fs::read_to_string(&target)
+                .unwrap()
+                .contains("unknownFutureSetting"),
+            "恢复写回时也必须保留未知未来字段"
+        );
+        let mut saved_again = loaded.0.clone();
+        saved_again.language = "en-US".to_string();
+        SettingsStorage::save_to_path(&target, &saved_again)
+            .expect("用户下次保存也不能删除未知未来字段");
+        assert!(
+            fs::read_to_string(&target)
+                .unwrap()
+                .contains("unknownFutureSetting"),
+            "后续保存必须继续保留未知未来字段"
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_new_incompatible_document_gets_its_own_backup_instead_of_reusing_a_stale_one() {
+        let dir = test_dir();
+        let target = dir.join("settings.json");
+        fs::write(
+            incompatible_settings_backup_path(&target),
+            r#"{ "unknownFutureSetting": "old-value" }"#,
+        )
+        .unwrap();
+        let original = r#"{ "toggleShortcut": "Ctrl+Alt+V", "screenshotQuality": "bad", "unknownFutureSetting": "new-value" }"#;
+        fs::write(&target, original).unwrap();
+
+        SettingsStorage::load_settings_from_paths(&target, &[]).expect("不同原始配置仍应可恢复");
+
+        let backups = fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                path.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .contains("incompatible")
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            backups
+                .iter()
+                .any(|path| fs::read_to_string(path).unwrap().contains("new-value")),
+            "新配置的未知字段必须有独立备份，不能静默复用旧备份"
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn legacy_setting_aliases_override_defaults_during_field_by_field_recovery() {
+        let dir = test_dir();
+        let target = dir.join("settings.json");
+        fs::write(
+            &target,
+            r#"{
+                "history_limit": 321,
+                "custom_storage_path": "D:/QuickClipboardData",
+                "use_custom_storage": true,
+                "screenshotQuality": "bad"
+            }"#,
+        )
+        .unwrap();
+
+        let loaded = SettingsStorage::load_settings_from_paths(&target, &[])
+            .expect("别名与坏字段并存时仍应恢复")
+            .expect("存在设置文件时必须返回恢复结果");
+
+        assert_eq!(loaded.0.history_limit, 321);
+        assert_eq!(
+            loaded.0.custom_storage_path.as_deref(),
+            Some("D:/QuickClipboardData")
+        );
+        assert!(loaded.0.use_custom_storage);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn backup_failure_refuses_to_overwrite_an_incompatible_settings_document() {
+        let dir = test_dir();
+        let target = dir.join("settings.json");
+        let original = r#"{ "toggleShortcut": "Ctrl+Alt+V", "screenshotQuality": "bad" }"#;
+        fs::write(&target, original).unwrap();
+        fs::create_dir(incompatible_settings_backup_path(&target)).unwrap();
+
+        let loaded = SettingsStorage::load_settings_from_paths(&target, &[]);
+
+        assert!(loaded.is_err(), "无法安全备份时必须拒绝恢复写回");
         assert_eq!(fs::read_to_string(&target).unwrap(), original);
         fs::remove_dir_all(dir).unwrap();
     }
