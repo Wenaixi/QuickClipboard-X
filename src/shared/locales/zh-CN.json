@@ -247,7 +247,8 @@
       "copy": "复制",
       "save": "另存为",
       "pin": "贴图",
-      "ai": "AI 识别"
+      "ai": "AI 识别",
+      "configureAi": "配置 AI"
     },
     "processing": "处理中",
     "selectionLabel": "截图选区",
@@ -255,6 +256,7 @@
     "cancelFailed": "取消截图失败：{{error}}",
     "sessionNotReady": "截图会话尚未准备好，请重新启动截图。",
     "actionFailed": "{{action}}失败：{{error}}",
+    "openAiSettingsFailed": "打开 AI 设置失败：{{error}}",
     "shortcutHint": "{{label}}（{{shortcut}}）"
   },
   "settings": {

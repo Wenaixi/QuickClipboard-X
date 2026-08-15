@@ -135,6 +135,18 @@ fn ensure_vision_model(model: &str) -> Result<(), AiVisionError> {
     Ok(())
 }
 
+pub fn validate_configuration(
+    api_key: &str,
+    base_url: &str,
+    model: &str,
+) -> Result<(), AiVisionError> {
+    if api_key.trim().is_empty() {
+        return Err(AiVisionError::NotConfigured);
+    }
+    normalized_base_url(base_url)?;
+    ensure_vision_model(model)
+}
+
 fn classify_http_status(status: StatusCode) -> AiVisionError {
     match status {
         StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => AiVisionError::Unauthorized,
@@ -334,6 +346,28 @@ mod tests {
         assert_eq!(ensure_vision_model("Qwen/Qwen2-7B-Instruct"), Err(AiVisionError::UnsupportedVisionModel));
         assert!(ensure_vision_model("Qwen/Qwen2.5-VL-7B-Instruct").is_ok());
         assert!(ensure_vision_model("gpt-4o").is_ok());
+    }
+
+    #[test]
+    fn configuration_validation_requires_key_https_endpoint_and_vision_model() {
+        assert!(validate_configuration(
+            "test-key",
+            "https://api.example.com/v1",
+            "Qwen/Qwen2.5-VL-7B-Instruct",
+        )
+        .is_ok());
+        assert_eq!(
+            validate_configuration("", "https://api.example.com", "gpt-4o"),
+            Err(AiVisionError::NotConfigured)
+        );
+        assert_eq!(
+            validate_configuration("test-key", "http://api.example.com", "gpt-4o"),
+            Err(AiVisionError::NotConfigured)
+        );
+        assert_eq!(
+            validate_configuration("test-key", "https://api.example.com", "Qwen/Qwen2-7B-Instruct"),
+            Err(AiVisionError::UnsupportedVisionModel)
+        );
     }
 
     #[test]
