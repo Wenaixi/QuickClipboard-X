@@ -1,7 +1,6 @@
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
-import { ensureCleanWorkspace } from './ensure-clean-workspace.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -48,7 +47,6 @@ process.on('SIGTERM', () => {
 })
 
 async function main() {
-  ensureCleanWorkspace()
   host = run(rootDir, 'npm run dev')
 
   host.on('exit', (code) => {

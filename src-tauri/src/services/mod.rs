@@ -1,4 +1,5 @@
 pub mod clipboard;
+#[cfg(target_os = "windows")]
 pub mod screenshot;
 pub mod database;
 pub mod data_management;

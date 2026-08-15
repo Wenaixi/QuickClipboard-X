@@ -8,7 +8,9 @@ use crate::windows::screenshot_window;
 pub struct ScreenshotSelection {
     pub left: u32,
     pub top: u32,
+    #[allow(dead_code)]
     pub right: u32,
+    #[allow(dead_code)]
     pub bottom: u32,
     pub width: u32,
     pub height: u32,

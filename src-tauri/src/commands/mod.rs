@@ -12,6 +12,7 @@ pub mod app_links;
 pub mod sync_transfer;
 pub mod webdav_sync;
 pub mod drop_proxy;
+#[cfg(target_os = "windows")]
 pub mod screenshot;
 
 pub use clipboard::*;

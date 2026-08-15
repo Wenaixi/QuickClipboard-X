@@ -261,29 +261,13 @@ fn handle_tray_menu_selection(app: &AppHandle, selected_id: &str) {
                     if let Some((_, file_path)) = images.get(idx) {
                         let app = app.clone();
                         let file_path = file_path.clone();
-                        #[cfg(feature = "gpu-image-viewer")]
-                        if let Err(e) = crate::windows::native_pin_window::create_native_pin_from_file(
-                            app.clone(), file_path.clone(),
-                        ) {
-                            eprintln!("原生贴图窗口失败，尝试tauri版: {}", e);
-                            tauri::async_runtime::spawn(async move {
-                                if let Err(e2) = crate::windows::pin_image_window::pin_image_from_file(
-                                    app, file_path, None, None, None, None, None, None, None, None, None, None, None,
-                                ).await {
-                                    eprintln!("tauri版贴图窗口也失败: {}", e2);
-                                }
-                            });
-                        }
-                        #[cfg(not(feature = "gpu-image-viewer"))]
-                        {
-                            tauri::async_runtime::spawn(async move {
-                                if let Err(e) = crate::windows::pin_image_window::pin_image_from_file(
-                                    app, file_path, None, None, None, None, None, None, None, None, None, None, None,
-                                ).await {
-                                    eprintln!("创建贴图窗口失败: {}", e);
-                                }
-                            });
-                        }
+                        tauri::async_runtime::spawn(async move {
+                            if let Err(e) = crate::windows::pin_image_window::pin_image_from_file(
+                                app, file_path, None, None, None, None, None, None, None, None, None, None, None,
+                            ).await {
+                                eprintln!("创建贴图窗口失败: {}", e);
+                            }
+                        });
                     }
                 }
             }
