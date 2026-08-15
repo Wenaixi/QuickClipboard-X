@@ -34,6 +34,30 @@ pub fn get_mouse_position() -> (i32, i32) {
     crate::utils::mouse::get_cursor_position()
 }
 
+#[tauri::command]
+pub fn get_screenshot_ai_config_status() -> bool {
+    let settings = crate::services::settings::get_settings();
+    settings.screenshot_ai_enabled
+        && crate::services::screenshot::validate_configuration(
+            &settings.ai_api_key,
+            &settings.ai_base_url,
+            &settings.ai_model,
+        )
+        .is_ok()
+}
+
+#[tauri::command]
+pub async fn test_screenshot_ai_config() -> Result<(), String> {
+    let settings = crate::services::settings::get_settings();
+    crate::services::screenshot::test_configuration(
+        &settings.ai_api_key,
+        &settings.ai_base_url,
+        &settings.ai_model,
+    )
+    .await
+    .map_err(|error| error.to_string())
+}
+
 #[cfg(target_os = "windows")]
 #[tauri::command]
 pub fn start_screenshot(app: AppHandle) -> Result<(), String> {

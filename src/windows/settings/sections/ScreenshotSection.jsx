@@ -1,4 +1,8 @@
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { invoke } from '@tauri-apps/api/core';
+import { toast } from '@shared/store/toastStore';
+import Button from '@shared/components/ui/Button';
 import SettingsSection from '../components/SettingsSection';
 import SettingItem from '../components/SettingItem';
 import Toggle from '@shared/components/ui/Toggle';
@@ -36,6 +40,29 @@ function ScreenshotSection({
   }];
 
   const lifecycleModeValue = settings.screenshotWindowLifecycleMode || 'quick';
+  const [aiConfigured, setAiConfigured] = useState(false);
+  const [testingAiConfig, setTestingAiConfig] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    invoke('get_screenshot_ai_config_status')
+      .then(value => { if (active) setAiConfigured(value === true); })
+      .catch(() => { if (active) setAiConfigured(false); });
+    return () => { active = false; };
+  }, [settings.screenshotAiEnabled, settings.aiApiKey, settings.aiBaseUrl, settings.aiModel]);
+
+  const testAiConfig = async () => {
+    setTestingAiConfig(true);
+    try {
+      await invoke('test_screenshot_ai_config');
+      setAiConfigured(true);
+      toast.success(t('settings.screenshot.testAiConfigSuccess'));
+    } catch (error) {
+      toast.error(t('settings.screenshot.testAiConfigFailed', { error: String(error) }));
+    } finally {
+      setTestingAiConfig(false);
+    }
+  };
 
   return <SettingsSection title={t('settings.screenshot.title')} description={t('settings.screenshot.description')}>
       <SettingItem label={t('settings.screenshot.enabled')} description={t('settings.screenshot.enabledDesc')}>
@@ -64,6 +91,12 @@ function ScreenshotSection({
 
       <SettingItem label={t('settings.screenshot.aiPrompt')} description={t('settings.screenshot.aiPromptDesc')}>
         <Input value={settings.screenshotAiPrompt || ''} onChange={event => onSettingChange('screenshotAiPrompt', event.target.value)} className="w-80" />
+      </SettingItem>
+
+      <SettingItem label={t('settings.screenshot.aiConfigStatus')} description={aiConfigured ? t('settings.screenshot.aiConfigReady') : t('settings.screenshot.aiConfigMissing')}>
+        <Button variant="secondary" loading={testingAiConfig} disabled={!aiConfigured} onClick={testAiConfig} icon={<i className="ti ti-test-pipe" />}>
+          {t('settings.screenshot.testAiConfig')}
+        </Button>
       </SettingItem>
 
       <SettingItem label={t('settings.screenshot.lifecycleMode')} description={t('settings.screenshot.lifecycleModeDesc')}>
