@@ -32,6 +32,21 @@
         "dragDropEnabled": false,
         "shadow": false,
         "visibleOnAllWorkspaces": true
+      },
+      {
+        "label": "screenshot",
+        "title": "截图",
+        "url": "windows/screenshot/index.html",
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "resizable": false,
+        "focus": true,
+        "shadow": false,
+        "dragDropEnabled": false,
+        "visibleOnAllWorkspaces": true
       }
     ],
     "security": {

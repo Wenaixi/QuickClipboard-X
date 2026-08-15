@@ -106,6 +106,12 @@ impl ScreenshotSessionManager {
         self.current.as_ref()
     }
 
+    pub fn is_current_phase(&self, session_id: &str, phase: SessionPhase) -> bool {
+        self.current.as_ref().is_some_and(|session| {
+            session.session_id == session_id && session.phase == phase
+        })
+    }
+
     pub fn begin_processing(&mut self, session_id: &str) -> Result<(), SessionError> {
         let session = self.current.as_mut().ok_or(SessionError::NoActiveSession)?;
         ensure_current_session(&session.session_id, session_id)?;
@@ -311,6 +317,33 @@ mod tests {
     }
 
     #[test]
+    fn cancelled_processing_session_cannot_finish_a_new_session() {
+        let mut manager = ScreenshotSessionManager::default();
+        let monitor = MonitorRect::new(0, 0, 1920, 1080).unwrap();
+        let old_session_id = match manager.start(monitor, false) {
+            StartSessionResult::Started(session) => session.session_id().to_string(),
+            other => panic!("首次启动应创建会话，实际为 {other:?}"),
+        };
+        manager.begin_processing(&old_session_id).unwrap();
+        manager
+            .cancel(&old_session_id, MainWindowVisibilityRevision(0))
+            .unwrap();
+
+        let new_session_id = match manager.start(monitor, false) {
+            StartSessionResult::Started(session) => session.session_id().to_string(),
+            other => panic!("取消后应允许创建新会话，实际为 {other:?}"),
+        };
+        assert_ne!(old_session_id, new_session_id);
+
+        assert!(matches!(
+            manager.finish(&old_session_id, MainWindowVisibilityRevision(0)),
+            Err(SessionError::StaleSession { .. })
+        ));
+        assert_eq!(manager.phase(), Some(SessionPhase::Selecting));
+        assert_eq!(manager.current().unwrap().session_id(), new_session_id);
+    }
+
+    #[test]
     fn finishing_processing_session_returns_cleanup_and_idle() {
         let mut manager = ScreenshotSessionManager::default();
         let monitor = MonitorRect::new(0, 0, 3840, 2160).unwrap();
@@ -339,4 +372,3 @@ mod tests {
         assert!(manager.current().is_none());
     }
 }
-

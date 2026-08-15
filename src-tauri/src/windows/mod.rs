@@ -11,9 +11,12 @@ pub mod preview_window;
 pub mod transfer_shelf;
 pub mod receive_box;
 pub mod drop_proxy;
+pub mod screenshot_window;
 
 #[cfg(feature = "gpu-image-viewer")]
 pub mod native_pin_window;
+
+// 原生 gpu-image-viewer 贴图窗口仅在私有发行版启用。
 
 #[cfg(test)]
 mod poison_recovery_guards {

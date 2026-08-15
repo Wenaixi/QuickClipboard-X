@@ -1,8 +1,6 @@
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
-import fs from 'node:fs/promises'
-import { existsSync } from 'node:fs'
 import { ensureCleanWorkspace } from './ensure-clean-workspace.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -40,57 +38,9 @@ function run(cwd, args) {
   })
 }
 
-async function linkScreenshotSource() {
-  const screenshotPluginSrc = path.join(rootDir, 'src-tauri', 'plugins', 'screenshot-suite', 'web', 'windows', 'screenshot')
-  const mainProjectScreenshot = path.join(rootDir, 'src', 'windows', 'screenshot')
-
-  if (!existsSync(screenshotPluginSrc)) {
-    throw new Error(`未找到截图插件源码: ${screenshotPluginSrc}`)
-  }
-
-  if (existsSync(mainProjectScreenshot)) {
-    await fs.rm(mainProjectScreenshot, { recursive: true, force: true })
-  }
-
-  await fs.cp(screenshotPluginSrc, mainProjectScreenshot, { recursive: true })
-}
-
-async function unlinkScreenshotSource() {
-  const mainProjectScreenshot = path.join(rootDir, 'src', 'windows', 'screenshot')
-
-  if (existsSync(mainProjectScreenshot)) {
-    await fs.rm(mainProjectScreenshot, { recursive: true, force: true })
-  }
-}
-
 async function main() {
-  const isCommunity = process.env.QC_COMMUNITY === '1'
-
-  // 完整版构建前检测并恢复社区构建遗留的补丁文件
-  if (!isCommunity) {
-    ensureCleanWorkspace()
-  }
-
-  const hasScreenshotPlugin = !isCommunity && existsSync(
-    path.join(rootDir, 'src-tauri', 'plugins', 'screenshot-suite', 'web', 'package.json')
-  )
-
-  if (!isCommunity) {
-    ensureCleanWorkspace()
-  }
-
-  try {
-    if (hasScreenshotPlugin) {
-      await linkScreenshotSource()
-    }
-
-    await run(rootDir, ['run', 'build'])
-
-  } finally {
-    if (hasScreenshotPlugin) {
-      await unlinkScreenshotSource()
-    }
-  }
+  ensureCleanWorkspace()
+  await run(rootDir, ['run', 'build'])
 }
 
 process.on('SIGINT', () => {

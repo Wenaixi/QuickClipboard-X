@@ -58,6 +58,14 @@ function ScreenshotSection({
         <Toggle checked={settings.screenshotColorIncludeFormat} onChange={checked => onSettingChange('screenshotColorIncludeFormat', checked)} />
       </SettingItem>
 
+      <SettingItem label={t('settings.screenshot.aiEnabled')} description={t('settings.screenshot.aiEnabledDesc')}>
+        <Toggle checked={settings.screenshotAiEnabled !== false} onChange={checked => onSettingChange('screenshotAiEnabled', checked)} />
+      </SettingItem>
+
+      <SettingItem label={t('settings.screenshot.aiPrompt')} description={t('settings.screenshot.aiPromptDesc')}>
+        <Input value={settings.screenshotAiPrompt || ''} onChange={event => onSettingChange('screenshotAiPrompt', event.target.value)} className="w-80" />
+      </SettingItem>
+
       <SettingItem label={t('settings.screenshot.lifecycleMode')} description={t('settings.screenshot.lifecycleModeDesc')}>
         <Select value={lifecycleModeValue} onChange={value => onSettingChange('screenshotWindowLifecycleMode', value)} options={lifecycleModeOptions} className="w-80" />
       </SettingItem>

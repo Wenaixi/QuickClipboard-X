@@ -8,7 +8,7 @@ pub mod merge;
 pub use options::PasteAction;
 pub use clipboard_content::{
     FilesData, 
-    set_clipboard_from_item, set_clipboard_text, set_clipboard_files,
+    set_clipboard_from_item, set_clipboard_text, set_clipboard_files, set_clipboard_image_file,
 };
 pub use merge::{copy_merged_items, paste_merged_items};
 

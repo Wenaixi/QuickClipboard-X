@@ -52,6 +52,10 @@ function actionLabel(action) {
   return ACTIONS.find((item) => item.id === action)?.label || action;
 }
 
+function actionIsEnabled(action, bootstrap) {
+  return action !== 'ai' || bootstrap.screenshotAiEnabled !== false;
+}
+
 function isPrimaryPointer(event) {
   return event.button === 0 || (event.pointerType === 'touch' && event.isPrimary);
 }
@@ -71,6 +75,7 @@ function App() {
   const [selecting, setSelecting] = useState(false);
   const [busyAction, setBusyAction] = useState('');
   const [actionError, setActionError] = useState('');
+  const initialActionRef = useRef('');
 
   const toolbarStyle = useMemo(() => {
     if (!selection) return undefined;
@@ -105,6 +110,7 @@ function App() {
         devicePixelRatio: globalThis.devicePixelRatio,
       });
       setBootstrap(nextBootstrap);
+      initialActionRef.current = nextBootstrap.initialAction;
       draftRef.current = null;
       selectionRef.current = null;
       setSelection(null);
@@ -113,9 +119,13 @@ function App() {
       applySelectionStyle(rootRef.current, null);
     });
     configurePromise.then((cleanup) => {
-      if (active) unlisten = cleanup; else cleanup();
+      if (!active) {
+        cleanup();
+        return;
+      }
+      unlisten = cleanup;
+      invoke(VIEWPORT_READY_COMMAND).catch(() => {});
     });
-    invoke(VIEWPORT_READY_COMMAND).catch(() => {});
     return () => {
       active = false;
       unlisten?.();
@@ -140,7 +150,7 @@ function App() {
 
   const completeScreenshot = async (action) => {
     const currentSelection = selectionRef.current;
-    if (!currentSelection || busyAction) return;
+    if (!currentSelection || busyAction || !actionIsEnabled(action, bootstrap)) return;
     if (!bootstrap.sessionId) {
       setActionError('截图会话尚未准备好，请重新启动截图。');
       return;
@@ -194,6 +204,11 @@ function App() {
     selectionRef.current = finalSelection;
     setSelection(finalSelection);
     setSelecting(false);
+    if (initialActionRef.current) {
+      const action = initialActionRef.current;
+      initialActionRef.current = '';
+      void completeScreenshot(action);
+    }
     root.releasePointerCapture?.(event.pointerId);
   };
 
@@ -221,7 +236,7 @@ function App() {
       <div className="screenshot-mask screenshot-mask-right" aria-hidden="true" />
       <div className="screenshot-mask screenshot-mask-bottom" aria-hidden="true" />
       <div className="screenshot-selection" aria-hidden="true"><span className="screenshot-selection-size">{selection ? `${Math.round(selection.width)} × ${Math.round(selection.height)}` : ''}</span></div>
-      {selection && <div className="screenshot-toolbar" style={toolbarStyle} data-screenshot-control onPointerDown={(event) => event.stopPropagation()}>{ACTIONS.map((action) => <button key={action.id} type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction)} onClick={() => void completeScreenshot(action.id)} title={action.shortcut ? `${action.label}（${action.shortcut}）` : action.label}>{busyAction === action.id ? '处理中' : action.label}</button>)}</div>}
+      {selection && <div className="screenshot-toolbar" style={toolbarStyle} data-screenshot-control onPointerDown={(event) => event.stopPropagation()}>{ACTIONS.map((action) => <button key={action.id} type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction) || !actionIsEnabled(action.id, bootstrap)} onClick={() => void completeScreenshot(action.id)} title={action.shortcut ? `${action.label}（${action.shortcut}）` : action.label}>{busyAction === action.id ? '处理中' : action.label}</button>)}</div>}
       {actionError && <div className="screenshot-error" role="alert" data-screenshot-control>{actionError}</div>}
       <button type="button" className="screenshot-cancel" data-screenshot-control onPointerDown={(event) => event.stopPropagation()} onClick={() => void cancelScreenshot()} aria-label="取消截图" title="取消截图（Esc）">取消</button>
     </main>

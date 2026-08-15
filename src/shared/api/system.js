@@ -31,19 +31,9 @@ export async function startScreenshotQuickOcr() {
   return await invoke('start_screenshot_quick_ocr')
 }
 
-// 捕获所有显示器截图
-export async function captureAllScreenshots() {
-  return await invoke('plugin:screenshot-suite|capture_all_screenshots')
-}
-
-// 获取最近一次截屏结果
-export async function getLastScreenshotCaptures() {
-  return await invoke('plugin:screenshot-suite|get_last_screenshot_captures')
-}
-
-// 取消当前截屏会话
-export async function cancelScreenshotSession() {
-  return await invoke('plugin:screenshot-suite|cancel_screenshot_session')
+// 取消当前截图会话。新截图窗口会话需要显式传入 sessionId。
+export async function cancelScreenshotSession(sessionId) {
+  return await invoke('cancel_screenshot', { sessionId })
 }
 
 // 检查 AI 翻译配置

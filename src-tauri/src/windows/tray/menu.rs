@@ -227,15 +227,8 @@ fn handle_tray_menu_selection(app: &AppHandle, selected_id: &str) {
             let app = app.clone();
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_millis(150));
-                #[cfg(feature = "screenshot-suite")]
-                {
-                    if let Err(e) = screenshot_suite::start_screenshot(&app) {
-                        eprintln!("启动截图窗口失败: {}", e);
-                    }
-                }
-                #[cfg(not(feature = "screenshot-suite"))]
-                {
-                    let _ = app;
+                if let Err(error) = crate::commands::screenshot::start_screenshot(app) {
+                    eprintln!("启动截图窗口失败: {}", error);
                 }
             });
         }
