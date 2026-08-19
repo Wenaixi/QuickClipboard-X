@@ -24,6 +24,11 @@ test('helpEntries 返回全部已知快捷键条目', () => {
   }
 });
 
+test('quickAction 键与 actionModel 的数字键映射保持一致', () => {
+  const entry = helpEntries(t).find((item) => item.id === 'quickAction');
+  assert.deepEqual(entry.keys, ['1', '2', '3', '4']);
+});
+
 test('helpEntries 每条含非空键与翻译文案', () => {
   for (const entry of helpEntries(t)) {
     assert.ok(Array.isArray(entry.keys) && entry.keys.length > 0, entry.id + ' 键数组为空');

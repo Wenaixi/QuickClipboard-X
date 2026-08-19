@@ -6,12 +6,14 @@ export function completeShortcutForEvent(event) {
     throw new TypeError('事件对象缺失');
   }
   const key = typeof event.key === 'string' ? event.key.toLowerCase() : '';
+  // AltGr 在 Chromium/WebView2 中会同时置位 ctrlKey 与 altKey；先整体拒绝 alt/meta，
+  // 避免欧洲键盘布局下 AltGr+C/S/P 被误判为完成动作。
+  if (event.altKey || event.metaKey) return null;
   if (event.ctrlKey) {
     if (key === 'c') return 'copy';
     if (key === 's') return 'save';
     if (key === 'p') return 'pin';
     return null;
   }
-  if (event.metaKey || event.altKey) return null;
   return key === 'enter' ? 'copy' : null;
 }
