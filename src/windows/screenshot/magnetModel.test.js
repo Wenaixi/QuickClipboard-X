@@ -122,6 +122,24 @@ test('magnetSelection 平移只改位置不改尺寸且吸附点精确落线', (
   }
 });
 
+test('magnetSelection 默认容差 6px 且边界行为一致', () => {
+  const source = readFileSync(new URL('./magnetModel.js', import.meta.url), 'utf8');
+  // 源码护栏：默认吸附容差必须明确为 6（ShareX 公开行为的合理贴近阈值）。
+  assert.ok(source.includes('const tolerance = options.tolerance ?? 6;'), '默认容差必须为 6');
+  // 行为边界：距左缘 6px 内吸附到 0，7px 外不吸附（同一侧比较保证语义一致）。
+  const make = (left) => ({ left, top: 100, right: left + 300, bottom: 300, width: 300, height: 200 });
+  const at6 = magnetSelection(make(6), bounds);
+  assert.equal(at6.left, 0, '距左缘 6px 必须吸附');
+  assert.equal(at6.width, 300, '吸附不得改变尺寸');
+  const at7 = magnetSelection(make(7), bounds);
+  assert.equal(at7.left, 7, '距左缘 7px 不得吸附');
+  // 自定义容差同样生效：容差 10 时 10px 吸附、11px 不吸附。
+  const at10 = magnetSelection(make(10), bounds, { tolerance: 10 });
+  assert.equal(at10.left, 0, '自定义容差 10 内必须吸附');
+  const at11 = magnetSelection(make(11), bounds, { tolerance: 10 });
+  assert.equal(at11.left, 11, '自定义容差 10 外不得吸附');
+});
+
 test('magnetSelection 拒绝无效输入', () => {
   assert.throws(() => magnetSelection({ left: 0, top: 0, right: 1, bottom: 1 }, { width: 0, height: 10 }), /边界尺寸必须为正数/);
   assert.throws(() => magnetSelection({ left: 0, top: 0, right: 1, bottom: 1 }, bounds, { tolerance: -1 }), /吸附容差不能为负数/);
