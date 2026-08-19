@@ -263,6 +263,7 @@
       "move": "Drag to move the selection",
       "resize": "Drag to resize the selection"
     },
+    "idleHint": "Drag to select a region, press F1 for shortcuts",
     "help": {
       "title": "Shortcuts",
       "complete": "Complete and copy",

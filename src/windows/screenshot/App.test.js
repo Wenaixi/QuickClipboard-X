@@ -87,6 +87,16 @@ test('完成快捷键统一走模型且支持 Ctrl+C 复制', () => {
   assert.ok(source.includes('if (completeAction) { event.preventDefault(); void completeScreenshot(completeAction); }'));
 });
 
+test('选区建立前显示初始引导提示且不遮挡拖拽', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('import { idleHint } from \'./idleModel.js\';'));
+  assert.ok(source.includes('!selecting && !selection && !showHelp && <div className="screenshot-idle-hint" data-screenshot-idle="true">{idleHint(t)}</div>'));
+  for (const locale of ['zh-CN', 'en-US']) {
+    const messages = JSON.parse(readFileSync(new URL(`../../shared/locales/${locale}.json`, import.meta.url)));
+    assert.equal(typeof messages.screenshot.idleHint, 'string', `${locale} 缺少 screenshot.idleHint`);
+  }
+});
+
 test('快捷键帮助面板随 F1 切换并列出全部快捷键', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('import { helpEntries, isHelpShortcut } from \'./helpModel.js\';'));
