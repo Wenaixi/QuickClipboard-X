@@ -43,6 +43,12 @@ test('normalizeBootstrap 使用显式显示器物理尺寸与逻辑尺寸', () =
   });
 });
 
+test('坐标指示面板在拖拽时渲染并显示光标坐标', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('<div className="screenshot-coordinates" data-screenshot-coordinates="true" style={coordinatePanelStyle(magnifierPoint, bootstrap.bounds)}>{formatCursorCoordinate(magnifierPoint)}</div>'));
+  assert.ok(source.includes('coordinatePanelPosition(point, bounds)'));
+});
+
 test('放大镜渲染条件包含开关、背景快照与指针点', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   // 以 JSX 表达式开头锚定，避免前置 false 短路绕过该条件。

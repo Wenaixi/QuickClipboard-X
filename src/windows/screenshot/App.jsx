@@ -5,6 +5,7 @@ import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { normalizeBootstrap } from './screenshotModel.js';
 import { magnifierGeometry } from './magnifierModel.js';
+import { coordinatePanelPosition, formatCursorCoordinate } from './coordinateModel.js';
 import {
   createRafWriter,
   hitSelectionEdge,
@@ -53,6 +54,14 @@ function pointFromPointerEvent(event, element) {
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
+}
+
+function coordinatePanelStyle(point, bounds) {
+  const position = coordinatePanelPosition(point, bounds);
+  return {
+    left: `${position.left}px`,
+    top: `${position.top}px`,
+  };
 }
 
 function magnifierCanvasStyle(point, bounds) {
@@ -410,6 +419,9 @@ function App() {
       {selection && <div className="screenshot-toolbar" style={toolbarStyle} data-screenshot-control onPointerDown={(event) => event.stopPropagation()}>{ACTIONS.map((action) => { const label = actionLabel(action.id, t); return <button key={action.id} type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction) || !actionIsEnabled(action.id, bootstrap)} onClick={() => void completeScreenshot(action.id)} title={action.shortcut ? t('screenshot.shortcutHint', { label, shortcut: action.shortcut }) : label}>{busyAction === action.id ? t('screenshot.processing') : label}</button>; })}{!bootstrap.screenshotAiConfigured && <button type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction)} onClick={() => void openAiSettings()}>{t('screenshot.actions.configureAi')}</button>}</div>}
       {bootstrap.screenshotMagnifierEnabled && bootstrap.magnifierBackground && magnifierPoint && (draftRef.current || moveRef.current || resizeRef.current) && (
         <canvas className="screenshot-magnifier" data-screenshot-magnifier="true" style={magnifierCanvasStyle(magnifierPoint, bootstrap.bounds)} ref={magnifierCanvasRef} />
+      )}
+      {magnifierPoint && (draftRef.current || moveRef.current || resizeRef.current) && (
+        <div className="screenshot-coordinates" data-screenshot-coordinates="true" style={coordinatePanelStyle(magnifierPoint, bootstrap.bounds)}>{formatCursorCoordinate(magnifierPoint)}</div>
       )}
       {actionError && <div className="screenshot-error" role="alert" data-screenshot-control>{actionError}</div>}
       <button type="button" className="screenshot-cancel" data-screenshot-control onPointerDown={(event) => event.stopPropagation()} onClick={() => void cancelScreenshot()} aria-label={t('screenshot.cancelLabel')} title={t('screenshot.shortcutHint', { label: t('screenshot.cancelLabel'), shortcut: 'Esc' })}>{t('screenshot.cancel')}</button>
