@@ -21,6 +21,7 @@ import { pushSelectionHistory, undoSelectionHistory } from './historyModel.js';
 import { rulerTicks } from './rulerModel.js';
 import { modeForState, modeHint } from './modeModel.js';
 import { selectionHandles } from './handleModel.js';
+import { formatSelectionPosition } from './positionModel.js';
 import {
   createRafWriter,
   hitSelectionEdge,
@@ -72,11 +73,12 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
-function selectionSizeLabelText(selection) {
+function selectionSizeLabelText(selection, bootstrap) {
   const pixels = formatPixelSize(selection);
   const ratio = formatAspectRatio(selection);
   const megapixels = formatMegapixels(selection);
-  return `${pixels} · ${ratio} · ${megapixels}`;
+  const position = formatSelectionPosition(selection, { dpr: bootstrap.dpr, monitorLeft: bootstrap.monitorLeft, monitorTop: bootstrap.monitorTop });
+  return `${pixels} · ${ratio} · ${megapixels} · ${position}`;
 }
 
 function selectionSizeLabelClass(selection, bounds) {
@@ -574,7 +576,7 @@ function App() {
       <div className="screenshot-mask screenshot-mask-left" aria-hidden="true" />
       <div className="screenshot-mask screenshot-mask-right" aria-hidden="true" />
       <div className="screenshot-mask screenshot-mask-bottom" aria-hidden="true" />
-      <div className="screenshot-selection screenshot-selection-line" aria-hidden="true" style={selectionLineStyle()}>{selection && <span className={selectionSizeLabelClass(selection, bootstrap.bounds)} style={selectionSizeLabelStyle(selection, bootstrap.bounds)}>{selectionSizeLabelText(selection)}</span>}</div>
+      <div className="screenshot-selection screenshot-selection-line" aria-hidden="true" style={selectionLineStyle()}>{selection && <span className={selectionSizeLabelClass(selection, bootstrap.bounds)} style={selectionSizeLabelStyle(selection, bootstrap.bounds)}>{selectionSizeLabelText(selection, bootstrap)}</span>}</div>
       {selection && <div className="screenshot-toolbar" style={toolbarStyle} data-screenshot-control onPointerDown={(event) => event.stopPropagation()}>{ACTIONS.map((action) => { const label = actionLabel(action.id, t); return <button key={action.id} type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction) || !actionIsEnabled(action.id, bootstrap)} onClick={() => void completeScreenshot(action.id)} title={[action.shortcut && t('screenshot.shortcutHint', { label, shortcut: action.shortcut }), hotkeyForAction(action.id) && t('screenshot.shortcutHint', { label, shortcut: hotkeyForAction(action.id) })].filter(Boolean).join(' · ') || label}>{busyAction === action.id ? t('screenshot.processing') : label}</button>; })}{!bootstrap.screenshotAiConfigured && <button type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction)} onClick={() => void openAiSettings()}>{t('screenshot.actions.configureAi')}</button>}</div>}
       {bootstrap.screenshotMagnifierEnabled && bootstrap.magnifierBackground && magnifierPoint && (draftRef.current || moveRef.current || resizeRef.current) && (
         <>
