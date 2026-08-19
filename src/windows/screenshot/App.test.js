@@ -518,6 +518,18 @@ test('新拖拽开始时先递增手势并清空选区历史', () => {
   assert.ok(source.includes(draftAnchor), '手势递增必须紧邻并先于历史清空');
 });
 
+test('尺寸标注文案必须聚合像素/比例/百万像素/位置四要素', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  // 尺寸标签是选区最直观的信息载体：像素尺寸、宽高比、百万像素与屏幕位置缺一不可。
+  assert.ok(source.includes('const pixels = formatPixelSize(physical);'), '尺寸文案必须包含像素尺寸');
+  assert.ok(source.includes('const ratio = formatAspectRatio(physical);'), '尺寸文案必须包含宽高比');
+  assert.ok(source.includes('const megapixels = formatMegapixels(physical);'), '尺寸文案必须包含百万像素');
+  assert.ok(source.includes('formatSelectionPosition(selection'), '尺寸文案必须包含屏幕位置');
+  assert.ok(source.includes('const physical = physicalSize(selection, bootstrap.dpr);'), '物理尺寸必须按 DPI 换算');
+  // 四要素必须拼接进同一返回值。
+  assert.ok(source.includes('return `${pixels} · ${ratio} · ${megapixels} · ${position}`;'), '四要素必须聚合进同一文案');
+});
+
 test('AI 未配置时工具栏禁用 AI 动作且数字键 4 引导进入设置', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   // 工具栏按钮：disabled 判定必须与可用性函数一致。
