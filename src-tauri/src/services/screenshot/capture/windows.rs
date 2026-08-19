@@ -444,8 +444,8 @@ mod tests {
         ))
         .expect("读取 Windows 窗口选择源码失败");
         let body_start = source
-            .find("pub fn find_window_rect_at_point")
-            .expect("缺少窗口选择函数");
+            .find("fn is_capture_candidate")
+            .expect("缺少候选窗口过滤函数");
         let body_end = source[body_start..]
             .find("const GRAPHICS_CAPTURE_SESSION_TYPE")
             .map(|offset| body_start + offset)
