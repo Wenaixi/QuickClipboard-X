@@ -49,6 +49,22 @@ test('工具栏放置与定位统一走自适应模块', () => {
   assert.ok(source.includes('return toolbarStyleModel(selection, bootstrap.bounds, placement);'));
 });
 
+test('交互模式提示随拖拽/移动/调整状态渲染', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('modeHint(modeForState({ selecting, moving, resizing }), t)'));
+  assert.ok(source.includes('data-screenshot-mode="true"'));
+  assert.ok(source.includes('setResizing(true);'));
+  assert.ok(source.includes('setMoving(true);'));
+  assert.ok(source.includes('setResizing(false);'));
+  assert.ok(source.includes('setMoving(false);'));
+  for (const locale of ['zh-CN', 'en-US']) {
+    const messages = JSON.parse(readFileSync(new URL(`../../shared/locales/${locale}.json`, import.meta.url)));
+    for (const key of ['select', 'move', 'resize']) {
+      assert.equal(typeof messages.screenshot.mode[key], 'string', `${locale} 缺少 screenshot.mode.${key}`);
+    }
+  }
+});
+
 test('选区建立后渲染像素标尺并输出自适应刻度', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('const horizontalTicks = rulerTicks(bounds.width);'));
