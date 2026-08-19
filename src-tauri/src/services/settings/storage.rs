@@ -644,6 +644,33 @@ mod tests {
     }
 
     #[test]
+    fn upgrade_load_keeps_every_compatible_field_and_unknown_fields_without_backup() {
+        let dir = test_dir();
+        let target = dir.join("settings.json");
+        // 模拟旧版本导出的设置：含一个已删除字段（未来未知键）、一个旧别名键、
+        // 一个当前仍存在的常规键。升级加载必须全部兼容保留且不触发备份。
+        let original = r#"{
+          "language": "en-US",
+          "edgeHideEnabled": false,
+          "screenshotAutoSave": true,
+          "toggleShortcut": "Ctrl+Shift+T"
+        }"#;
+        fs::write(&target, original).unwrap();
+
+        let loaded = SettingsStorage::load_settings_from_paths(&target, &[]).unwrap().unwrap();
+        assert_eq!(loaded.0.language, "en-US", "常规键必须保留");
+        assert!(!loaded.0.edge_hide_enabled, "布尔键必须保留");
+        // screenshotAutoSave 是已删除的旧字段：兼容恢复后进入 extra_fields 保留，
+        // 保存回写时不得丢失，且不得触发任何备份文件（§7bd80d6b 契约）。
+        let backup_exists = dir
+            .read_dir()
+            .unwrap()
+            .any(|entry| entry.unwrap().file_name().to_string_lossy().contains("incompatible"));
+        assert!(!backup_exists, "未知字段不得触发备份");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn backup_failure_refuses_to_overwrite_an_incompatible_settings_document() {
         let dir = test_dir();
         let target = dir.join("settings.json");
