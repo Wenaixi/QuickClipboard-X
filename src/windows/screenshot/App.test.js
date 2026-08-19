@@ -70,6 +70,14 @@ test('放大镜拖拽时更新指针点并在结束/取消时清空', () => {
   assert.ok(source.includes('setMagnifierPoint(null);'));
 });
 
+test('滚轮调整放大镜缩放倍率并随缩放重绘', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('onWheel={handleWheel}'));
+  assert.ok(source.includes('setMagnifierScale((current) => magnifierScaleForWheel(current, event.deltaY));'));
+  assert.ok(source.includes('magnifierCanvasStyle(magnifierPoint, bootstrap.bounds, magnifierScale)'));
+  assert.ok(source.includes('{ scale: magnifierScale }'));
+});
+
 test('放大镜绘制后读取中心像素颜色并渲染读数标签', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('readCenterPixel(context.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height)'));
@@ -83,7 +91,7 @@ test('放大镜绘制后读取中心像素颜色并渲染读数标签', () => {
 test('放大镜 canvas 用几何绘制背景快照且关闭平滑', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('context.imageSmoothingEnabled = false;'));
-  assert.ok(source.includes('magnifierGeometry(magnifierPoint, bootstrap.bounds)'));
+  assert.ok(source.includes('magnifierGeometry(magnifierPoint, bootstrap.bounds, { scale: magnifierScale })'));
   assert.ok(source.includes('context.drawImage('));
 });
 
