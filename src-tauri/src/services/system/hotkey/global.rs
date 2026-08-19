@@ -1147,5 +1147,38 @@ mod tests {
             );
         }
     }
+
+    // 截图热键触发必须经过低内存模式恢复与全局禁用守卫：
+    // 低内存模式下热键应先把运行时恢复到正常模式再启动截图，
+    // 前台全局禁用（如其他应用抢占）时必须静默忽略。
+    #[test]
+    fn screenshot_hotkey_trigger_passes_low_memory_and_global_disable_guards() {
+        let src = strip_line_comments(&global_source());
+        let b = fn_body(&src, "register_screenshot_shortcut");
+        let low_memory_pos = b.find("ensure_normal_mode_for_hotkey");
+        let global_disable_pos = b.find("is_foreground_globally_disabled");
+        let action_pos = b.find("action(app)");
+        assert!(
+            low_memory_pos.is_some() && global_disable_pos.is_some() && action_pos.is_some()
+                && low_memory_pos < global_disable_pos
+                && global_disable_pos < action_pos,
+            "截图热键触发顺序必须为 低内存恢复→全局禁用守卫→执行动作"
+        );
+    }
+
+    // reload 注册截图热键必须受 screenshot_enabled 守卫：
+    // 截图功能关闭时即使配置里残留快捷键也不得注册（防幽灵热键）。
+    #[test]
+    fn reload_registers_screenshot_hotkeys_only_when_screenshot_enabled() {
+        let src = strip_line_comments(&global_source());
+        let b = fn_body(&src, "reload_from_settings_inner");
+        for id in ["screenshot_shortcut", "screenshot_quick_save_shortcut", "screenshot_quick_pin_shortcut", "screenshot_quick_ocr_shortcut"] {
+            assert!(
+                b.find(&format!("settings.screenshot_enabled && !settings.{id}.is_empty()"))
+                    .is_some(),
+                "reload 注册 {id} 必须受 screenshot_enabled 守卫"
+            );
+        }
+    }
 }
 
