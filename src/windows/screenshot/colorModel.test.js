@@ -20,11 +20,12 @@ test('readCenterPixel 从 RGBA 平铺数组读取中心像素', () => {
   assert.deepEqual(readCenterPixel(data, width, height), { r: 10, g: 20, b: 30 });
 });
 
-test('readCenterPixel 偶数尺寸取右上中心像素', () => {
+test('readCenterPixel 偶数尺寸取与十字中心对齐的像素', () => {
+  // 4×4 时十字中心在 (2, 2)，颜色读数必须与之对齐，避免偏上 1 像素。
   const width = 4;
   const height = 4;
   const data = new Uint8ClampedArray(width * height * 4);
-  rgbaPixel(data, width, 2, 1, 7, 8, 9);
+  rgbaPixel(data, width, 2, 2, 7, 8, 9);
   assert.deepEqual(readCenterPixel(data, width, height), { r: 7, g: 8, b: 9 });
 });
 

@@ -262,12 +262,14 @@ function App() {
       if (!context) return;
       context.imageSmoothingEnabled = false;
       context.clearRect(0, 0, canvas.width, canvas.height);
+      const dpr = bootstrap.dpr;
+      // 背景快照是物理像素 PNG，采样源几何为逻辑像素，绘制前按 DPR 换算避免高 DPI 错位。
       context.drawImage(
         image,
-        geometry.source.left,
-        geometry.source.top,
-        geometry.source.cols,
-        geometry.source.rows,
+        geometry.source.left * dpr,
+        geometry.source.top * dpr,
+        geometry.source.cols * dpr,
+        geometry.source.rows * dpr,
         0,
         0,
         canvas.width,
@@ -605,6 +607,10 @@ function App() {
     };
   }, [bootstrap.sessionId, busyAction, showHelp]);
 
+  const magnifierLayout = useMemo(() => (
+    magnifierPoint ? magnifierCanvasStyle(magnifierPoint, bootstrap.bounds, magnifierScale) : null
+  ), [bootstrap.bounds, magnifierPoint, magnifierScale]);
+
   return (
     <main ref={rootRef} className="screenshot-root" data-selection-active="false" data-selecting={selecting ? 'true' : 'false'} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={cancelScreenshot} onDoubleClick={handleDoubleClick} onWheel={handleWheel} onContextMenu={(event) => { event.preventDefault(); if (!selectionRef.current || canResetSelection(selectionRef.current)) void cancelScreenshot(); }} aria-label={t('screenshot.selectionLabel')}>
       <div className="screenshot-mask screenshot-mask-top" aria-hidden="true" />
@@ -615,8 +621,8 @@ function App() {
       {selection && <div className="screenshot-toolbar" style={toolbarStyle} data-screenshot-control onPointerDown={(event) => event.stopPropagation()}>{ACTIONS.map((action) => { const label = actionLabel(action.id, t); return <button key={action.id} type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction) || !actionIsEnabled(action.id, bootstrap)} onClick={() => void completeScreenshot(action.id)} title={[action.shortcut && t('screenshot.shortcutHint', { label, shortcut: action.shortcut }), hotkeyForAction(action.id) && t('screenshot.shortcutHint', { label, shortcut: hotkeyForAction(action.id) })].filter(Boolean).join(' · ') || label}>{busyAction === action.id ? t('screenshot.processing') : label}</button>; })}{!bootstrap.screenshotAiConfigured && <button type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction)} onClick={() => void openAiSettings()}>{t('screenshot.actions.configureAi')}</button>}</div>}
       {bootstrap.screenshotMagnifierEnabled && bootstrap.magnifierBackground && magnifierPoint && (draftRef.current || moveRef.current || resizeRef.current) && (
         <>
-          <canvas className="screenshot-magnifier" data-screenshot-magnifier="true" style={magnifierCanvasStyle(magnifierPoint, bootstrap.bounds, magnifierScale)} ref={magnifierCanvasRef} />
-          {magnifierColor && <div className="screenshot-color" data-screenshot-color="true" style={{ left: `${magnifierCanvasStyle(magnifierPoint, bootstrap.bounds, magnifierScale).left}`, top: `${magnifierCanvasStyle(magnifierPoint, bootstrap.bounds, magnifierScale).top}`, backgroundColor: hexFromRgb(magnifierColor) }}>{formatRgb(magnifierColor)}</div>}
+          <canvas className="screenshot-magnifier" data-screenshot-magnifier="true" style={magnifierLayout} ref={magnifierCanvasRef} />
+          {magnifierColor && <div className="screenshot-color" data-screenshot-color="true" style={{ left: magnifierLayout.left, top: `${parseFloat(magnifierLayout.top) + parseFloat(magnifierLayout.height) + 4}px`, backgroundColor: hexFromRgb(magnifierColor) }}>{formatRgb(magnifierColor)}</div>}
         </>
       )}
       {magnifierPoint && (draftRef.current || moveRef.current || resizeRef.current) && (
@@ -629,7 +635,7 @@ function App() {
       {selection && <Ruler bounds={bootstrap.bounds} />}
       {selection && <SelectionHandles selection={selection} />}
       {!selecting && !selection && !showHelp && <div className="screenshot-idle-hint" data-screenshot-idle="true">{idleHint(t)}</div>}
-      {selection && !busyAction && !showHelp && <div className="screenshot-invite" data-screenshot-invite="true">{includeInvite(t)}</div>}
+      {selection && !selecting && !moving && !resizing && !busyAction && !showHelp && <div className="screenshot-invite" data-screenshot-invite="true">{includeInvite(t)}</div>}
       {modeHint(modeForState({ selecting, moving, resizing }), t) && <div className="screenshot-mode-hint" data-screenshot-mode="true">{modeHint(modeForState({ selecting, moving, resizing }), t)}</div>}
       {showHelp && (
         <div className="screenshot-help" data-screenshot-help="true" role="dialog" aria-label={t('screenshot.help.title')}>

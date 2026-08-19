@@ -27,11 +27,22 @@ export function formatMegapixels(size) {
 }
 
 // 将逻辑像素尺寸按 DPR 换算为物理像素尺寸（ShareX 公开行为：尺寸标签显示实际截取的物理像素）。
-// 先乘后四舍五入到整数像素，宽高分别独立取整。
+// 带左/右/上/下边界时采用与 selectionToPhysical 一致的取整策略：
+// 右/下边界向上取整、左/上边界向下取整，保证标签像素数与实际截图完全一致；
+// 仅含宽高时回退为先乘 DPR 再四舍五入。
 export function physicalSize(size, dpr) {
   assertSize(size, '物理像素尺寸');
   if (!Number.isFinite(dpr) || dpr <= 0) {
     throw new RangeError('dpr 必须是正数');
+  }
+  const hasEdges =
+    Number.isFinite(size.left) && Number.isFinite(size.top)
+    && Number.isFinite(size.right) && Number.isFinite(size.bottom);
+  if (hasEdges) {
+    return {
+      width: Math.ceil(size.right * dpr) - Math.floor(size.left * dpr),
+      height: Math.ceil(size.bottom * dpr) - Math.floor(size.top * dpr),
+    };
   }
   return {
     width: Math.round(size.width * dpr),

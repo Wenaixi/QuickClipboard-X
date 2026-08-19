@@ -29,10 +29,15 @@ test('toolbarStyle 下方放置返回选区下缘坐标', () => {
   assert.equal(style.top, '408px');
 });
 
-test('toolbarStyle 上方放置返回选区上缘坐标并向上偏移', () => {
+test('toolbarStyle 上方放置返回选区上缘坐标并向上让出工具栏高度', () => {
   const style = toolbarStyle({ left: 200, top: 100, right: 500, bottom: 400 }, { width: 1920, height: 1080 }, 'above');
   assert.equal(style.left, '208px');
-  assert.equal(style.top, '92px');
+  assert.equal(style.top, '52px');
+});
+
+test('toolbarPlacement 上方空间不足以容纳工具栏时仍放下方避免越界', () => {
+  // 选区顶部 20px 无法容纳工具栏自身高度与间距，必须放下方。
+  assert.equal(toolbarPlacement({ left: 200, top: 20, right: 500, bottom: 200, width: 300, height: 180 }, { width: 1920, height: 1080 }), 'below');
 });
 
 test('toolbarStyle 选区贴近右缘时工具栏左移夹紧到显示器内', () => {
