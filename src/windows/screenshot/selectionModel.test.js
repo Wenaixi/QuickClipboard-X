@@ -114,6 +114,18 @@ test('squareSelection 反向拖拽时沿反方向扩展正方形', () => {
   });
 });
 
+test('squareSelection 起点贴边反向拖拽不越界到负坐标', () => {
+  // 起点在屏幕左/上边缘反向拖拽时，left/top 不得越界到 -1。
+  const selection = squareSelection({ x: 0, y: 0 }, { x: -100, y: -100 }, bounds);
+  assert.equal(selection.left, 0);
+  assert.equal(selection.top, 0);
+  assert.equal(selection.width, 1);
+  assert.equal(selection.height, 1);
+  const rightEdge = squareSelection({ x: 799, y: 0 }, { x: 700, y: -100 }, bounds);
+  assert.equal(rightEdge.left, 798);
+  assert.equal(rightEdge.top, 0);
+});
+
 test('squareSelection 起点贴近右下边界时边长被可达范围夹紧', () => {
   const selection = squareSelection({ x: 5, y: 5 }, { x: 1000, y: 1000 }, bounds);
   assert.deepEqual(selectionValues(selection), {

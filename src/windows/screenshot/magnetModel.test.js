@@ -54,6 +54,19 @@ test('magnetSelection 调整大小拖 s 边靠近水平中心线时下边缘吸�
   assert.deepEqual(result, { left: 100, top: 100, right: 400, bottom: 540, width: 300, height: 440 });
 });
 
+test('magnetSelection 越界选区不产生负宽或零宽', () => {
+  const bounds = { width: 800, height: 600 };
+  const w = magnetSelection({ left: -100, top: 100, right: -50, bottom: 200 }, bounds, { edge: 'w' });
+  assert.ok(w.width >= 1, 'edge=w 越界选区必须保持最小 1px 宽');
+  assert.equal(w.left, 0);
+  const n = magnetSelection({ left: 100, top: -100, right: 200, bottom: -50 }, bounds, { edge: 'n' });
+  assert.ok(n.height >= 1, 'edge=n 越界选区必须保持最小 1px 高');
+  assert.equal(n.top, 0);
+  const pan = magnetSelection({ left: -5, top: -5, right: 805, bottom: 605 }, bounds);
+  assert.ok(pan.right <= 800, '平移后右边界不得越界');
+  assert.ok(pan.bottom <= 600, '平移后下边界不得越界');
+});
+
 test('magnetSelection 拒绝无效输入', () => {
   assert.throws(() => magnetSelection({ left: 0, top: 0, right: 1, bottom: 1 }, { width: 0, height: 10 }), /边界尺寸必须为正数/);
   assert.throws(() => magnetSelection({ left: 0, top: 0, right: 1, bottom: 1 }, bounds, { tolerance: -1 }), /吸附容差不能为负数/);

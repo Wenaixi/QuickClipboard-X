@@ -87,8 +87,12 @@ export function squareSelection(start, end, bounds) {
   const rightExtent = start.x <= end.x ? bounds.width - start.x : start.x;
   const downExtent = start.y <= end.y ? bounds.height - start.y : start.y;
   const side = Math.max(1, Math.min(rawSide, rightExtent, downExtent));
-  const left = start.x <= end.x ? start.x : start.x - side;
-  const top = start.y <= end.y ? start.y : start.y - side;
+  let left = start.x <= end.x ? start.x : start.x - side;
+  let top = start.y <= end.y ? start.y : start.y - side;
+  // 起点贴边（start.x 或 start.y 为 0）时反向拖拽会让 left/top 越界到 -1，
+  // 返回前整体夹紧到边界内，保证边长不受损。
+  left = Math.min(Math.max(left, 0), Math.max(0, bounds.width - side));
+  top = Math.min(Math.max(top, 0), Math.max(0, bounds.height - side));
   return { left, top, right: left + side, bottom: top + side, width: side, height: side };
 }
 
