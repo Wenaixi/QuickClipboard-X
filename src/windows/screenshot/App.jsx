@@ -18,6 +18,7 @@ import {
   selectionForPointerGesture,
   selectionFromPhysical,
   selectionToPhysical,
+  squareSelection,
 } from './selectionModel.js';
 
 const CONFIGURE_EVENT = 'screenshot:configure';
@@ -307,7 +308,10 @@ function App() {
     if (!draft || !root || event.pointerId !== pointerIdRef.current) return;
     draft.end = pointFromPointerEvent(event, root);
     setMagnifierPoint(draft.end);
-    rafWriterRef.current?.schedule(normalizeSelection(draft.start, draft.end, bootstrap.bounds));
+    const next = event.shiftKey
+      ? squareSelection(draft.start, draft.end, bootstrap.bounds)
+      : normalizeSelection(draft.start, draft.end, bootstrap.bounds);
+    rafWriterRef.current?.schedule(next);
   };
 
   const handlePointerUp = async (event) => {
@@ -353,8 +357,9 @@ function App() {
     rafWriterRef.current?.cancel();
     root.releasePointerCapture?.(event.pointerId);
 
-    let finalSelection = selectionForPointerGesture(draft.start, end, bootstrap.bounds);
-    if (clicked && bootstrap.sessionId) {
+    const square = event.shiftKey && !clicked ? squareSelection(draft.start, end, bootstrap.bounds) : null;
+    let finalSelection = square ?? selectionForPointerGesture(draft.start, end, bootstrap.bounds);
+    if (!square && clicked && bootstrap.sessionId) {
       try {
         const physicalSelection = await invoke(FIND_WINDOW_COMMAND, {
           sessionId: bootstrap.sessionId,
