@@ -80,6 +80,13 @@ test('Ctrl+A 一键选中整个屏幕并保留撤销历史', () => {
   assert.ok(body.includes('pushSelectionHistory'), '全屏选区前必须保留撤销历史');
 });
 
+test('完成快捷键统一走模型且支持 Ctrl+C 复制', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('import { completeShortcutForEvent } from \'./completeShortcutModel.js\';'));
+  assert.ok(source.includes('const completeAction = completeShortcutForEvent(event);'));
+  assert.ok(source.includes('if (completeAction) { event.preventDefault(); void completeScreenshot(completeAction); }'));
+});
+
 test('快捷键帮助面板随 F1 切换并列出全部快捷键', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('import { helpEntries, isHelpShortcut } from \'./helpModel.js\';'));
@@ -88,7 +95,7 @@ test('快捷键帮助面板随 F1 切换并列出全部快捷键', () => {
   assert.ok(source.includes('helpEntries(t).map((entry) =>'));
   for (const locale of ['zh-CN', 'en-US']) {
     const messages = JSON.parse(readFileSync(new URL(`../../shared/locales/${locale}.json`, import.meta.url)));
-    for (const key of ['title', 'complete', 'save', 'pin', 'cancel', 'nudge', 'square', 'center', 'undo', 'quickAction']) {
+    for (const key of ['title', 'complete', 'save', 'pin', 'fullscreen', 'cancel', 'nudge', 'square', 'center', 'undo', 'quickAction']) {
       assert.equal(typeof messages.screenshot.help[key], 'string', `${locale} 缺少 screenshot.help.${key}`);
     }
   }
