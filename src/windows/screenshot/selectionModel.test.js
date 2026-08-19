@@ -79,6 +79,30 @@ test('normalizeSelection 在右下边缘仍保证最小 1x1', () => {
   });
 });
 
+test('normalizeSelection 反选统一且起止点夹紧并最小 1x1', () => {
+  const source = readFileSync(new URL('./selectionModel.js', import.meta.url), 'utf8');
+  // 源码护栏：单轴归一化必须把起止两端都夹到 [0, limit] 再取 min/max（越界拖拽不产生负坐标或越界矩形），
+  // 且退化点（high == low）必须扩成最小 1x1：右/下边缘向内侧扩（低端减一），非边缘向高端扩一。
+  const axisStart = source.indexOf('function normalizeAxis(start, end, limit) {');
+  const axisBody = source.slice(axisStart, axisStart + 400);
+  assert.ok(axisBody.includes('Math.min(clamp(start, 0, limit), clamp(end, 0, limit))'), '低端必须是两端夹紧后的较小值');
+  assert.ok(axisBody.includes('Math.max(clamp(start, 0, limit), clamp(end, 0, limit))'), '高端必须是两端夹紧后的较大值');
+  assert.ok(axisBody.includes('if (low >= limit) {'), '退化点在右/下边缘必须走内侧扩展分支');
+  assert.ok(axisBody.includes('return [Math.max(0, limit - 1), limit];'), '右/下边缘退化必须向内侧扩成 1x1');
+  assert.ok(axisBody.includes('return [low, Math.min(limit, low + 1)];'), '非边缘退化必须向高端扩成 1x1');
+  // 行为属性：反选统一、越界夹紧、四角与右/下边缘退化都保持最小 1x1 且不越界。
+  const rev = normalizeSelection({ x: 400, y: 300 }, { x: 100, y: 50 }, bounds);
+  assert.deepEqual(selectionValues(rev), { left: 100, top: 50, right: 400, bottom: 300, width: 300, height: 250 });
+  const clamped = normalizeSelection({ x: -10, y: 610 }, { x: 810, y: -10 }, bounds);
+  assert.deepEqual(selectionValues(clamped), { left: 0, top: 0, right: 800, bottom: 600, width: 800, height: 600 });
+  for (const corner of [{ x: 0, y: 0 }, { x: 800, y: 0 }, { x: 0, y: 600 }, { x: 800, y: 600 }]) {
+    const s = normalizeSelection(corner, corner, bounds);
+    assert.equal(s.width, 1, '退化点必须保持最小宽度 1');
+    assert.equal(s.height, 1, '退化点必须保持最小高度 1');
+    assert.ok(s.left >= 0 && s.top >= 0 && s.right <= 800 && s.bottom <= 600, '退化点不得越界');
+  }
+});
+
 test('normalizeSelection 拒绝无效显示器尺寸', () => {
   assert.throws(
     () => normalizeSelection({ x: 0, y: 0 }, { x: 1, y: 1 }, { width: 0, height: 100 }),
