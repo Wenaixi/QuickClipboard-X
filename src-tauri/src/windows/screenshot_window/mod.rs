@@ -527,6 +527,32 @@ mod source_guards {
     }
 
     #[test]
+    fn start_screenshot_restores_main_window_when_hide_accounting_fails() {
+        let source = source_file("windows/screenshot_window/mod.rs");
+        let start = source.rfind("pub fn start_screenshot").expect("缺少截图启动函数");
+        let end = source[start..]
+            .find("pub fn screenshot_window_ready")
+            .map(|offset| start + offset)
+            .expect("缺少函数结束锚点");
+        let body = &source[start..end];
+        // 隐藏记账失败路径必须对称恢复主窗口，否则用户主窗口被吞且无法再打开。
+        let fail_branch = body
+            .find("if let Err(error) = state.sessions.mark_main_window_hidden(&session_id, revision) {")
+            .expect("缺少隐藏记账失败分支");
+        let after_fail = &body[fail_branch..];
+        assert!(
+            after_fail.contains("show_main_window(&window);"),
+            "隐藏记账失败必须恢复主窗口"
+        );
+        // 主窗口不存在时也必须取消会话，避免遗留孤儿会话。
+        let none_branch = body
+            .find("None => {")
+            .expect("缺少主窗口不存在分支");
+        let after_none = &body[none_branch..body.find("hide_main_window(&window);").expect("缺少隐藏动作")];
+        assert!(after_none.contains("state.sessions.cancel(&session_id, revision)"), "主窗口不存在必须取消会话");
+    }
+
+    #[test]
     fn existing_session_skips_reconfigure_to_keep_monitor_consistent() {
         let source = source_file("windows/screenshot_window/mod.rs");
         // 测试模块自身含 "pub fn start_screenshot" 字面量（§10.4 自指陷阱），
