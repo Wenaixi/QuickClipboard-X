@@ -598,6 +598,23 @@ test('选区建立后数字键快捷执行动作且快捷键提示展示', () =>
   assert.ok(source.includes('hotkeyForAction(action.id)'));
 });
 
+test('动作工具栏快捷键提示完整且点击走单一完成入口', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  // ACTIONS 定义：四个动作的快捷键映射必须完整正确（ai 无快捷键）。
+  const actionsStart = source.indexOf('const ACTIONS = [');
+  const actionsBody = source.slice(actionsStart, actionsStart + 200);
+  assert.ok(actionsBody.includes("{ id: 'copy', shortcut: 'Enter' }"), 'copy 必须映射 Enter');
+  assert.ok(actionsBody.includes("{ id: 'save', shortcut: 'Ctrl+S' }"), 'save 必须映射 Ctrl+S');
+  assert.ok(actionsBody.includes("{ id: 'pin', shortcut: 'Ctrl+P' }"), 'pin 必须映射 Ctrl+P');
+  assert.ok(actionsBody.includes("{ id: 'ai', shortcut: '' }"), 'ai 必须无默认快捷键');
+  // 按钮 title 必须合并 action.shortcut 与 hotkeyForAction（用户悬停可见完整快捷键）。
+  const toolbarStart = source.indexOf('className="screenshot-toolbar"');
+  const toolbarBody = source.slice(toolbarStart, toolbarStart + 1200);
+  assert.ok(toolbarBody.includes('title={t(\'screenshot.shortcutHint\', { label, shortcut: [action.shortcut, hotkeyForAction(action.id)].filter(Boolean).join(\' / \') })}'), '按钮 title 必须合并快捷键');
+  // 按钮点击必须走 completeScreenshot 单一完成入口（不允许直接 invoke）。
+  assert.ok(toolbarBody.includes('onClick={() => void completeScreenshot(action.id)}'), '按钮点击必须走完成入口');
+});
+
 test('工具栏动作按钮使用原生 button 且不被禁用时保持键盘可达', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   // 动作按钮必须用原生 button（天然 Tab 聚焦 + Enter/Space 触发），
