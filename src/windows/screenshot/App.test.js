@@ -493,6 +493,20 @@ test('选区建立后数字键快捷执行动作且快捷键提示展示', () =>
   assert.ok(source.includes('hotkeyForAction(action.id)'));
 });
 
+test('工具栏动作按钮使用原生 button 且不被禁用时保持键盘可达', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  // 动作按钮必须用原生 button（天然 Tab 聚焦 + Enter/Space 触发），
+  // 不能用 div role=button 代替，否则键盘导航与辅助技术支持断裂。
+  const toolbarStart = source.indexOf('className="screenshot-toolbar"');
+  const toolbarBody = source.slice(toolbarStart, toolbarStart + 1200);
+  assert.ok(toolbarBody.includes('ACTIONS.map((action) => { const label = actionLabel(action.id, t); return <button key={action.id} type="button" className="screenshot-action" data-screenshot-control'), '工具栏动作必须是原生 button');
+  // 不可禁用时不能加 tabIndex=-1 剥夺焦点（仅 disabled 会天然移出 Tab 序）。
+  assert.ok(!toolbarBody.includes('tabIndex={-1}'), '工具栏按钮不得主动剥夺焦点');
+  // 取消按钮同样是原生 button 且带可访问名称。
+  assert.ok(source.includes('<button type="button" className="screenshot-cancel" data-screenshot-control'), '取消按钮必须是原生 button');
+  assert.ok(source.includes('aria-label={t(\'screenshot.cancelLabel\')}'), '取消按钮必须有可访问名称');
+});
+
 test('AI 未配置时工具栏禁用 AI 动作且数字键 4 引导进入设置', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   // 工具栏按钮：disabled 判定必须与可用性函数一致。
