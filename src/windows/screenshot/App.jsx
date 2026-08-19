@@ -404,10 +404,15 @@ function App() {
       await invoke(COMPLETE_COMMAND, { sessionId: bootstrap.sessionId, selection: physicalSelection, action });
     } catch (error) {
       setActionError(t('screenshot.actionFailed', { action: actionLabel(action, t), error: String(error) }));
+      return;
     } finally {
       // 无论成功失败都解除动作占用，避免成功路径永久卡在处理中。
       setBusyAction('');
     }
+    // 截图成功后销毁窗口：后端 cleanup_plan 只 hide 不销毁，React 实例保留上一会话的
+    // 选区/工具栏状态；后端 hide 触发的 blur 恰逢 busyAction 非空被跳过，残留状态会在
+    // 下次快捷键复用窗口时闪现旧选区。成功路径主动 close 让状态与 webview 一起释放。
+    await getCurrentWindow().close().catch(() => {});
   };
 
   const handlePointerDown = (event) => {

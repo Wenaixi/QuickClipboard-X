@@ -116,6 +116,18 @@ test('放大镜背景采样按 DPR 换算物理像素且色块不遮挡面板', 
   assert.ok(source.includes('below + 20 <= bounds.height'));
 });
 
+test('截图成功后主动关闭窗口避免残留选区状态闪现', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const start = source.indexOf('const completeScreenshot = async (action) => {');
+  const body = source.slice(start);
+  // 成功路径必须销毁窗口：后端 cleanup_plan 只 hide 不销毁，React 实例会保留
+  // 上一会话的选区/工具栏状态并在下次复用窗口时闪现旧选区。
+  assert.ok(body.includes("await getCurrentWindow().close().catch(() => {});"), '成功路径必须主动关闭截图窗口');
+  const catchIndex = body.indexOf('} catch (error) {');
+  const closeIndex = body.indexOf("await getCurrentWindow().close()");
+  assert.ok(catchIndex !== -1 && closeIndex !== -1 && catchIndex < closeIndex, '失败路径必须 return 显示错误，成功路径才 close');
+});
+
 test('完成动作成功后清理占用且 AI 未配置回落配置入口', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('} finally {'));
