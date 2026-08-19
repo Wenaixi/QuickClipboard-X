@@ -69,6 +69,17 @@ test('放大镜绘制网格线与中心十字辅助像素对齐', () => {
   assert.ok(source.includes('context.moveTo(cross.x + 0.5, 0);'));
 });
 
+test('Ctrl+A 一键选中整个屏幕并保留撤销历史', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('import { fullScreenSelection } from \'./fullScreenModel.js\';'));
+  assert.ok(source.includes("if (event.ctrlKey && event.key.toLowerCase() === 'a') {"));
+  assert.ok(source.includes('const next = fullScreenSelection(bootstrap.bounds);'));
+  const keydownIndex = source.indexOf('const handleKeyDown = (event) => {');
+  const body = source.slice(keydownIndex);
+  assert.ok(body.includes('fullScreenSelection'), 'keydown 必须使用全屏选区生成');
+  assert.ok(body.includes('pushSelectionHistory'), '全屏选区前必须保留撤销历史');
+});
+
 test('快捷键帮助面板随 F1 切换并列出全部快捷键', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('import { helpEntries, isHelpShortcut } from \'./helpModel.js\';'));
