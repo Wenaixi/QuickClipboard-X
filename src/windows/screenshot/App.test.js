@@ -195,6 +195,14 @@ test('快捷键帮助面板随 F1 切换并列出全部快捷键', () => {
   }
 });
 
+test('configure 复用窗口时复位帮助面板与处理中占用', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const start = source.indexOf('const configurePromise = listen(CONFIGURE_EVENT');
+  const body = source.slice(start, source.indexOf('configurePromise\n      .then'));
+  assert.ok(body.includes('setShowHelp(false);'), '复用窗口必须关闭上次的帮助面板');
+  assert.ok(body.includes("setBusyAction('');"), '复用窗口必须清除上次的处理中占用');
+});
+
 test('拖拽草稿走统一选区生成且取消/配置统一重置交互状态', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('import { selectionFromDraft, resetInteractionState } from \'./draftModel.js\';'));
