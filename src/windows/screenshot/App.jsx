@@ -15,6 +15,7 @@ import { lineStyle } from './annotationModel.js';
 import { readCenterPixel, formatRgb, hexFromRgb } from './colorModel.js';
 import { magnifierScaleForWheel } from './magnifierZoomModel.js';
 import { formatPixelSize, formatMegapixels } from './sizeModel.js';
+import { magnetSelection } from './magnetModel.js';
 import {
   createRafWriter,
   hitSelectionEdge,
@@ -353,7 +354,7 @@ function App() {
     if (resizing && root && event.pointerId === resizing.pointerId) {
       const current = pointFromPointerEvent(event, root);
       setMagnifierPoint(current);
-      const next = resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds, { keepAspectRatio: event.shiftKey, fromCenter: event.ctrlKey });
+      const next = magnetSelection(resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds, { keepAspectRatio: event.shiftKey, fromCenter: event.ctrlKey }), bootstrap.bounds, { edge: resizing.edge });
       selectionRef.current = next;
       rafWriterRef.current?.schedule(next);
       return;
@@ -362,7 +363,7 @@ function App() {
     if (moving && root && event.pointerId === moving.pointerId) {
       const current = pointFromPointerEvent(event, root);
       setMagnifierPoint(current);
-      const next = nudgeSelection(moving.selectionStart, current.x - moving.start.x, current.y - moving.start.y, bootstrap.bounds);
+      const next = magnetSelection(nudgeSelection(moving.selectionStart, current.x - moving.start.x, current.y - moving.start.y, bootstrap.bounds), bootstrap.bounds);
       selectionRef.current = next;
       rafWriterRef.current?.schedule(next);
       return;
@@ -409,7 +410,7 @@ function App() {
     if (resizing && root && event.pointerId === resizing.pointerId) {
       event.preventDefault();
       const current = pointFromPointerEvent(event, root);
-      const finalSelection = resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds, { keepAspectRatio: event.shiftKey, fromCenter: event.ctrlKey });
+      const finalSelection = magnetSelection(resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds, { keepAspectRatio: event.shiftKey, fromCenter: event.ctrlKey }), bootstrap.bounds, { edge: resizing.edge });
       resizeRef.current = null;
       pointerIdRef.current = null;
       setMagnifierPoint(null);
@@ -424,7 +425,7 @@ function App() {
     if (moving && root && event.pointerId === moving.pointerId) {
       event.preventDefault();
       const current = pointFromPointerEvent(event, root);
-      const finalSelection = nudgeSelection(moving.selectionStart, current.x - moving.start.x, current.y - moving.start.y, bootstrap.bounds);
+      const finalSelection = magnetSelection(nudgeSelection(moving.selectionStart, current.x - moving.start.x, current.y - moving.start.y, bootstrap.bounds), bootstrap.bounds);
       moveRef.current = null;
       pointerIdRef.current = null;
       setMagnifierPoint(null);
@@ -463,6 +464,9 @@ function App() {
         // 未命中可截图窗口时保留 1×1 的单击选区，用户仍可继续拖动选择。
       }
     }
+
+    // 单击选窗保留窗口精确矩形不吸附；拖动（含正方形）收尾时吸附到屏幕引导线。
+    if (!clicked) finalSelection = magnetSelection(finalSelection, bootstrap.bounds);
 
     if (!isCurrentGesture(gestureId, gestureIdRef.current)) return;
     applySelectionStyle(root, finalSelection);
