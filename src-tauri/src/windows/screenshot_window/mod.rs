@@ -434,6 +434,26 @@ mod source_guards {
     }
 
     #[test]
+    fn ai_success_path_commits_session_before_writing_clipboard() {
+        let source = source_file("windows/screenshot_window/mod.rs");
+        let ai_start = source.find("\"ai\" => {").expect("缺少 AI 截图动作");
+        let other_idx = source[ai_start..]
+            .find("        other =>")
+            .map(|offset| ai_start + offset)
+            .expect("缺少动作兜底");
+        let ai_body = &source[ai_start..other_idx];
+        // 成功路径必须先 begin_commit 锁定会话为 Committing，再写剪贴板：
+        // 若顺序颠倒，剪贴板先被写入、随后会话提交失败，产生无法撤回的幽灵文本。
+        let commit = ai_body
+            .find("begin_screenshot_commit(session_id)?;")
+            .expect("缺少会话提交");
+        let copy = ai_body
+            .find("copy_screenshot_text(&result.text)")
+            .expect("缺少剪贴板写入");
+        assert!(commit < copy, "必须先提交会话再写剪贴板");
+    }
+
+    #[test]
     fn cancelled_ai_session_cannot_write_recognized_text_to_clipboard() {
         let source = source_file("windows/screenshot_window/mod.rs");
         let ai_start = source.find("\"ai\" => {").expect("缺少 AI 截图动作");
