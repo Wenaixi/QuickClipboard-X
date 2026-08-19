@@ -65,8 +65,8 @@ export function magnetSelection(selection, bounds, options = {}) {
     const snapHeight = bottom - top;
     left = clamp(left, 0, Math.max(0, bounds.width - snapWidth));
     top = clamp(top, 0, Math.max(0, bounds.height - snapHeight));
-    right = left + snapWidth;
-    bottom = top + snapHeight;
+    right = Math.min(left + snapWidth, bounds.width);
+    bottom = Math.min(top + snapHeight, bounds.height);
   } else {
     if (edge.includes('e')) {
       right += bestSnapDelta([
@@ -81,6 +81,8 @@ export function magnetSelection(selection, bounds, options = {}) {
         { delta: bounds.width / 2 - left },
       ], tolerance);
       left = clamp(left, 0, Math.max(0, right - 1));
+      // 选区已整体越界时 left 被夹回 0 但 right 未动，会产生负宽；保证最小 1px。
+      right = Math.max(right, left + 1);
     }
     if (edge.includes('s')) {
       bottom += bestSnapDelta([
@@ -95,6 +97,8 @@ export function magnetSelection(selection, bounds, options = {}) {
         { delta: bounds.height / 2 - top },
       ], tolerance);
       top = clamp(top, 0, Math.max(0, bottom - 1));
+      // 选区已整体越界时 top 被夹回 0 但 bottom 未动，会产生负高；保证最小 1px。
+      bottom = Math.max(bottom, top + 1);
     }
   }
 
