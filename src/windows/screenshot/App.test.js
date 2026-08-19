@@ -100,11 +100,18 @@ test('选区建立前显示初始引导提示且不遮挡拖拽', () => {
 test('选区建立后显示完成动作邀请提示且不遮挡操作', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('import { includeInvite } from \'./inviteModel.js\';'));
-  assert.ok(source.includes('selection && !busyAction && !showHelp && <div className="screenshot-invite" data-screenshot-invite="true">{includeInvite(t)}</div>'));
+  assert.ok(source.includes('selection && !selecting && !moving && !resizing && !busyAction && !showHelp && <div className="screenshot-invite" data-screenshot-invite="true">{includeInvite(t)}</div>'));
   for (const locale of ['zh-CN', 'en-US']) {
     const messages = JSON.parse(readFileSync(new URL(`../../shared/locales/${locale}.json`, import.meta.url)));
     assert.equal(typeof messages.screenshot.invite, 'string', `${locale} 缺少 screenshot.invite`);
   }
+});
+
+test('放大镜背景采样按 DPR 换算物理像素且色块不遮挡面板', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('geometry.source.cols * dpr'));
+  assert.ok(source.includes('const magnifierLayout = useMemo(() => ('));
+  assert.ok(source.includes('parseFloat(magnifierLayout.top) + parseFloat(magnifierLayout.height) + 4'));
 });
 
 test('完成动作成功后清理占用且 AI 未配置回落配置入口', () => {

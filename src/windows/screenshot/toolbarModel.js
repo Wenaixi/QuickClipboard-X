@@ -8,8 +8,10 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
-// 工具栏上下边距（像素），上方放置时再上移自身高度预留空间。
+// 工具栏上下边距（像素）与工具栏自身高度（像素）。
+// 上方放置时必须再上移自身高度，避免工具栏遮挡选区上边缘。
 const TOOLBAR_GAP = 8;
+const TOOLBAR_HEIGHT = 40;
 
 // 决策工具栏放在选区下方还是上方（ShareX 公开行为：工具栏贴近选区且随选区自适应翻转）。
 // 选区贴近屏幕上缘时放下方；否则默认放下方，仅当下方空间不足且上方空间更大时翻转。
@@ -25,7 +27,8 @@ export function toolbarPlacement(selection, bounds) {
   }
   const spaceBelow = bounds.height - selection.bottom;
   const spaceAbove = selection.top;
-  if (spaceAbove <= TOOLBAR_GAP || spaceBelow >= spaceAbove) {
+  // 上方放置需同时容纳自身高度与间距，否则翻到下方避免负坐标越界。
+  if (spaceAbove <= TOOLBAR_GAP + TOOLBAR_HEIGHT || spaceBelow >= spaceAbove) {
     return 'below';
   }
   return 'above';
@@ -49,6 +52,8 @@ export function toolbarStyle(selection, bounds, placement, toolbarWidth = 300) {
   }
   const maxLeft = Math.max(TOOLBAR_GAP, bounds.width - toolbarWidth - TOOLBAR_GAP);
   const left = clamp(selection.left + TOOLBAR_GAP, TOOLBAR_GAP, maxLeft);
-  const top = placement === 'below' ? selection.bottom + TOOLBAR_GAP : selection.top - TOOLBAR_GAP;
+  const top = placement === 'below'
+    ? selection.bottom + TOOLBAR_GAP
+    : selection.top - TOOLBAR_GAP - TOOLBAR_HEIGHT;
   return { left: `${left}px`, top: `${top}px` };
 }

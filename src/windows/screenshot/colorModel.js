@@ -3,7 +3,7 @@ function clampChannel(value) {
 }
 
 // 从 RGBA 平铺字节数组读取中心像素（ShareX 公开行为：放大镜同时显示光标下像素的颜色值）。
-// 偶数尺寸时取右上中心像素；数据长度不足或尺寸非法时抛异常。
+// 中心取 x=floor(w/2) 与 y=floor(h/2)，与面板十字参考线对齐；数据长度不足或尺寸非法时抛异常。
 export function readCenterPixel(data, width, height) {
   if (!width || !Number.isInteger(width) || !height || !Number.isInteger(height) || width <= 0 || height <= 0) {
     throw new RangeError('宽度与高度必须为正数');
@@ -12,7 +12,7 @@ export function readCenterPixel(data, width, height) {
     throw new RangeError('背景快照数据长度不足');
   }
   const x = Math.floor(width / 2);
-  const y = Math.floor((height - 1) / 2);
+  const y = Math.floor(height / 2);
   const index = (y * width + x) * 4;
   return { r: data[index], g: data[index + 1], b: data[index + 2] };
 }
