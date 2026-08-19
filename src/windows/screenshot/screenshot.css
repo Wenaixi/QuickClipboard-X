@@ -29,6 +29,7 @@ button { font: inherit; }
 .screenshot-mask-left { top: var(--selection-top); bottom: calc(100% - var(--selection-bottom)); left: 0; width: var(--selection-left); }
 .screenshot-mask-right { top: var(--selection-top); right: 0; bottom: calc(100% - var(--selection-bottom)); left: var(--selection-right); }
 .screenshot-mask-bottom { right: 0; bottom: 0; left: 0; top: var(--selection-bottom); }
+.screenshot-magnifier { position: absolute; z-index: 3; pointer-events: none; border: 1px solid rgba(255, 255, 255, 0.7); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.42); background: #000; }
 .screenshot-root[data-selection-active="false"] .screenshot-mask { inset: 0; width: auto; height: auto; }
 
 .screenshot-selection { position: absolute; z-index: 2; top: var(--selection-top); left: var(--selection-left); width: var(--selection-width); height: var(--selection-height); border: 1px solid rgba(255, 255, 255, 0.96); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.42); pointer-events: none; opacity: 0; }

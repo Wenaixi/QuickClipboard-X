@@ -38,7 +38,39 @@ test('normalizeBootstrap 使用显式显示器物理尺寸与逻辑尺寸', () =
     initialAction: '',
     screenshotAiEnabled: true,
     screenshotAiConfigured: false,
+    screenshotMagnifierEnabled: true,
+    magnifierBackground: null,
   });
+});
+
+test('放大镜渲染条件包含开关、背景快照与指针点', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  // 以 JSX 表达式开头锚定，避免前置 false 短路绕过该条件。
+  assert.ok(source.includes('{bootstrap.screenshotMagnifierEnabled && bootstrap.magnifierBackground && magnifierPoint && (draftRef.current || moveRef.current || resizeRef.current) && ('));
+  assert.ok(source.includes('<canvas className="screenshot-magnifier"'));
+});
+
+test('放大镜拖拽时更新指针点并在结束/取消时清空', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('setMagnifierPoint(current);'));
+  assert.ok(source.includes('setMagnifierPoint(draft.end);'));
+  assert.ok(source.includes('setMagnifierPoint(null);'));
+});
+
+test('放大镜 canvas 用几何绘制背景快照且关闭平滑', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('context.imageSmoothingEnabled = false;'));
+  assert.ok(source.includes('magnifierGeometry(magnifierPoint, bootstrap.bounds)'));
+  assert.ok(source.includes('context.drawImage('));
+});
+
+test('normalizeBootstrap 透传放大镜开关与背景快照', () => {
+  const result = normalizeBootstrap({
+    screenshotMagnifierEnabled: false,
+    magnifierBackground: 'data:image/png;base64,AAAA',
+  });
+  assert.equal(result.screenshotMagnifierEnabled, false);
+  assert.equal(result.magnifierBackground, 'data:image/png;base64,AAAA');
 });
 
 test('选区内部按下进入整体平移模式', () => {
@@ -112,6 +144,8 @@ test('normalizeBootstrap 缺失尺寸时以视口和 DPR 推导安全默认值',
       initialAction: '',
       screenshotAiEnabled: true,
       screenshotAiConfigured: false,
+      screenshotMagnifierEnabled: true,
+      magnifierBackground: null,
     });
   } finally {
     Object.defineProperty(globalThis, 'innerWidth', { configurable: true, value: oldWidth });
