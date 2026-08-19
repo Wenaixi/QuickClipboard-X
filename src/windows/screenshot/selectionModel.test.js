@@ -607,6 +607,29 @@ test('nudgeSelection 支持 10px 快速步长并夹在右下方边界', () => {
   });
 });
 
+test('nudgeSelection 尺寸守恒且边界按尺寸推导并先归一化', () => {
+  const source = readFileSync(new URL('./selectionModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function nudgeSelection');
+  const body = source.slice(start, start + 1000);
+  // 源码护栏：必须先归一化当前选区（脏输入如 left>right 也能得到合法矩形），
+  // 边界必须按选区尺寸推导（maxLeft = bounds.width - current.width，贴边时 clamp 才不越界）。
+  assert.ok(body.includes('const current = normalizeSelection('), '微调前必须先归一化当前选区');
+  assert.ok(body.includes('const maxLeft = Math.max(0, bounds.width - current.width);'), '横向边界必须按尺寸推导');
+  assert.ok(body.includes('const maxTop = Math.max(0, bounds.height - current.height);'), '纵向边界必须按尺寸推导');
+  assert.ok(body.includes('right: left + current.width'), '右边缘必须由左边缘加宽度得到');
+  assert.ok(body.includes('bottom: top + current.height'), '下边缘必须由上边缘加高度得到');
+  // 行为属性：任意位移下尺寸守恒（width/height 不变），且各方向都贴边界时夹紧不越界。
+  const base = { left: 100, top: 80, right: 300, bottom: 240, width: 200, height: 160 };
+  for (const [dx, dy] of [[1, 1], [-5, -5], [10, -10], [500, 500], [-500, -500]]) {
+    const moved = nudgeSelection(base, dx, dy, bounds);
+    assert.equal(moved.width, 200, '移动不得改变宽度');
+    assert.equal(moved.height, 160, '移动不得改变高度');
+    assert.ok(moved.left >= 0 && moved.top >= 0 && moved.right <= 800 && moved.bottom <= 600, '移动不得越界');
+  }
+  const corner = nudgeSelection({ left: 0, top: 0, right: 800, bottom: 600, width: 800, height: 600 }, 10, 10, bounds);
+  assert.deepEqual(selectionValues(corner), { left: 0, top: 0, right: 800, bottom: 600, width: 800, height: 600 }, '占满边界时移动必须原地夹紧');
+});
+
 test('nudgeSelection 拒绝无效边界或非有限位移', () => {
   assert.throws(
     () => nudgeSelection({ left: 0, top: 0, right: 1, bottom: 1 }, 1, 1, { width: 0, height: 100 }),
