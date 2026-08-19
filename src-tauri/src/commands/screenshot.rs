@@ -69,19 +69,24 @@ mod tests {
     #[cfg(target_os = "windows")]
     #[test]
     fn screenshot_session_commands_require_the_invoking_screenshot_window() {
+        // 命令名带 \n 行首前缀：测试数组里是引号内字符串（前导是引号而非换行），
+        // 不带前缀会让 source.find 命中测试代码而非生产声明，护栏永远绿
+        // （§10.4 自指陷阱，已实证：5 个命令全匹配到测试数组，guard 命中测试
+        // 自身的 find 字面量，生产代码零覆盖）。
         let source = source();
         for command in [
-            "pub fn screenshot_window_ready",
-            "pub fn cancel_screenshot",
-            "pub fn find_screenshot_window_at_point",
-            "pub async fn complete_screenshot",
-            "pub fn close_screenshot_window",
+            "\npub fn screenshot_window_ready",
+            "\npub fn cancel_screenshot",
+            "\npub fn find_screenshot_window_at_point",
+            "\npub async fn complete_screenshot",
+            "\npub fn close_screenshot_window",
         ] {
             let start = source.find(command).expect("缺少截图会话命令");
-            let body = &source[start..];
-            let guard = body.find("require_screenshot_window(&window)?;")
+            // 只搜声明之后到下一个 #[tauri::command] 之间的区域，确保校验属于本函数体。
+            let tail = &source[start + command.len()..];
+            let guard = tail.find("require_screenshot_window(&window)?;")
                 .expect("截图会话命令缺少调用窗口校验");
-            let next_command = body.find("\n#[cfg(target_os = \"windows\")]").unwrap_or(body.len());
+            let next_command = tail.find("\n#[tauri::command]").unwrap_or(tail.len());
             assert!(guard < next_command, "{command} 必须在自身函数体内校验调用窗口");
         }
     }
