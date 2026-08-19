@@ -106,6 +106,82 @@ export function hitSelectionInterior(point, selection, inset = 4) {
   return point.x >= left && point.x < right && point.y >= top && point.y < bottom;
 }
 
+export function hitSelectionEdge(point, selection, tolerance = 4) {
+  assertFiniteNumber(point?.x, '点 x');
+  assertFiniteNumber(point?.y, '点 y');
+  for (const key of ['left', 'top', 'right', 'bottom']) {
+    assertFiniteNumber(selection?.[key], `selection.${key}`);
+  }
+  assertFiniteNumber(tolerance, '边缘容差');
+  if (tolerance < 0) {
+    throw new RangeError('边缘容差不能为负数');
+  }
+
+  if (
+    point.x < selection.left - tolerance
+    || point.x >= selection.right + tolerance
+    || point.y < selection.top - tolerance
+    || point.y >= selection.bottom + tolerance
+  ) {
+    return null;
+  }
+  // 严格内部点（距各边都超过容差）留给平移，不属边缘。
+  if (
+    point.x > selection.left + tolerance
+    && point.x < selection.right - tolerance
+    && point.y > selection.top + tolerance
+    && point.y < selection.bottom - tolerance
+  ) {
+    return null;
+  }
+
+  const edges = [];
+  if (point.x <= selection.left + tolerance) edges.push('w');
+  if (point.x >= selection.right - tolerance) edges.push('e');
+  if (point.y <= selection.top + tolerance) edges.push('n');
+  if (point.y >= selection.bottom - tolerance) edges.push('s');
+  if (edges.length === 0) {
+    return null;
+  }
+  // 角点按 n/s 在前、e/w 在后的约定命名（nw/ne/sw/se）。
+  edges.sort((a, b) => 'nsew'.indexOf(a) - 'nsew'.indexOf(b));
+  return edges.join('');
+}
+
+export function resizeSelection(selection, edge, point, bounds) {
+  if (!bounds || !Number.isFinite(bounds.width) || !Number.isFinite(bounds.height) || bounds.width <= 0 || bounds.height <= 0) {
+    throw new RangeError('边界尺寸必须为正数');
+  }
+  if (typeof edge !== 'string' || edge.length === 0 || !/^[nsew]+$/.test(edge)) {
+    throw new TypeError('edge 必须是 n/s/e/w 组合');
+  }
+  assertFiniteNumber(point?.x, '点 x');
+  assertFiniteNumber(point?.y, '点 y');
+
+  const current = normalizeSelection(
+    { x: selection.left, y: selection.top },
+    { x: selection.right, y: selection.bottom },
+    bounds
+  );
+  let left = current.left;
+  let right = current.right;
+  let top = current.top;
+  let bottom = current.bottom;
+
+  if (edge.includes('w')) left = clamp(point.x, 0, bounds.width);
+  if (edge.includes('e')) right = clamp(point.x, 0, bounds.width);
+  if (edge.includes('n')) top = clamp(point.y, 0, bounds.height);
+  if (edge.includes('s')) bottom = clamp(point.y, 0, bounds.height);
+
+  // 仅被拖动的边按对边夹紧到最小 1px，不翻转选区；未被拖动的边保持原值。
+  if (edge.includes('w')) left = clamp(left, 0, Math.max(0, right - 1));
+  if (edge.includes('e')) right = clamp(right, left + 1, bounds.width);
+  if (edge.includes('n')) top = clamp(top, 0, Math.max(0, bottom - 1));
+  if (edge.includes('s')) bottom = clamp(bottom, top + 1, bounds.height);
+
+  return { left, top, right, bottom, width: right - left, height: bottom - top };
+}
+
 export function nudgeSelection(selection, dx, dy, bounds) {
   if (!bounds || !Number.isFinite(bounds.width) || !Number.isFinite(bounds.height) || bounds.width <= 0 || bounds.height <= 0) {
     throw new RangeError('边界尺寸必须为正数');
