@@ -501,6 +501,19 @@ test('截图键盘微调接线调用 nudgeSelection 并同步选区状态', () =
   assert.ok(source.includes('applySelectionStyle(rootRef.current, next);'));
 });
 
+test('completeScreenshot 防重入且 finally 必解除占用并 dispose 条件关闭', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  // 防重入核心：动作处理中禁止二次触发（工具栏/快捷键/双击都走此入口）。
+  assert.ok(source.includes('const completeScreenshot = async (action) => {\n    const currentSelection = selectionRef.current;\n    if (!currentSelection || busyAction) return;'), '动作入口必须防重入');
+  assert.ok(source.includes('setBusyAction(action);'), '执行前必须标记占用');
+  // 无论成功失败都解除占用：finally 语义防止成功路径永久卡在处理中。
+  const finallyIdx = source.indexOf('// 无论成功失败都解除动作占用，避免成功路径永久卡在处理中。');
+  assert.ok(finallyIdx !== -1, '必须显式注释 finally 解除语义');
+  assert.ok(source.includes('} finally {\n      // 无论成功失败都解除动作占用，避免成功路径永久卡在处理中。\n      setBusyAction(\'\');\n    }'), 'finally 必须解除动作占用');
+  // 成功路径按生命周期模式条件关闭窗口（dispose 销毁 / quick 复用）。
+  assert.ok(source.includes("if (bootstrap.lifecycleMode === 'dispose') {"), '成功路径必须按生命周期模式条件关闭');
+});
+
 test('交互状态机修复护栏：ref 同步与 busyAction 守卫与放大镜复位', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   // F1：新草稿起点同步清 selectionRef，避免与 React state 撕裂。
