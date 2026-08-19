@@ -37,8 +37,14 @@ export function magnifierGeometry(point, bounds, options = {}) {
   const sourceLeft = clamp(point.x - cols / 2, 0, Math.max(0, bounds.width - cols));
   const sourceTop = clamp(point.y - rows / 2, 0, Math.max(0, bounds.height - rows));
 
-  const preferRight = point.x + gap + panelWidth <= bounds.width - margin;
-  const preferBelow = point.y + gap + panelHeight <= bounds.height - margin;
+  // 光标在显示器外（多显示器负坐标）时优先侧起点可能为负，必须同时要求
+  // 面板起点留出边距，否则面板会放到屏幕外完全不可见。
+  // 光标在显示器外（多显示器负坐标）时优先侧起点可能为负，必须同时要求
+  // 面板起点留出边距，否则面板会放到屏幕外完全不可见。
+  const preferRight =
+    point.x + gap + panelWidth <= bounds.width - margin && point.x + gap >= margin;
+  const preferBelow =
+    point.y + gap + panelHeight <= bounds.height - margin && point.y + gap >= margin;
   const panelLeft = preferRight
     ? point.x + gap
     : clamp(point.x - gap - panelWidth, margin, Math.max(margin, bounds.width - panelWidth - margin));
