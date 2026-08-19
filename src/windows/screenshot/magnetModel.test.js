@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { magnetSelection } from './magnetModel.js';
 
 const bounds = { width: 1920, height: 1080 };
@@ -65,6 +66,22 @@ test('magnetSelection 越界选区不产生负宽或零宽', () => {
   const pan = magnetSelection({ left: -5, top: -5, right: 805, bottom: 605 }, bounds);
   assert.ok(pan.right <= 800, '平移后右边界不得越界');
   assert.ok(pan.bottom <= 600, '平移后下边界不得越界');
+});
+
+test('magnetSelection 任何输入都返回边界内最小 1px 合法选区', () => {
+  const source = readFileSync(new URL('./magnetModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function magnetSelection');
+  const body = source.slice(start);
+  // 平移与调整两条路径都必须以夹紧收尾，返回的选区不得越界或产生负尺寸。
+  assert.ok(body.includes('left = clamp(left, 0, Math.max(0, bounds.width - snapWidth))'), '平移路径必须夹紧 left');
+  assert.ok(body.includes('right = Math.min(left + snapWidth, bounds.width)'), '平移路径必须夹紧 right');
+  assert.ok(body.includes('right = Math.max(right, left + 1)'), 'w 边调整必须保证最小 1px 宽度');
+  assert.ok(body.includes('bottom = Math.max(bottom, top + 1)'), 'n 边调整必须保证最小 1px 高度');
+  // 越界输入也必须产生合法选区。
+  const pan = magnetSelection({ left: -5, top: -5, right: 805, bottom: 605 }, bounds);
+  assert.ok(pan.width >= 1 && pan.height >= 1, '平移越界输入必须保持最小 1px');
+  const w = magnetSelection({ left: -100, top: 100, right: -50, bottom: 200 }, bounds, { edge: 'w' });
+  assert.ok(w.width >= 1 && w.height >= 1 && w.left >= 0, 'w 边越界输入必须夹紧且最小 1px');
 });
 
 test('magnetSelection 拒绝无效输入', () => {
