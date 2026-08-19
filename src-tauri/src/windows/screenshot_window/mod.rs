@@ -406,6 +406,34 @@ mod source_guards {
     }
 
     #[test]
+    fn cancel_and_failure_paths_restore_main_window_only_via_cleanup_plan() {
+        let source = source_file("windows/screenshot_window/mod.rs");
+        // 取消与失败清理都必须把恢复动作委托给 cleanup_plan（主窗口恢复唯一决策点）。
+        let cancel_start = source.rfind("pub fn cancel_screenshot").expect("缺少取消截图命令");
+        let cancel_end = source[cancel_start..]
+            .find("pub fn find_window_selection")
+            .map(|offset| cancel_start + offset)
+            .expect("缺少取消命令结束锚点");
+        let cancel_body = &source[cancel_start..cancel_end];
+        // 必须裸调用并传播错误；let _ = 丢弃错误会掩盖主窗口恢复失败。
+        assert!(cancel_body.contains("\n    cleanup_plan(plan, app)\n}"), "取消必须裸调用 cleanup_plan 并传播错误");
+        assert!(!cancel_body.contains("let _ = cleanup_plan"), "取消不得丢弃 cleanup_plan 错误");
+        // 失败清理定义之后是 is_screenshot_active；截到该锚点避免后缀含测试自身断言字面量（§10.4）。
+        let failed_start = source.rfind("fn finish_failed_screenshot").expect("缺少失败清理函数");
+        let failed_end = source[failed_start..]
+            .find("pub fn is_screenshot_active")
+            .map(|offset| failed_start + offset)
+            .expect("缺少失败清理函数结束锚点");
+        let failed_body = &source[failed_start..failed_end];
+        assert!(failed_body.contains("cleanup_plan(plan, app)"), "失败清理必须走 cleanup_plan 恢复主窗口");
+        // cleanup_plan 中主窗口恢复必须由 plan.restore_main_window 守卫（revision 匹配才恢复）。
+        let plan_start = source.rfind("fn cleanup_plan").expect("缺少 cleanup_plan");
+        let plan_body = &source[plan_start..];
+        assert!(plan_body.contains("if plan.restore_main_window {"), "主窗口恢复必须由会话计划守卫");
+        assert!(plan_body.contains("show_main_window(&window);"), "恢复动作必须是 show_main_window");
+    }
+
+    #[test]
     fn cancelled_ai_session_cannot_write_recognized_text_to_clipboard() {
         let source = source_file("windows/screenshot_window/mod.rs");
         let ai_start = source.find("\"ai\" => {").expect("缺少 AI 截图动作");
