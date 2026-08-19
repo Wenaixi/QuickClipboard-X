@@ -62,6 +62,7 @@ const NUDGE_STEP = 1;
 const NUDGE_FAST_STEP = 10;
 const MOVE_INSET = 4;
 const RESIZE_TOLERANCE = 4;
+const DEFAULT_MAGNIFIER_SCALE = 6;
 const NUDGE_DIRECTIONS = {
   ArrowUp: [0, -1],
   ArrowDown: [0, 1],
@@ -226,7 +227,7 @@ function App() {
   const [resizing, setResizing] = useState(false);
   const [magnifierPoint, setMagnifierPoint] = useState(null);
   const [magnifierColor, setMagnifierColor] = useState(null);
-  const [magnifierScale, setMagnifierScale] = useState(6);
+  const [magnifierScale, setMagnifierScale] = useState(DEFAULT_MAGNIFIER_SCALE);
   const [busyAction, setBusyAction] = useState('');
   const [actionError, setActionError] = useState('');
   const initialActionRef = useRef('');
@@ -311,6 +312,8 @@ function App() {
       gestureIdRef.current += 1;
       selectionHistoryRef.current = [];
       resetInteractionState({ draftRef, selectionRef, moveRef, resizeRef, setSelection, setSelecting, setMoving, setResizing });
+      setMagnifierPoint(null);
+      setMagnifierScale(DEFAULT_MAGNIFIER_SCALE);
       setActionError('');
       applySelectionStyle(rootRef.current, null);
       if (rootRef.current) rootRef.current.style.cursor = 'crosshair';
@@ -344,6 +347,7 @@ function App() {
     selectionHistoryRef.current = [];
     resetInteractionState({ draftRef, selectionRef, moveRef, resizeRef, setSelection, setSelecting, setMoving, setResizing });
     setMagnifierPoint(null);
+    setMagnifierScale(DEFAULT_MAGNIFIER_SCALE);
     rafWriterRef.current?.cancel();
     applySelectionStyle(rootRef.current, null);
     if (rootRef.current) rootRef.current.style.cursor = 'crosshair';
@@ -393,6 +397,7 @@ function App() {
       if (edge) {
         selectionHistoryRef.current = pushSelectionHistory(selectionHistoryRef.current, selectionRef.current);
         resizeRef.current = { pointerId: event.pointerId, edge };
+        setSelecting(false);
         setResizing(true);
         root.setPointerCapture?.(event.pointerId);
         return;
@@ -400,6 +405,7 @@ function App() {
       if (hitSelectionInterior(start, selectionRef.current, MOVE_INSET)) {
         selectionHistoryRef.current = pushSelectionHistory(selectionHistoryRef.current, selectionRef.current);
         moveRef.current = { pointerId: event.pointerId, start, selectionStart: selectionRef.current };
+        setSelecting(false);
         setMoving(true);
         root.setPointerCapture?.(event.pointerId);
         return;
@@ -411,6 +417,7 @@ function App() {
     pointerIdRef.current = event.pointerId;
     root.setPointerCapture?.(event.pointerId);
     setSelecting(true);
+    selectionRef.current = null;
     setSelection(null);
     setActionError('');
     root.style.cursor = 'crosshair';
@@ -418,6 +425,7 @@ function App() {
   };
 
   const handlePointerMove = (event) => {
+    if (busyAction) return;
     const root = rootRef.current;
     const resizing = resizeRef.current;
     if (resizing && root && event.pointerId === resizing.pointerId) {
@@ -479,6 +487,7 @@ function App() {
       const current = pointFromPointerEvent(event, root);
       const finalSelection = magnetSelection(resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds, { keepAspectRatio: event.shiftKey, fromCenter: event.ctrlKey }), bootstrap.bounds, { edge: resizing.edge });
       resizeRef.current = null;
+      setSelecting(false);
       setResizing(false);
       pointerIdRef.current = null;
       setMagnifierPoint(null);
@@ -495,6 +504,7 @@ function App() {
       const current = pointFromPointerEvent(event, root);
       const finalSelection = magnetSelection(nudgeSelection(moving.selectionStart, current.x - moving.start.x, current.y - moving.start.y, bootstrap.bounds), bootstrap.bounds);
       moveRef.current = null;
+      setSelecting(false);
       setMoving(false);
       pointerIdRef.current = null;
       setMagnifierPoint(null);
@@ -605,7 +615,7 @@ function App() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('blur', handleBlur);
     };
-  }, [bootstrap.sessionId, busyAction, showHelp]);
+  }, [bootstrap.sessionId, bootstrap.bounds, busyAction, showHelp]);
 
   const magnifierLayout = useMemo(() => (
     magnifierPoint ? magnifierCanvasStyle(magnifierPoint, bootstrap.bounds, magnifierScale) : null

@@ -409,6 +409,22 @@ test('截图键盘微调接线调用 nudgeSelection 并同步选区状态', () =
   assert.ok(source.includes('applySelectionStyle(rootRef.current, next);'));
 });
 
+test('交互状态机修复护栏：ref 同步与 busyAction 守卫与放大镜复位', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  // F1：新草稿起点同步清 selectionRef，避免与 React state 撕裂。
+  assert.ok(source.includes('setSelecting(true);\n    selectionRef.current = null;\n    setSelection(null);'));
+  // F4：处理中禁止 pointermove 改写选区。
+  assert.ok(source.includes('const handlePointerMove = (event) => {\n    if (busyAction) return;'));
+  // F5：调整/移动开始与完成分支统一清理 selecting 状态。
+  assert.ok(source.includes('setSelecting(false);\n        setResizing(true);'));
+  assert.ok(source.includes('setSelecting(false);\n        setMoving(true);'));
+  // F3：configure 与取消时复位放大镜缩放倍率。
+  assert.ok(source.includes('setMagnifierScale(DEFAULT_MAGNIFIER_SCALE);'));
+  assert.ok(source.includes('const DEFAULT_MAGNIFIER_SCALE = 6;'));
+  // F6：bounds 变化时重建键盘闭包。
+  assert.ok(source.includes("}, [bootstrap.sessionId, bootstrap.bounds, busyAction, showHelp]);"));
+});
+
 test('截图键盘微调默认 1px 且 Ctrl 加速 10px', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('const NUDGE_STEP = 1;'));
