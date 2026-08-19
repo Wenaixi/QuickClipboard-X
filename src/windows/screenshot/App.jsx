@@ -22,6 +22,7 @@ import { rulerTicks } from './rulerModel.js';
 import { modeForState, modeHint } from './modeModel.js';
 import { selectionHandles } from './handleModel.js';
 import { formatSelectionPosition } from './positionModel.js';
+import { selectionFromDraft, resetInteractionState } from './draftModel.js';
 import {
   createRafWriter,
   hitSelectionEdge,
@@ -284,12 +285,7 @@ function App() {
       initialActionRef.current = nextBootstrap.initialAction;
       gestureIdRef.current += 1;
       selectionHistoryRef.current = [];
-      draftRef.current = null;
-      selectionRef.current = null;
-      setSelection(null);
-      setSelecting(false);
-      setMoving(false);
-      setResizing(false);
+      resetInteractionState({ draftRef, selectionRef, moveRef, resizeRef, setSelection, setSelecting, setMoving, setResizing });
       setActionError('');
       applySelectionStyle(rootRef.current, null);
       if (rootRef.current) rootRef.current.style.cursor = 'crosshair';
@@ -321,16 +317,11 @@ function App() {
     const sessionId = bootstrap.sessionId;
     gestureIdRef.current += 1;
     selectionHistoryRef.current = [];
-    draftRef.current = null;
-    selectionRef.current = null;
+    resetInteractionState({ draftRef, selectionRef, moveRef, resizeRef, setSelection, setSelecting, setMoving, setResizing });
     setMagnifierPoint(null);
     rafWriterRef.current?.cancel();
     applySelectionStyle(rootRef.current, null);
     if (rootRef.current) rootRef.current.style.cursor = 'crosshair';
-    setSelection(null);
-    setSelecting(false);
-    setMoving(false);
-    setResizing(false);
     setActionError('');
     if (sessionId) {
       try { await invoke(CANCEL_COMMAND, { sessionId }); }
@@ -424,9 +415,7 @@ function App() {
     if (!root || event.pointerId !== pointerIdRef.current) return;
     draft.end = pointFromPointerEvent(event, root);
     setMagnifierPoint(draft.end);
-    const next = event.shiftKey
-      ? squareSelection(draft.start, draft.end, bootstrap.bounds)
-      : normalizeSelection(draft.start, draft.end, bootstrap.bounds);
+    const next = selectionFromDraft(draft, event, bootstrap.bounds);
     rafWriterRef.current?.schedule(next);
   };
 

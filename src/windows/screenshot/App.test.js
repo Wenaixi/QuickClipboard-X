@@ -49,6 +49,14 @@ test('工具栏放置与定位统一走自适应模块', () => {
   assert.ok(source.includes('return toolbarStyleModel(selection, bootstrap.bounds, placement);'));
 });
 
+test('拖拽草稿走统一选区生成且取消/配置统一重置交互状态', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('import { selectionFromDraft, resetInteractionState } from \'./draftModel.js\';'));
+  assert.ok(source.includes('const next = selectionFromDraft(draft, event, bootstrap.bounds);'));
+  const resets = source.match(/resetInteractionState\(\{ draftRef, selectionRef, moveRef, resizeRef, setSelection, setSelecting, setMoving, setResizing \}\);/g);
+  assert.ok(resets && resets.length >= 2, '取消与配置重置必须都走统一交互重置');
+});
+
 test('选区建立后渲染八个调整手柄', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('import { selectionHandles } from \'./handleModel.js\';'));
@@ -204,8 +212,10 @@ test('双击选区内部时完成截图且忽略控件区', () => {
 });
 
 test('初次拖拽按住 Shift 时实时走正方形框选', () => {
+  // 实时框选统一走 selectionFromDraft（内部按 Shift 分流 squareSelection/normalizeSelection），
+  // 此处锚定统一调用，避免单点绕过。
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
-  assert.ok(source.includes('? squareSelection(draft.start, draft.end, bootstrap.bounds)'));
+  assert.ok(source.includes('const next = selectionFromDraft(draft, event, bootstrap.bounds);'));
 });
 
 test('拖动收尾时非单击选区吸附到屏幕引导线且单击选窗不吸附', () => {
