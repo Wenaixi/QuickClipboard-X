@@ -550,6 +550,18 @@ test('AI 未配置时工具栏禁用 AI 动作且数字键 4 引导进入设置'
   assert.ok(source.includes('return action !== \'ai\' || (bootstrap.screenshotAiEnabled !== false && bootstrap.screenshotAiConfigured === true);'), 'AI 可用性判断必须要求已配置');
 });
 
+test('方向键微调排除修饰键且每次保留撤销历史', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  // 方向键微调只响应纯方向键；alt/meta 组合留给其它语义（窗口切换等）。
+  const nudgeStart = source.indexOf("if (nudgeX !== undefined && !event.altKey && !event.metaKey) {", 620);
+  const nudgeBlock = source.slice(nudgeStart, nudgeStart + 400);
+  assert.ok(nudgeBlock.includes("!event.altKey && !event.metaKey"), '必须排除 alt/meta 修饰键');
+  // 每次微调前保留撤销历史：方向键连续操作可逐步撤销。
+  assert.ok(nudgeBlock.includes("selectionHistoryRef.current = pushSelectionHistory(selectionHistoryRef.current, selectionRef.current);"), '微调前必须保留撤销历史');
+  // 步长必须由 Ctrl 快进/普通两种取值决定。
+  assert.ok(nudgeBlock.includes("event.ctrlKey ? NUDGE_FAST_STEP : NUDGE_STEP"), '步长必须区分快进与普通');
+});
+
 test('截图键盘微调接线调用 nudgeSelection 并同步选区状态', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('const next = nudgeSelection(selectionRef.current, nudgeX * step, nudgeY * step, bootstrap.bounds);'));
