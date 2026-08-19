@@ -597,6 +597,21 @@ test('截图键盘微调接线调用 nudgeSelection 并同步选区状态', () =
   assert.ok(source.includes('applySelectionStyle(rootRef.current, next);'));
 });
 
+test('completeScreenshot 失败分支设置可见错误且不卡处理中', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  // 失败处理不变量：
+  // 1) 无 sessionId 时必须设置 sessionNotReady 错误（用户可见）。
+  // 2) invoke 抛错时 catch 必须设置 actionFailed 错误（用户可见），不能静默吞掉。
+  // 3) catch 内设置错误早于 finally 解除占用，失败也不会永久卡在处理中。
+  const start = source.indexOf('const completeScreenshot = async (action) => {');
+  const body = source.slice(start, source.indexOf('const handlePointerDown', start));
+  assert.ok(body.includes("setActionError(t('screenshot.sessionNotReady'))"), '无 session 必须设置 sessionNotReady');
+  assert.ok(body.includes("setActionError(t('screenshot.actionFailed', { action: actionLabel(action, t), error: String(error) }))"), 'invoke 失败必须设置 actionFailed');
+  const catchIdx = body.indexOf("setActionError(t('screenshot.actionFailed'");
+  const finallyIdx = body.indexOf('} finally {');
+  assert.ok(catchIdx >= 0 && finallyIdx >= 0 && catchIdx < finallyIdx, '错误提示必须设置在 finally 解除占用之前');
+});
+
 test('completeScreenshot 防重入且 finally 必解除占用并 dispose 条件关闭', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   // 防重入核心：动作处理中禁止二次触发（工具栏/快捷键/双击都走此入口）。
