@@ -264,10 +264,14 @@ function App() {
     const canvas = magnifierCanvasRef.current;
     if (!canvas || !magnifierPoint || !bootstrap.magnifierBackground) {
       setMagnifierColor(null);
-      return;
+      return undefined;
     }
+    // 过期帧令牌：鼠标快速移动时旧 Image 的 onload 可能晚于新帧触发，
+    // 闭包捕获旧 magnifierPoint 覆盖新渲染并污染颜色读数，必须按代丢弃。
+    let generation = 0;
     const image = new Image();
     image.onload = () => {
+      const frame = generation;
       const geometry = magnifierGeometry(magnifierPoint, bootstrap.bounds, { scale: magnifierScale });
       canvas.width = geometry.panel.width;
       canvas.height = geometry.panel.height;
@@ -291,6 +295,7 @@ function App() {
       // 必须在绘制任何叠加线之前读取中心像素：十字线 alpha=0.85 会污染
       // 中心像素的 RGB，导致颜色板永远偏红。
       const centerPixel = readCenterPixel(context.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height);
+      if (frame !== generation) return;
       const grid = magnifierGridLines(geometry);
       const cross = magnifierCrosshair(geometry);
       context.strokeStyle = 'rgba(255, 255, 255, 0.28)';
@@ -306,9 +311,14 @@ function App() {
       context.moveTo(0, cross.y + 0.5);
       context.lineTo(canvas.width, cross.y + 0.5);
       context.stroke();
+      if (frame !== generation) return;
       setMagnifierColor(centerPixel);
     };
     image.src = bootstrap.magnifierBackground;
+    return () => {
+      generation += 1;
+      image.onload = null;
+    };
   }, [bootstrap.magnifierBackground, bootstrap.bounds, magnifierPoint, magnifierScale]);
 
   useEffect(() => {
@@ -332,14 +342,16 @@ function App() {
       applySelectionStyle(rootRef.current, null);
       if (rootRef.current) rootRef.current.style.cursor = 'crosshair';
     });
-    configurePromise.then((cleanup) => {
-      if (!active) {
-        cleanup();
-        return;
-      }
-      unlisten = cleanup;
-      invoke(VIEWPORT_READY_COMMAND).catch(() => {});
-    });
+    configurePromise
+      .then((cleanup) => {
+        if (!active) {
+          cleanup();
+          return;
+        }
+        unlisten = cleanup;
+        invoke(VIEWPORT_READY_COMMAND).catch(() => {});
+      })
+      .catch(() => {});
     return () => {
       active = false;
       unlisten?.();
