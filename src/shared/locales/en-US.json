@@ -262,6 +262,18 @@
       "select": "Drag to select a region",
       "move": "Drag to move the selection",
       "resize": "Drag to resize the selection"
+    },
+    "help": {
+      "title": "Shortcuts",
+      "complete": "Complete and copy",
+      "save": "Save as image",
+      "pin": "Pin",
+      "cancel": "Cancel screenshot",
+      "nudge": "Arrow keys to nudge",
+      "square": "Shift for square",
+      "center": "Ctrl to resize from center",
+      "undo": "Ctrl+Z to undo",
+      "quickAction": "Number keys for quick actions"
     }
   },
   "settings": {

@@ -57,5 +57,10 @@ button { font: inherit; }
 .screenshot-action:focus-visible, .screenshot-cancel:focus-visible { outline: 2px solid #60a5fa; outline-offset: 2px; }
 .screenshot-action:disabled { cursor: wait; opacity: 0.6; }
 .screenshot-cancel { position: absolute; z-index: 4; top: 12px; right: 12px; padding: 7px 10px; border: 1px solid rgba(255, 255, 255, 0.18); background: rgba(24, 24, 27, 0.82); font-size: 13px; pointer-events: auto; }
+.screenshot-help { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 6; min-width: 300px; max-height: 80vh; overflow-y: auto; padding: 14px 16px; border-radius: 10px; color: #fff; background: rgba(20, 20, 24, 0.92); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45); pointer-events: none; }
+.screenshot-help-title { margin-bottom: 10px; font-size: 14px; font-weight: 600; }
+.screenshot-help-row { display: flex; justify-content: space-between; gap: 16px; padding: 4px 0; font-size: 12px; line-height: 1.5; }
+.screenshot-help-keys { color: #ffd479; white-space: nowrap; }
+.screenshot-help-label { color: rgba(255, 255, 255, 0.82); text-align: right; }
 .screenshot-mode-hint { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 4; padding: 5px 12px; border-radius: 6px; color: #fff; background: rgba(0, 0, 0, 0.66); font-size: 12px; line-height: 1.4; white-space: nowrap; pointer-events: none; }
 .screenshot-error { position: absolute; z-index: 5; right: 12px; bottom: 12px; max-width: min(560px, calc(100% - 24px)); padding: 8px 12px; border: 1px solid rgba(248, 113, 113, 0.45); border-radius: 6px; color: #fee2e2; background: rgba(127, 29, 29, 0.92); font-size: 13px; line-height: 1.4; pointer-events: auto; }

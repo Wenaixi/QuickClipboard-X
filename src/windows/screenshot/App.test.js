@@ -49,6 +49,20 @@ test('工具栏放置与定位统一走自适应模块', () => {
   assert.ok(source.includes('return toolbarStyleModel(selection, bootstrap.bounds, placement);'));
 });
 
+test('快捷键帮助面板随 F1 切换并列出全部快捷键', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('import { helpEntries, isHelpShortcut } from \'./helpModel.js\';'));
+  assert.ok(source.includes('if (isHelpShortcut(event)) { event.preventDefault(); setShowHelp((current) => !current); return; }'));
+  assert.ok(source.includes('data-screenshot-help="true"'));
+  assert.ok(source.includes('helpEntries(t).map((entry) =>'));
+  for (const locale of ['zh-CN', 'en-US']) {
+    const messages = JSON.parse(readFileSync(new URL(`../../shared/locales/${locale}.json`, import.meta.url)));
+    for (const key of ['title', 'complete', 'save', 'pin', 'cancel', 'nudge', 'square', 'center', 'undo', 'quickAction']) {
+      assert.equal(typeof messages.screenshot.help[key], 'string', `${locale} 缺少 screenshot.help.${key}`);
+    }
+  }
+});
+
 test('拖拽草稿走统一选区生成且取消/配置统一重置交互状态', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('import { selectionFromDraft, resetInteractionState } from \'./draftModel.js\';'));

@@ -262,6 +262,18 @@
       "select": "拖动以框选截图区域",
       "move": "拖动以移动选区",
       "resize": "拖动以调整选区大小"
+    },
+    "help": {
+      "title": "快捷键",
+      "complete": "完成截图并复制",
+      "save": "保存为图片",
+      "pin": "贴图",
+      "cancel": "取消截图",
+      "nudge": "方向键微调选区",
+      "square": "Shift 保持正方形",
+      "center": "Ctrl 从中心缩放",
+      "undo": "Ctrl+Z 撤销",
+      "quickAction": "数字键快捷动作"
     }
   },
   "settings": {

@@ -23,6 +23,7 @@ import { modeForState, modeHint } from './modeModel.js';
 import { selectionHandles } from './handleModel.js';
 import { formatSelectionPosition } from './positionModel.js';
 import { selectionFromDraft, resetInteractionState } from './draftModel.js';
+import { helpEntries, isHelpShortcut } from './helpModel.js';
 import {
   createRafWriter,
   hitSelectionEdge,
@@ -213,6 +214,7 @@ function App() {
     devicePixelRatio: globalThis.devicePixelRatio,
   }));
   const [selection, setSelection] = useState(null);
+  const [showHelp, setShowHelp] = useState(false);
   const [selecting, setSelecting] = useState(false);
   const [moving, setMoving] = useState(false);
   const [resizing, setResizing] = useState(false);
@@ -523,6 +525,7 @@ function App() {
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') { event.preventDefault(); void cancelScreenshot(); return; }
       if (event.target instanceof Element && event.target.closest('[data-screenshot-control]')) return;
+      if (isHelpShortcut(event)) { event.preventDefault(); setShowHelp((current) => !current); return; }
       if (!selectionRef.current || busyAction) return;
       const [nudgeX, nudgeY] = NUDGE_DIRECTIONS[event.key] || [];
       if (nudgeX !== undefined) {
@@ -584,6 +587,17 @@ function App() {
       {selection && <Ruler bounds={bootstrap.bounds} />}
       {selection && <SelectionHandles selection={selection} />}
       {modeHint(modeForState({ selecting, moving, resizing }), t) && <div className="screenshot-mode-hint" data-screenshot-mode="true">{modeHint(modeForState({ selecting, moving, resizing }), t)}</div>}
+      {showHelp && (
+        <div className="screenshot-help" data-screenshot-help="true" role="dialog" aria-label={t('screenshot.help.title')}>
+          <div className="screenshot-help-title">{t('screenshot.help.title')}</div>
+          {helpEntries(t).map((entry) => (
+            <div key={entry.id} className="screenshot-help-row">
+              <span className="screenshot-help-keys">{entry.keys.join(' / ')}</span>
+              <span className="screenshot-help-label">{entry.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
       {actionError && <div className="screenshot-error" role="alert" data-screenshot-control>{actionError}</div>}
       <button type="button" className="screenshot-cancel" data-screenshot-control onPointerDown={(event) => event.stopPropagation()} onClick={() => void cancelScreenshot()} aria-label={t('screenshot.cancelLabel')} title={t('screenshot.shortcutHint', { label: t('screenshot.cancelLabel'), shortcut: 'Esc' })}>{t('screenshot.cancel')}</button>
     </main>
