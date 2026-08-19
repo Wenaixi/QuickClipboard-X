@@ -32,6 +32,7 @@ button { font: inherit; }
 .screenshot-magnifier { position: absolute; z-index: 3; pointer-events: none; border: 1px solid rgba(255, 255, 255, 0.7); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.42); background: #000; }
 .screenshot-coordinates { position: absolute; z-index: 3; min-width: 96px; padding: 4px 8px; border: 1px solid rgba(255, 255, 255, 0.5); border-radius: 4px; color: #fff; background: rgba(0, 0, 0, 0.78); font-size: 12px; line-height: 1.4; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
 .screenshot-guide { position: absolute; z-index: 3; pointer-events: none; background: rgba(255, 255, 255, 0.55); box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.5); }
+.screenshot-thirds { position: absolute; z-index: 2; pointer-events: none; background: rgba(255, 255, 255, 0.22); }
 .screenshot-root[data-selection-active="false"] .screenshot-mask { inset: 0; width: auto; height: auto; }
 
 .screenshot-selection { position: absolute; z-index: 2; top: var(--selection-top); left: var(--selection-left); width: var(--selection-width); height: var(--selection-height); border: 1px solid rgba(255, 255, 255, 0.96); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.42); pointer-events: none; opacity: 0; }
