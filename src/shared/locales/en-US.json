@@ -264,6 +264,7 @@
       "resize": "Drag to resize the selection"
     },
     "idleHint": "Drag to select a region, press F1 for shortcuts",
+    "invite": "Press Enter to copy, F1 for all shortcuts",
     "help": {
       "title": "Shortcuts",
       "complete": "Complete and copy",
