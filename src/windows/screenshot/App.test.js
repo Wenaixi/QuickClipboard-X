@@ -95,6 +95,13 @@ test('尺寸标签随选区贴近边缘翻转防溢出', () => {
   assert.ok(source.includes('screenshot-selection-size-left'));
 });
 
+test('悬停选区时切换调整/移动光标并在取消时重置', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('const hover = cursorForSelectionHover(pointFromPointerEvent(event, root), selectionRef.current, bootstrap.bounds);'));
+  assert.ok(source.includes("root.style.cursor = hover || 'crosshair';"));
+  assert.ok(source.includes("rootRef.current.style.cursor = 'crosshair';"));
+});
+
 test('选区内部按下进入整体平移模式', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('if (hitSelectionInterior(start, selectionRef.current, MOVE_INSET)) {'));

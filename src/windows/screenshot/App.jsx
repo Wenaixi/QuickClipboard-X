@@ -9,6 +9,7 @@ import { coordinatePanelPosition, formatCursorCoordinate } from './coordinateMod
 import { guideLines } from './guideModel.js';
 import { actionForHotkey, hotkeyForAction } from './actionModel.js';
 import { selectionLabelPlacement } from './labelModel.js';
+import { cursorForSelectionHover } from './cursorModel.js';
 import {
   createRafWriter,
   hitSelectionEdge,
@@ -219,6 +220,7 @@ function App() {
       setSelecting(false);
       setActionError('');
       applySelectionStyle(rootRef.current, null);
+      if (rootRef.current) rootRef.current.style.cursor = 'crosshair';
     });
     configurePromise.then((cleanup) => {
       if (!active) {
@@ -251,6 +253,7 @@ function App() {
     setMagnifierPoint(null);
     rafWriterRef.current?.cancel();
     applySelectionStyle(rootRef.current, null);
+    if (rootRef.current) rootRef.current.style.cursor = 'crosshair';
     setSelection(null);
     setSelecting(false);
     setActionError('');
@@ -307,6 +310,7 @@ function App() {
     setSelecting(true);
     setSelection(null);
     setActionError('');
+    root.style.cursor = 'crosshair';
     applySelectionStyle(root, normalizeSelection(start, start, bootstrap.bounds));
   };
 
@@ -331,7 +335,13 @@ function App() {
       return;
     }
     const draft = draftRef.current;
-    if (!draft || !root || event.pointerId !== pointerIdRef.current) return;
+    if (!draft) {
+      if (!root) return;
+      const hover = cursorForSelectionHover(pointFromPointerEvent(event, root), selectionRef.current, bootstrap.bounds);
+      root.style.cursor = hover || 'crosshair';
+      return;
+    }
+    if (!root || event.pointerId !== pointerIdRef.current) return;
     draft.end = pointFromPointerEvent(event, root);
     setMagnifierPoint(draft.end);
     const next = event.shiftKey
