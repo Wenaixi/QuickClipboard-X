@@ -157,6 +157,9 @@ test('帮助面板可交互且点击不穿透底层拖拽', () => {
   // 锚定 .screenshot-help 完整规则，避免被 toolbar/cancel 的 pointer-events: auto 误命中。
   const helpRule = css.split('\n').find((line) => line.includes('.screenshot-help {'));
   assert.ok(helpRule && helpRule.includes('pointer-events: auto;'), '帮助面板必须可交互');
+  assert.ok(helpRule.includes('max-width: calc(100% - 24px)'), '帮助面板必须夹紧不超过屏幕宽度');
+  assert.ok(helpRule.includes('min-width: min(300px'), '窄屏时帮助面板最小宽度必须可收缩');
+  assert.ok(helpRule.includes('overflow: auto'), '帮助面板必须支持双轴滚动防内容溢出');
   assert.ok(source.includes('data-screenshot-control role="dialog"'), '帮助面板必须阻止底层拖拽');
   assert.ok(source.includes('onPointerDown={(event) => event.stopPropagation()}'), '帮助面板必须停止事件冒泡');
 });
