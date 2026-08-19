@@ -285,6 +285,73 @@ test('hitSelectionEdge 自定义容差并拒绝负容差', () => {
   assert.throws(() => hitSelectionEdge({ x: 1, y: 1 }, selection, -1), /边缘容差不能为负数/);
 });
 
+test('resizeSelection 从中心缩放时拖动右边界左右对称扩展', () => {
+  const resized = resizeSelection(
+    { left: 100, top: 100, right: 300, bottom: 300 },
+    'e',
+    { x: 350, y: 200 },
+    bounds,
+    { fromCenter: true }
+  );
+  assert.deepEqual(resized, { left: 50, top: 100, right: 350, bottom: 300, width: 300, height: 200 });
+});
+
+test('resizeSelection 从中心缩放时拖动左边界对称收窄', () => {
+  const resized = resizeSelection(
+    { left: 100, top: 100, right: 300, bottom: 300 },
+    'w',
+    { x: 150, y: 200 },
+    bounds,
+    { fromCenter: true }
+  );
+  assert.deepEqual(resized, { left: 150, top: 100, right: 250, bottom: 300, width: 100, height: 200 });
+});
+
+test('resizeSelection 从中心缩放时拖动下边界上下对称扩展', () => {
+  const resized = resizeSelection(
+    { left: 100, top: 100, right: 300, bottom: 300 },
+    's',
+    { x: 200, y: 400 },
+    bounds,
+    { fromCenter: true }
+  );
+  assert.deepEqual(resized, { left: 100, top: 0, right: 300, bottom: 400, width: 200, height: 400 });
+});
+
+test('resizeSelection 从中心缩放时拖动角点宽高都对称扩展', () => {
+  const resized = resizeSelection(
+    { left: 100, top: 100, right: 300, bottom: 300 },
+    'se',
+    { x: 350, y: 400 },
+    bounds,
+    { fromCenter: true }
+  );
+  assert.deepEqual(resized, { left: 50, top: 0, right: 350, bottom: 400, width: 300, height: 400 });
+});
+
+test('resizeSelection 从中心缩放时整体夹紧到显示器边界', () => {
+  const localBounds = { width: 1920, height: 1080 };
+  const resized = resizeSelection(
+    { left: 100, top: 100, right: 300, bottom: 300 },
+    'e',
+    { x: 2000, y: 200 },
+    localBounds,
+    { fromCenter: true }
+  );
+  assert.deepEqual(resized, { left: 0, top: 100, right: 1920, bottom: 300, width: 1920, height: 200 });
+});
+
+test('resizeSelection 从中心缩放且保持比例时中心固定', () => {
+  const resized = resizeSelection(
+    { left: 100, top: 100, right: 300, bottom: 300 },
+    'e',
+    { x: 350, y: 200 },
+    bounds,
+    { keepAspectRatio: true, fromCenter: true }
+  );
+  assert.deepEqual(resized, { left: 75, top: 75, right: 325, bottom: 325, width: 250, height: 250 });
+});
+
 test('resizeSelection 拖动右边界向右增大宽度', () => {
   const resized = resizeSelection(
     { left: 100, top: 80, right: 300, bottom: 240, width: 200, height: 160 },
