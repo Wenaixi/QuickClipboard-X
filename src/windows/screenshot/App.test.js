@@ -40,6 +40,7 @@ test('normalizeBootstrap 使用显式显示器物理尺寸与逻辑尺寸', () =
     screenshotAiConfigured: false,
     screenshotMagnifierEnabled: true,
     magnifierBackground: null,
+    screenshotHintsEnabled: true,
     lifecycleMode: 'quick',
   });
 });
@@ -541,6 +542,16 @@ test('尺寸标注文案必须聚合像素/比例/百万像素/位置四要素',
   assert.ok(source.includes('return `${pixels} · ${ratio} · ${megapixels} · ${position}`;'), '四要素必须聚合进同一文案');
 });
 
+test('空闲与模式提示渲染受截图提示开关守卫', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  // 提示开关关闭时不得渲染空闲引导与模式提示；帮助面板（F1）是用户主动请求，不受此开关控制。
+  assert.ok(source.includes('bootstrap.screenshotHintsEnabled && !selecting && !selection && !showHelp'), '空闲提示必须受提示开关守卫');
+  assert.ok(source.includes('bootstrap.screenshotHintsEnabled && modeHint(modeForState'), '模式提示必须受提示开关守卫');
+  // bootstrap 解析必须携带该字段（默认开启，与 Rust AppSettings 默认一致）。
+  const model = readFileSync(new URL('./screenshotModel.js', import.meta.url), 'utf8');
+  assert.ok(model.includes('screenshotHintsEnabled: payload.screenshotHintsEnabled !== false'), 'bootstrap 解析必须携带提示开关');
+});
+
 test('AI 未配置时工具栏禁用 AI 动作且数字键 4 引导进入设置', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   // 工具栏按钮：disabled 判定必须与可用性函数一致。
@@ -626,6 +637,7 @@ test('normalizeBootstrap 缺失尺寸时以视口和 DPR 推导安全默认值',
       screenshotAiConfigured: false,
       screenshotMagnifierEnabled: true,
       magnifierBackground: null,
+      screenshotHintsEnabled: true,
       lifecycleMode: 'quick',
     });
   } finally {

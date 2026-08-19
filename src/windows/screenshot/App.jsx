@@ -695,9 +695,9 @@ function App() {
       {selection && <ThirdsGrid bounds={bootstrap.bounds} />}
       {selection && <Ruler bounds={bootstrap.bounds} />}
       {selection && <SelectionHandles selection={selection} />}
-      {!selecting && !selection && !showHelp && <div className="screenshot-idle-hint" aria-live="polite" data-screenshot-idle="true">{idleHint(t)}</div>}
+      {bootstrap.screenshotHintsEnabled && !selecting && !selection && !showHelp && <div className="screenshot-idle-hint" aria-live="polite" data-screenshot-idle="true">{idleHint(t)}</div>}
       {selection && !selecting && !moving && !resizing && !busyAction && !showHelp && <div className="screenshot-invite" data-screenshot-invite="true">{includeInvite(t)}</div>}
-      {modeHint(modeForState({ selecting, moving, resizing }), t) && <div className="screenshot-mode-hint" aria-hidden="true" data-screenshot-mode="true">{modeHint(modeForState({ selecting, moving, resizing }), t)}</div>}
+      {bootstrap.screenshotHintsEnabled && modeHint(modeForState({ selecting, moving, resizing }), t) && <div className="screenshot-mode-hint" aria-hidden="true" data-screenshot-mode="true">{modeHint(modeForState({ selecting, moving, resizing }), t)}</div>}
       {showHelp && (
         <div className="screenshot-help" data-screenshot-help="true" data-screenshot-control role="dialog" aria-label={t('screenshot.help.title')} onPointerDown={(event) => event.stopPropagation()}>
           <div className="screenshot-help-title">{t('screenshot.help.title')}</div>
