@@ -51,6 +51,24 @@ test('工具栏放置与定位统一走自适应模块', () => {
   assert.ok(source.includes('return toolbarStyleModel(selection, bootstrap.bounds, placement);'));
 });
 
+test('取消截图必须完整清理交互状态且清理先于后端请求', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const cancelStart = source.indexOf('const cancelScreenshot = async () => {');
+  const cancelBody = source.slice(cancelStart, cancelStart + 700);
+  // 清理完整性：取消必须清空手势、撤销历史、交互状态、放大镜、RAF、样式、光标。
+  assert.ok(cancelBody.includes('gestureIdRef.current += 1;'), '取消必须作废当前手势');
+  assert.ok(cancelBody.includes('selectionHistoryRef.current = [];'), '取消必须清空撤销历史');
+  assert.ok(cancelBody.includes('resetInteractionState({ draftRef, selectionRef, moveRef, resizeRef, setSelection, setSelecting, setMoving, setResizing });'), '取消必须统一重置交互状态');
+  assert.ok(cancelBody.includes('setMagnifierPoint(null);'), '取消必须清空放大镜点');
+  assert.ok(cancelBody.includes('rafWriterRef.current?.cancel();'), '取消必须取消在飞绘制');
+  assert.ok(cancelBody.includes("applySelectionStyle(rootRef.current, null);"), '取消必须清除选区样式');
+  assert.ok(cancelBody.includes("rootRef.current.style.cursor = 'crosshair';"), '取消必须复位光标');
+  // 顺序不变量：UI 清理必须先于向后端发 cancel 请求。若后端请求失败，界面已干净不卡。
+  const resetIdx = cancelBody.indexOf('resetInteractionState(');
+  const invokeIdx = cancelBody.indexOf("invoke(CANCEL_COMMAND, { sessionId })");
+  assert.ok(resetIdx >= 0 && invokeIdx >= 0 && resetIdx < invokeIdx, 'UI 清理必须先于后端请求');
+});
+
 test('Esc 与右键仅在无选区或小选区时取消截图', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('import { canResetSelection } from \'./resetModel.js\';'));
