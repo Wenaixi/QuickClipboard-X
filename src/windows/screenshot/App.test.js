@@ -126,6 +126,10 @@ test('截图成功后主动关闭窗口避免残留选区状态闪现', () => {
   const catchIndex = body.indexOf('} catch (error) {');
   const closeIndex = body.indexOf("await getCurrentWindow().close()");
   assert.ok(catchIndex !== -1 && closeIndex !== -1 && catchIndex < closeIndex, '失败路径必须 return 显示错误，成功路径才 close');
+  // 顺序不变量：close 前必须先清空交互状态，否则 close 触发的 blur 会被
+  // handleBlur 误判为取消而发出多余的 cancel_screenshot 请求（会话已完成）。
+  const resetIndex = body.indexOf('resetInteractionState({ draftRef, selectionRef, moveRef, resizeRef, setSelection, setSelecting, setMoving, setResizing });');
+  assert.ok(resetIndex !== -1 && resetIndex < closeIndex, '成功路径必须先清空交互状态再关闭窗口');
 });
 
 test('完成动作成功后清理占用且 AI 未配置回落配置入口', () => {

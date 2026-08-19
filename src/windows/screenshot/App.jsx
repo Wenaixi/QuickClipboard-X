@@ -412,6 +412,9 @@ function App() {
     // 截图成功后销毁窗口：后端 cleanup_plan 只 hide 不销毁，React 实例保留上一会话的
     // 选区/工具栏状态；后端 hide 触发的 blur 恰逢 busyAction 非空被跳过，残留状态会在
     // 下次快捷键复用窗口时闪现旧选区。成功路径主动 close 让状态与 webview 一起释放。
+    // 先清空交互状态：close 触发的 blur 若 selectionRef 仍非空，handleBlur 会误判为
+    // 取消而发出多余的 cancel_screenshot 请求（会话已完成返回 NoActiveSession）。
+    resetInteractionState({ draftRef, selectionRef, moveRef, resizeRef, setSelection, setSelecting, setMoving, setResizing });
     await getCurrentWindow().close().catch(() => {});
   };
 
