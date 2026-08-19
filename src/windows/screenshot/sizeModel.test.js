@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatPixelSize, formatMegapixels } from './sizeModel.js';
+import { formatPixelSize, formatMegapixels, formatAspectRatio } from './sizeModel.js';
 
 test('formatPixelSize 按国际规范输出像素尺寸', () => {
   assert.equal(formatPixelSize({ width: 1920, height: 1080 }), '1920 × 1080');
@@ -28,4 +28,27 @@ test('formatMegapixels 大尺寸保留一位小数', () => {
 
 test('formatMegapixels 拒绝非法输入', () => {
   assert.throws(() => formatMegapixels({ width: 1920, height: -1 }), /宽度与高度必须为非负数/);
+});
+
+test('formatAspectRatio 按最简整数比输出宽高比', () => {
+  assert.equal(formatAspectRatio({ width: 1920, height: 1080 }), '16:9');
+  assert.equal(formatAspectRatio({ width: 300, height: 200 }), '3:2');
+  assert.equal(formatAspectRatio({ width: 1, height: 1 }), '1:1');
+});
+
+test('formatAspectRatio 互质尺寸保持原比例', () => {
+  assert.equal(formatAspectRatio({ width: 7, height: 11 }), '7:11');
+  assert.equal(formatAspectRatio({ width: 1000, height: 1 }), '1000:1');
+});
+
+test('formatAspectRatio 先取整再化简', () => {
+  assert.equal(formatAspectRatio({ width: 1920.2, height: 1080.4 }), '16:9');
+  assert.equal(formatAspectRatio({ width: 300.6, height: 200.4 }), '301:200');
+});
+
+test('formatAspectRatio 拒绝零或非法输入', () => {
+  assert.throws(() => formatAspectRatio({ width: 0, height: 100 }), /宽度与高度必须为正数/);
+  assert.throws(() => formatAspectRatio(null), /尺寸对象/);
+  assert.throws(() => formatAspectRatio({ width: -1, height: 100 }), /宽度与高度必须为非负数/);
+  assert.throws(() => formatAspectRatio({ width: 1920, height: Number.NaN }), /高度 必须是有限数字/);
 });

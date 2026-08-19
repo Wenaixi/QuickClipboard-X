@@ -121,6 +121,7 @@ test('尺寸标签统一走格式化模块并含百万像素', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('selectionSizeLabelText(selection)'));
   assert.ok(source.includes('const pixels = formatPixelSize(selection);'));
+  assert.ok(source.includes('const ratio = formatAspectRatio(selection);'));
   assert.ok(source.includes('const megapixels = formatMegapixels(selection);'));
 });
 

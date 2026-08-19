@@ -25,3 +25,26 @@ export function formatMegapixels(size) {
   const megapixels = (size.width * size.height) / 1_000_000;
   return `${megapixels.toFixed(1)} MP`;
 }
+
+function greatestCommonDivisor(a, b) {
+  let x = a;
+  let y = b;
+  while (y !== 0) {
+    const remainder = x % y;
+    x = y;
+    y = remainder;
+  }
+  return x;
+}
+
+// 格式化选区宽高比为最简整数比（ShareX 公开行为：选区信息显示如 16:9），先取整再化简。
+export function formatAspectRatio(size) {
+  assertSize(size, '宽高比');
+  const width = Math.round(size.width);
+  const height = Math.round(size.height);
+  if (width <= 0 || height <= 0) {
+    throw new RangeError('宽度与高度必须为正数');
+  }
+  const divisor = greatestCommonDivisor(width, height);
+  return `${width / divisor}:${height / divisor}`;
+}
