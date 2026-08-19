@@ -148,7 +148,7 @@ export function hitSelectionEdge(point, selection, tolerance = 4) {
   return edges.join('');
 }
 
-export function resizeSelection(selection, edge, point, bounds) {
+export function resizeSelection(selection, edge, point, bounds, options = {}) {
   if (!bounds || !Number.isFinite(bounds.width) || !Number.isFinite(bounds.height) || bounds.width <= 0 || bounds.height <= 0) {
     throw new RangeError('边界尺寸必须为正数');
   }
@@ -163,6 +163,32 @@ export function resizeSelection(selection, edge, point, bounds) {
     { x: selection.right, y: selection.bottom },
     bounds
   );
+
+  // 保持比例（ShareX 公开行为：按住 Shift 时调整大小锁定宽高比）。
+  // 以拖动边的对边为锚点，主轴取拖动点到锚点的距离，另一维按当前宽高比推导，
+  // 角点取长轴驱动；最后整体夹紧到显示器边界，比例不因夹紧而改变。
+  if (options.keepAspectRatio === true) {
+    const ratio = current.width / current.height;
+    // 拖 w 锚定右边、拖 e 锚定左边；拖 n 锚定下边、拖 s 锚定上边。
+    const anchorX = edge.includes('w') ? current.right : current.left;
+    const anchorY = edge.includes('n') ? current.bottom : current.top;
+    const freeWidth = edge.includes('w') || edge.includes('e') ? Math.abs(point.x - anchorX) : 0;
+    const freeHeight = edge.includes('n') || edge.includes('s') ? Math.abs(point.y - anchorY) : 0;
+    const mainAxisIsWidth = freeWidth >= freeHeight;
+    const width = mainAxisIsWidth
+      ? Math.max(1, Math.round(freeWidth))
+      : Math.max(1, Math.round(freeHeight * ratio));
+    const height = mainAxisIsWidth
+      ? Math.max(1, Math.round(width / ratio))
+      : Math.max(1, Math.round(freeHeight));
+
+    const maxLeft = Math.max(0, bounds.width - width);
+    const maxTop = Math.max(0, bounds.height - height);
+    const left = clamp(edge.includes('w') ? current.right - width : current.left, 0, maxLeft);
+    const top = clamp(edge.includes('n') ? current.bottom - height : current.top, 0, maxTop);
+    return { left, top, right: left + width, bottom: top + height, width, height };
+  }
+
   let left = current.left;
   let right = current.right;
   let top = current.top;

@@ -280,7 +280,7 @@ function App() {
     if (resizing && root && event.pointerId === resizing.pointerId) {
       const current = pointFromPointerEvent(event, root);
       setMagnifierPoint(current);
-      const next = resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds);
+      const next = resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds, { keepAspectRatio: event.shiftKey });
       selectionRef.current = next;
       rafWriterRef.current?.schedule(next);
       return;
@@ -307,7 +307,7 @@ function App() {
     if (resizing && root && event.pointerId === resizing.pointerId) {
       event.preventDefault();
       const current = pointFromPointerEvent(event, root);
-      const finalSelection = resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds);
+      const finalSelection = resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds, { keepAspectRatio: event.shiftKey });
       resizeRef.current = null;
       pointerIdRef.current = null;
       setMagnifierPoint(null);
