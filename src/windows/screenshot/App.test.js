@@ -40,6 +40,7 @@ test('normalizeBootstrap 使用显式显示器物理尺寸与逻辑尺寸', () =
     screenshotAiConfigured: false,
     screenshotMagnifierEnabled: true,
     magnifierBackground: null,
+    lifecycleMode: 'quick',
   });
 });
 
@@ -375,6 +376,14 @@ test('初次拖拽按住 Shift 时实时走正方形框选', () => {
   assert.ok(source.includes('const next = selectionFromDraft(draft, event, bootstrap.bounds);'));
 });
 
+test('生命周期模式决定成功路径是否销毁截图窗口', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  // 成功路径必须按 dispose 条件关闭窗口；quick/auto 隐藏复用。
+  assert.ok(source.includes("if (bootstrap.lifecycleMode === 'dispose') {"), 'dispose 模式才销毁窗口');
+  const model = readFileSync(new URL('./screenshotModel.js', import.meta.url), 'utf8');
+  assert.ok(model.includes("lifecycleMode: payload.lifecycleMode === 'dispose' || payload.lifecycleMode === 'auto' ? payload.lifecycleMode : 'quick'"), 'bootstrap 解析必须携带生命周期模式');
+});
+
 test('拖拽框选/移动/调整时实时显示尺寸标签且收尾清空', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   // 尺寸标签渲染必须同时接受 liveSelection 与 selection（拖拽中无正式选区）。
@@ -536,6 +545,7 @@ test('normalizeBootstrap 缺失尺寸时以视口和 DPR 推导安全默认值',
       screenshotAiConfigured: false,
       screenshotMagnifierEnabled: true,
       magnifierBackground: null,
+      lifecycleMode: 'quick',
     });
   } finally {
     Object.defineProperty(globalThis, 'innerWidth', { configurable: true, value: oldWidth });
