@@ -41,6 +41,20 @@ test('normalizeBootstrap 使用显式显示器物理尺寸与逻辑尺寸', () =
   });
 });
 
+test('截图键盘微调接线调用 nudgeSelection 并同步选区状态', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('const next = nudgeSelection(selectionRef.current, nudgeX * step, nudgeY * step, bootstrap.bounds);'));
+  assert.ok(source.includes('setSelection(next);'));
+  assert.ok(source.includes('applySelectionStyle(rootRef.current, next);'));
+});
+
+test('截图键盘微调默认 1px 且 Ctrl 加速 10px', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('const NUDGE_STEP = 1;'));
+  assert.ok(source.includes('const NUDGE_FAST_STEP = 10;'));
+  assert.ok(source.includes('const step = event.ctrlKey ? NUDGE_FAST_STEP : NUDGE_STEP;'));
+});
+
 test('normalizeBootstrap 缺失尺寸时以视口和 DPR 推导安全默认值', () => {
   const oldWidth = globalThis.innerWidth;
   const oldHeight = globalThis.innerHeight;

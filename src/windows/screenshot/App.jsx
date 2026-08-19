@@ -9,6 +9,7 @@ import {
   isClickGesture,
   isCurrentGesture,
   normalizeSelection,
+  nudgeSelection,
   selectionForPointerGesture,
   selectionFromPhysical,
   selectionToPhysical,
@@ -26,6 +27,15 @@ const ACTIONS = [
   { id: 'pin', shortcut: 'Ctrl+P' },
   { id: 'ai', shortcut: '' },
 ];
+
+const NUDGE_STEP = 1;
+const NUDGE_FAST_STEP = 10;
+const NUDGE_DIRECTIONS = {
+  ArrowUp: [0, -1],
+  ArrowDown: [0, 1],
+  ArrowLeft: [-1, 0],
+  ArrowRight: [1, 0],
+};
 
 function pointFromPointerEvent(event, element) {
   const rect = element.getBoundingClientRect();
@@ -257,6 +267,16 @@ function App() {
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') { event.preventDefault(); void cancelScreenshot(); return; }
       if (!selectionRef.current || busyAction) return;
+      const [nudgeX, nudgeY] = NUDGE_DIRECTIONS[event.key] || [];
+      if (nudgeX !== undefined) {
+        event.preventDefault();
+        const step = event.ctrlKey ? NUDGE_FAST_STEP : NUDGE_STEP;
+        const next = nudgeSelection(selectionRef.current, nudgeX * step, nudgeY * step, bootstrap.bounds);
+        selectionRef.current = next;
+        setSelection(next);
+        applySelectionStyle(rootRef.current, next);
+        return;
+      }
       if (event.key === 'Enter') { event.preventDefault(); void completeScreenshot('copy'); }
       else if (event.ctrlKey && event.key.toLowerCase() === 's') { event.preventDefault(); void completeScreenshot('save'); }
       else if (event.ctrlKey && event.key.toLowerCase() === 'p') { event.preventDefault(); void completeScreenshot('pin'); }
