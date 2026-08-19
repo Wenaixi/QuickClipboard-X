@@ -252,6 +252,12 @@ test('放大镜绘制后读取中心像素颜色并渲染读数标签', () => {
   assert.ok(crossIndex !== -1, '放大镜必须绘制红色十字线');
   assert.ok(readIndex < crossIndex, '中心像素读取必须早于十字线绘制');
   assert.ok(source.includes('setMagnifierColor(centerPixel);'));
+  // 快速移动时旧 Image onload 可能晚于新帧触发，必须按代丢弃避免覆盖新渲染。
+  assert.ok(source.includes('let generation = 0;'));
+  assert.ok(source.includes('const frame = generation;'));
+  assert.ok(source.includes('if (frame !== generation) return;'));
+  assert.ok(source.includes('image.onload = null;'), 'effect cleanup 必须解除旧 onload 回调');
+  assert.ok(source.includes('configurePromise\n      .then('), 'configure 监听链尾必须捕获拒绝');
   assert.ok(source.includes('setMagnifierColor(null);'));
   assert.ok(source.includes('data-screenshot-color="true"'));
   assert.ok(source.includes('formatRgb(magnifierColor)'));
