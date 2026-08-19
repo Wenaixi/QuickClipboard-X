@@ -257,7 +257,12 @@
     "sessionNotReady": "The screenshot session is not ready. Please start it again.",
     "actionFailed": "Failed to {{action}}: {{error}}",
     "openAiSettingsFailed": "Failed to open AI settings: {{error}}",
-    "shortcutHint": "{{label}} ({{shortcut}})"
+    "shortcutHint": "{{label}} ({{shortcut}})",
+    "mode": {
+      "select": "Drag to select a region",
+      "move": "Drag to move the selection",
+      "resize": "Drag to resize the selection"
+    }
   },
   "settings": {
     "title": "Settings",

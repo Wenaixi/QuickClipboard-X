@@ -19,6 +19,7 @@ import { magnetSelection } from './magnetModel.js';
 import { toolbarPlacement, toolbarStyle as toolbarStyleModel } from './toolbarModel.js';
 import { pushSelectionHistory, undoSelectionHistory } from './historyModel.js';
 import { rulerTicks } from './rulerModel.js';
+import { modeForState, modeHint } from './modeModel.js';
 import {
   createRafWriter,
   hitSelectionEdge,
@@ -198,6 +199,8 @@ function App() {
   }));
   const [selection, setSelection] = useState(null);
   const [selecting, setSelecting] = useState(false);
+  const [moving, setMoving] = useState(false);
+  const [resizing, setResizing] = useState(false);
   const [magnifierPoint, setMagnifierPoint] = useState(null);
   const [magnifierColor, setMagnifierColor] = useState(null);
   const [magnifierScale, setMagnifierScale] = useState(6);
@@ -271,6 +274,8 @@ function App() {
       selectionRef.current = null;
       setSelection(null);
       setSelecting(false);
+      setMoving(false);
+      setResizing(false);
       setActionError('');
       applySelectionStyle(rootRef.current, null);
       if (rootRef.current) rootRef.current.style.cursor = 'crosshair';
@@ -310,6 +315,8 @@ function App() {
     if (rootRef.current) rootRef.current.style.cursor = 'crosshair';
     setSelection(null);
     setSelecting(false);
+    setMoving(false);
+    setResizing(false);
     setActionError('');
     if (sessionId) {
       try { await invoke(CANCEL_COMMAND, { sessionId }); }
@@ -349,12 +356,14 @@ function App() {
       if (edge) {
         selectionHistoryRef.current = pushSelectionHistory(selectionHistoryRef.current, selectionRef.current);
         resizeRef.current = { pointerId: event.pointerId, edge };
+        setResizing(true);
         root.setPointerCapture?.(event.pointerId);
         return;
       }
       if (hitSelectionInterior(start, selectionRef.current, MOVE_INSET)) {
         selectionHistoryRef.current = pushSelectionHistory(selectionHistoryRef.current, selectionRef.current);
         moveRef.current = { pointerId: event.pointerId, start, selectionStart: selectionRef.current };
+        setMoving(true);
         root.setPointerCapture?.(event.pointerId);
         return;
       }
@@ -435,6 +444,7 @@ function App() {
       const current = pointFromPointerEvent(event, root);
       const finalSelection = magnetSelection(resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds, { keepAspectRatio: event.shiftKey, fromCenter: event.ctrlKey }), bootstrap.bounds, { edge: resizing.edge });
       resizeRef.current = null;
+      setResizing(false);
       pointerIdRef.current = null;
       setMagnifierPoint(null);
       rafWriterRef.current?.cancel();
@@ -450,6 +460,7 @@ function App() {
       const current = pointFromPointerEvent(event, root);
       const finalSelection = magnetSelection(nudgeSelection(moving.selectionStart, current.x - moving.start.x, current.y - moving.start.y, bootstrap.bounds), bootstrap.bounds);
       moveRef.current = null;
+      setMoving(false);
       pointerIdRef.current = null;
       setMagnifierPoint(null);
       rafWriterRef.current?.cancel();
@@ -496,6 +507,8 @@ function App() {
     selectionRef.current = finalSelection;
     setSelection(finalSelection);
     setSelecting(false);
+    setMoving(false);
+    setResizing(false);
     if (initialActionRef.current) {
       const action = initialActionRef.current;
       initialActionRef.current = '';
@@ -566,6 +579,7 @@ function App() {
       )}
       {selection && <ThirdsGrid bounds={bootstrap.bounds} />}
       {selection && <Ruler bounds={bootstrap.bounds} />}
+      {modeHint(modeForState({ selecting, moving, resizing }), t) && <div className="screenshot-mode-hint" data-screenshot-mode="true">{modeHint(modeForState({ selecting, moving, resizing }), t)}</div>}
       {actionError && <div className="screenshot-error" role="alert" data-screenshot-control>{actionError}</div>}
       <button type="button" className="screenshot-cancel" data-screenshot-control onPointerDown={(event) => event.stopPropagation()} onClick={() => void cancelScreenshot()} aria-label={t('screenshot.cancelLabel')} title={t('screenshot.shortcutHint', { label: t('screenshot.cancelLabel'), shortcut: 'Esc' })}>{t('screenshot.cancel')}</button>
     </main>

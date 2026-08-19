@@ -257,7 +257,12 @@
     "sessionNotReady": "截图会话尚未准备好，请重新启动截图。",
     "actionFailed": "{{action}}失败：{{error}}",
     "openAiSettingsFailed": "打开 AI 设置失败：{{error}}",
-    "shortcutHint": "{{label}}（{{shortcut}}）"
+    "shortcutHint": "{{label}}（{{shortcut}}）",
+    "mode": {
+      "select": "拖动以框选截图区域",
+      "move": "拖动以移动选区",
+      "resize": "拖动以调整选区大小"
+    }
   },
   "settings": {
     "title": "设置",
