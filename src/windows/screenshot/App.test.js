@@ -150,12 +150,13 @@ test('normalizeBootstrap 透传放大镜开关与背景快照', () => {
   assert.equal(result.magnifierBackground, 'data:image/png;base64,AAAA');
 });
 
-test('尺寸标签统一走格式化模块并含百万像素', () => {
+test('尺寸标签统一走格式化模块并含位置与百万像素', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
-  assert.ok(source.includes('selectionSizeLabelText(selection)'));
+  assert.ok(source.includes('selectionSizeLabelText(selection, bootstrap)'));
   assert.ok(source.includes('const pixels = formatPixelSize(selection);'));
   assert.ok(source.includes('const ratio = formatAspectRatio(selection);'));
   assert.ok(source.includes('const megapixels = formatMegapixels(selection);'));
+  assert.ok(source.includes('const position = formatSelectionPosition(selection, { dpr: bootstrap.dpr, monitorLeft: bootstrap.monitorLeft, monitorTop: bootstrap.monitorTop });'));
 });
 
 test('尺寸标签随选区贴近边缘翻转防溢出', () => {
