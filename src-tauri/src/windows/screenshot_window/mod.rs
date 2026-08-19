@@ -471,6 +471,12 @@ fn finish_failed_screenshot(app: &AppHandle, session_id: &str) {
     }
 }
 
+/// 截图会话是否活跃。供主窗口贴边监控查询：截图期间必须抑制贴边悬浮弹出，
+/// 否则用户鼠标移到屏幕边缘框选时，被截图隐藏的主窗口会被 edge_monitor 弹回遮挡选区。
+pub fn is_screenshot_active() -> bool {
+    STATE.lock().sessions.phase().is_some()
+}
+
 pub fn start_screenshot(app: &AppHandle, initial_action: Option<&str>) -> Result<(), String> {
     let settings = get_settings();
     validate_initial_screenshot_action(initial_action, &settings)?;
