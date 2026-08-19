@@ -18,13 +18,17 @@ export function rulerMajorStep(length) {
 
 // 生成从 0 到长度（含端点）的标尺刻度：每主刻度间隔的 1/5 放一个次刻度，
 // 主刻度位置带像素文本标签，次刻度 label 为 null。
+// 用整数计数循环替代浮点累加：浮点累加在长度含小数时会产生漂移（如 1365.33），
+// 且 position % majorStep === 0 对漂移值不可靠；计数循环让位置始终为 minorStep 的整数倍。
 export function rulerTicks(length) {
   assertLength(length);
   const majorStep = rulerMajorStep(length);
   const minorStep = majorStep / 5;
   const ticks = [];
-  for (let position = 0; position <= length; position += minorStep) {
-    ticks.push({ position, label: position % majorStep === 0 ? String(position) : null });
+  const total = Math.floor(length / minorStep);
+  for (let index = 0; index <= total; index += 1) {
+    const position = index * minorStep;
+    ticks.push({ position, label: index % 5 === 0 ? String(position) : null });
   }
   return ticks;
 }
