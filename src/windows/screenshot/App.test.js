@@ -507,6 +507,17 @@ test('工具栏动作按钮使用原生 button 且不被禁用时保持键盘可
   assert.ok(source.includes('aria-label={t(\'screenshot.cancelLabel\')}'), '取消按钮必须有可访问名称');
 });
 
+test('新拖拽开始时先递增手势并清空选区历史', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  // 新拖拽（草稿选区）必须递增手势代号并清空历史：
+  // 若只清空历史不递增手势，撤销会把旧会话的调整记录误应用到新选区。
+  assert.ok(source.includes('gestureIdRef.current += 1;'), '新拖拽必须递增手势代号');
+  // 锚定 handlePointerDown 内的草稿拖拽块（含唯一 draftRef 赋值），避免与
+  // 其它 reset 路径的相邻序列误命中：手势递增必须紧邻并先于历史清空。
+  const draftAnchor = "gestureIdRef.current += 1;\n    selectionHistoryRef.current = [];\n    draftRef.current = { start, end: start };";
+  assert.ok(source.includes(draftAnchor), '手势递增必须紧邻并先于历史清空');
+});
+
 test('AI 未配置时工具栏禁用 AI 动作且数字键 4 引导进入设置', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   // 工具栏按钮：disabled 判定必须与可用性函数一致。
