@@ -27,6 +27,7 @@ import { selectionFromDraft, resetInteractionState } from './draftModel.js';
 import { helpEntries, isHelpShortcut } from './helpModel.js';
 import { canResetSelection } from './resetModel.js';
 import { fullScreenSelection } from './fullScreenModel.js';
+import { completeShortcutForEvent } from './completeShortcutModel.js';
 import {
   createRafWriter,
   hitSelectionEdge,
@@ -582,9 +583,8 @@ function App() {
       }
       const hotkeyAction = actionForHotkey(event.key);
       if (hotkeyAction) { event.preventDefault(); void completeScreenshot(hotkeyAction); return; }
-      if (event.key === 'Enter') { event.preventDefault(); void completeScreenshot('copy'); }
-      else if (event.ctrlKey && event.key.toLowerCase() === 's') { event.preventDefault(); void completeScreenshot('save'); }
-      else if (event.ctrlKey && event.key.toLowerCase() === 'p') { event.preventDefault(); void completeScreenshot('pin'); }
+      const completeAction = completeShortcutForEvent(event);
+      if (completeAction) { event.preventDefault(); void completeScreenshot(completeAction); }
     };
     const handleBlur = () => { if (draftRef.current || selectionRef.current) void cancelScreenshot(); };
     window.addEventListener('keydown', handleKeyDown);

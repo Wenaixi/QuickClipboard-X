@@ -3,9 +3,10 @@
 // isHelpShortcut 识别 F1 与 ?（无修饰键）作为帮助开关。
 
 const HELP_ITEMS = [
-  { id: 'complete', keys: ['Enter'], labelKey: 'screenshot.help.complete' },
+  { id: 'complete', keys: ['Enter', 'Ctrl+C'], labelKey: 'screenshot.help.complete' },
   { id: 'save', keys: ['Ctrl+S'], labelKey: 'screenshot.help.save' },
   { id: 'pin', keys: ['Ctrl+P'], labelKey: 'screenshot.help.pin' },
+  { id: 'fullscreen', keys: ['Ctrl+A'], labelKey: 'screenshot.help.fullscreen' },
   { id: 'cancel', keys: ['Esc'], labelKey: 'screenshot.help.cancel' },
   { id: 'nudge', keys: ['方向键'], labelKey: 'screenshot.help.nudge' },
   { id: 'square', keys: ['Shift'], labelKey: 'screenshot.help.square' },

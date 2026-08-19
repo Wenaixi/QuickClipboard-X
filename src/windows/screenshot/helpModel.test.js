@@ -4,6 +4,7 @@ import { helpEntries, isHelpShortcut } from './helpModel.js';
 
 const t = (key) => ({
   'screenshot.help.complete': '完成截图并复制',
+  'screenshot.help.fullscreen': '全屏选区',
   'screenshot.help.save': '保存为图片',
   'screenshot.help.pin': '贴图',
   'screenshot.help.cancel': '取消截图',
@@ -16,9 +17,9 @@ const t = (key) => ({
 
 test('helpEntries 返回全部已知快捷键条目', () => {
   const entries = helpEntries(t);
-  assert.equal(entries.length, 9);
+  assert.equal(entries.length, 10);
   const ids = entries.map((entry) => entry.id);
-  for (const id of ['complete', 'save', 'pin', 'cancel', 'nudge', 'square', 'center', 'undo', 'quickAction']) {
+  for (const id of ['complete', 'save', 'pin', 'fullscreen', 'cancel', 'nudge', 'square', 'center', 'undo', 'quickAction']) {
     assert.ok(ids.includes(id), '缺少 ' + id + ' 条目');
   }
 });
