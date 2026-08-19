@@ -27,9 +27,9 @@ use windows::Win32::System::WinRT::Direct3D11::{
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
 use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetTopWindow, GetWindow, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId, IsIconic,
-    IsWindowVisible, GW_HWNDNEXT, GWL_EXSTYLE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-    WS_EX_TRANSPARENT,
+    GetLayeredWindowAttributes, GetTopWindow, GetWindow, GetWindowLongW, GetWindowRect,
+    GetWindowThreadProcessId, IsIconic, IsWindowVisible, GW_HWNDNEXT, GWL_EXSTYLE,
+    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -284,7 +284,19 @@ fn is_capture_candidate(hwnd: windows::Win32::Foundation::HWND, current_process_
     let is_transparent = extended_style & WS_EX_TRANSPARENT.0 != 0;
     let is_non_activatable_tool = extended_style & WS_EX_TOOLWINDOW.0 != 0
         && extended_style & WS_EX_NOACTIVATE.0 != 0;
-    !is_transparent && !is_non_activatable_tool
+    // IsWindowVisible 对 layered 窗口只看 WS_VISIBLE 样式位，alpha=0 的完全透明窗口
+    // 视觉不可见但会被误选为单击截图目标，需要按 alpha 通道过滤。
+    let is_invisible_layered = if extended_style & WS_EX_LAYERED.0 != 0 {
+        let mut alpha: u8 = 255;
+        let mut flags = windows::Win32::UI::WindowsAndMessaging::LAYERED_WINDOW_ATTRIBUTES_FLAGS(0);
+        unsafe {
+            GetLayeredWindowAttributes(hwnd, None, Some(&mut alpha), Some(&mut flags)).is_ok()
+                && alpha == 0
+        }
+    } else {
+        false
+    };
+    !is_transparent && !is_non_activatable_tool && !is_invisible_layered
 }
 
 pub fn find_window_rect_at_point(x: i32, y: i32) -> Option<WindowRect> {
@@ -442,5 +454,8 @@ mod tests {
         assert!(body.contains("GetTopWindow(None)"));
         assert!(body.contains("GetWindow(hwnd, GW_HWNDNEXT)"));
         assert!(!body.contains("EnumWindows("));
+        // 完全透明的 layered 窗口必须被过滤，避免单击选窗误选视觉不可见窗口。
+        assert!(body.contains("GetLayeredWindowAttributes"));
+        assert!(body.contains("alpha == 0"));
     }
 }
