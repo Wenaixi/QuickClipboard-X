@@ -59,6 +59,16 @@ test('Esc 与右键仅在无选区或小选区时取消截图', () => {
   assert.ok(body.includes('canResetSelection'), 'keydown 必须使用小选区重置守卫');
 });
 
+test('放大镜绘制网格线与中心十字辅助像素对齐', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('import { magnifierGridLines, magnifierCrosshair } from \'./magnifierGridModel.js\';'));
+  assert.ok(source.includes('const grid = magnifierGridLines(geometry);'));
+  assert.ok(source.includes('const cross = magnifierCrosshair(geometry);'));
+  assert.ok(source.includes('for (const x of grid.vertical) { context.moveTo(x + 0.5, 0); context.lineTo(x + 0.5, canvas.height); }'));
+  assert.ok(source.includes('for (const y of grid.horizontal) { context.moveTo(0, y + 0.5); context.lineTo(canvas.width, y + 0.5); }'));
+  assert.ok(source.includes('context.moveTo(cross.x + 0.5, 0);'));
+});
+
 test('快捷键帮助面板随 F1 切换并列出全部快捷键', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('import { helpEntries, isHelpShortcut } from \'./helpModel.js\';'));
