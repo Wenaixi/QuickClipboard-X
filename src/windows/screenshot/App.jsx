@@ -5,6 +5,7 @@ import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { normalizeBootstrap } from './screenshotModel.js';
 import { magnifierGeometry } from './magnifierModel.js';
+import { magnifierGridLines, magnifierCrosshair } from './magnifierGridModel.js';
 import { coordinatePanelPosition, formatCursorCoordinate } from './coordinateModel.js';
 import { guideLines } from './guideModel.js';
 import { thirdsGrid } from './gridModel.js';
@@ -268,6 +269,21 @@ function App() {
         canvas.width,
         canvas.height
       );
+      const grid = magnifierGridLines(geometry);
+      const cross = magnifierCrosshair(geometry);
+      context.strokeStyle = 'rgba(255, 255, 255, 0.28)';
+      context.lineWidth = 1;
+      context.beginPath();
+      for (const x of grid.vertical) { context.moveTo(x + 0.5, 0); context.lineTo(x + 0.5, canvas.height); }
+      for (const y of grid.horizontal) { context.moveTo(0, y + 0.5); context.lineTo(canvas.width, y + 0.5); }
+      context.stroke();
+      context.strokeStyle = 'rgba(255, 80, 80, 0.85)';
+      context.beginPath();
+      context.moveTo(cross.x + 0.5, 0);
+      context.lineTo(cross.x + 0.5, canvas.height);
+      context.moveTo(0, cross.y + 0.5);
+      context.lineTo(canvas.width, cross.y + 0.5);
+      context.stroke();
       const pixel = readCenterPixel(context.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height);
       setMagnifierColor(pixel);
     };
