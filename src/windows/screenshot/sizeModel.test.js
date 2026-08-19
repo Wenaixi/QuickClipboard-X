@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { formatPixelSize, formatMegapixels, formatAspectRatio, physicalSize } from './sizeModel.js';
 
 test('physicalSize 与 selectionToPhysical 物理取整策略一致', () => {
@@ -72,6 +73,22 @@ test('physicalSize 拒绝非法 DPR 或尺寸', () => {
   assert.throws(() => physicalSize({ width: 1200, height: 700 }, 0), /dpr 必须是正数/);
   assert.throws(() => physicalSize({ width: 1200, height: 700 }, Number.NaN), /dpr 必须是正数/);
   assert.throws(() => physicalSize(null, 1), /尺寸对象/);
+});
+
+test('formatAspectRatio 先取整再欧几里得化简为最简整数比', () => {
+  const source = readFileSync(new URL('./sizeModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function formatAspectRatio');
+  const body = source.slice(start, start + 500);
+  // 源码护栏：必须先取整（小数尺寸四舍五入）再用统一 GCD 化简，禁止内联循环。
+  assert.ok(body.includes('Math.round(size.width)'), '宽度必须先取整');
+  assert.ok(body.includes('Math.round(size.height)'), '高度必须先取整');
+  assert.ok(body.includes('greatestCommonDivisor(width, height)'), '必须用统一 GCD 化简');
+  assert.ok(body.includes('return `${width / divisor}:${height / divisor}`;'), '必须输出最简整数比');
+  // 行为属性：常见比例最简、互质保持、小数先取整、极端大数不退化。
+  assert.equal(formatAspectRatio({ width: 1920, height: 1080 }), '16:9');
+  assert.equal(formatAspectRatio({ width: 1366, height: 768 }), '683:384', '1366:768 可被 2 化简');
+  assert.equal(formatAspectRatio({ width: 300.6, height: 200.4 }), '301:200');
+  assert.equal(formatAspectRatio({ width: 3840, height: 2160 }), '16:9', '4K 必须化简');
 });
 
 test('formatAspectRatio 拒绝零或非法输入', () => {
