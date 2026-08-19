@@ -207,8 +207,37 @@ export function resizeSelection(selection, edge, point, bounds, options = {}) {
 
     const maxLeft = Math.max(0, bounds.width - width);
     const maxTop = Math.max(0, bounds.height - height);
-    const left = clamp(edge.includes('w') ? current.right - width : current.left, 0, maxLeft);
-    const top = clamp(edge.includes('n') ? current.bottom - height : current.top, 0, maxTop);
+    let left;
+    let top;
+    if (options.fromCenter === true) {
+      // 从中心缩放（ShareX 公开行为：按住 Ctrl 时以选区中心为锚点）。
+      const centerX = (current.left + current.right) / 2;
+      const centerY = (current.top + current.bottom) / 2;
+      left = clamp(Math.round(centerX - width / 2), 0, maxLeft);
+      top = clamp(Math.round(centerY - height / 2), 0, maxTop);
+    } else {
+      left = clamp(edge.includes('w') ? current.right - width : current.left, 0, maxLeft);
+      top = clamp(edge.includes('n') ? current.bottom - height : current.top, 0, maxTop);
+    }
+    return { left, top, right: left + width, bottom: top + height, width, height };
+  }
+
+  // 从中心缩放（ShareX 公开行为：按住 Ctrl 时以选区中心为锚点，拖动的边与对边对称移动）。
+  if (options.fromCenter === true) {
+    const centerX = (current.left + current.right) / 2;
+    const centerY = (current.top + current.bottom) / 2;
+    let width = current.width;
+    let height = current.height;
+    if (edge.includes('w') || edge.includes('e')) {
+      width = Math.min(bounds.width, Math.max(1, Math.round(Math.abs(point.x - centerX) * 2)));
+    }
+    if (edge.includes('n') || edge.includes('s')) {
+      height = Math.min(bounds.height, Math.max(1, Math.round(Math.abs(point.y - centerY) * 2)));
+    }
+    const maxLeft = Math.max(0, bounds.width - width);
+    const maxTop = Math.max(0, bounds.height - height);
+    const left = clamp(Math.round(centerX - width / 2), 0, maxLeft);
+    const top = clamp(Math.round(centerY - height / 2), 0, maxTop);
     return { left, top, right: left + width, bottom: top + height, width, height };
   }
 
