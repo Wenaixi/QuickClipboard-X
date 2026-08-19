@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { physicalSize } from './sizeModel.js';
 import {
   createRafWriter,
   hitSelectionEdge,
@@ -257,6 +258,33 @@ test('selectionToPhysical 使用 floor 起点和 ceil 终点覆盖完整像素�
       height: 26,
     }
   );
+});
+
+test('selectionToPhysical 源码护栏：floor 起点 ceil 终点且最小 1px 与 physicalSize 一致', () => {
+  const source = readFileSync(new URL('./selectionModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function selectionToPhysical');
+  const body = source.slice(start, start + 900);
+  // 源码护栏：物理取整必须是 floor 起点 + ceil 终点（选区覆盖 [left, right) 的物理像素，
+  // 标签像素数与实际截图完全一致），退化点必须保留最小 1px。
+  assert.ok(body.includes('Math.floor(selection.left * devicePixelRatio)'), '左缘必须向下取整');
+  assert.ok(body.includes('Math.ceil(selection.right * devicePixelRatio)'), '右缘必须向上取整');
+  assert.ok(body.includes('Math.floor(selection.top * devicePixelRatio)'), '上缘必须向下取整');
+  assert.ok(body.includes('Math.ceil(selection.bottom * devicePixelRatio)'), '下缘必须向上取整');
+  assert.ok(body.includes('Math.max(1, end - start)'), '退化点必须保留最小 1px');
+  // 行为一致性：非退化选区下 selectionToPhysical 的宽高必须与 physicalSize 完全一致。
+  const cases = [
+    { left: 10.2, top: 20.1, right: 100.1, bottom: 40.3, dpr: 1.25 },
+    { left: 3, top: 7, right: 200.5, bottom: 120.4, dpr: 1.5 },
+    { left: 100.4, top: 50.6, right: 200.2, bottom: 120.8, dpr: 2 },
+    { left: 0, top: 0, right: 800, bottom: 600, dpr: 1 },
+  ];
+  for (const c of cases) {
+    const selection = { left: c.left, top: c.top, right: c.right, bottom: c.bottom, width: c.right - c.left, height: c.bottom - c.top };
+    const physical = selectionToPhysical(selection, c.dpr, { width: 1920, height: 1080 });
+    const sized = physicalSize(selection, c.dpr);
+    assert.equal(physical.width, sized.width, '物理宽度必须与尺寸标签一致');
+    assert.equal(physical.height, sized.height, '物理高度必须与尺寸标签一致');
+  }
 });
 
 test('selectionToPhysical 不允许越过物理显示器边界', () => {
