@@ -151,6 +151,13 @@ test('平移结束后保留选区且不触发选窗或清空', () => {
   assert.ok(source.includes('setSelection(finalSelection);'));
 });
 
+test('选区建立后数字键快捷执行动作且快捷键提示展示', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('const hotkeyAction = actionForHotkey(event.key);'));
+  assert.ok(source.includes('if (hotkeyAction) { event.preventDefault(); void completeScreenshot(hotkeyAction); return; }'));
+  assert.ok(source.includes('hotkeyForAction(action.id)'));
+});
+
 test('截图键盘微调接线调用 nudgeSelection 并同步选区状态', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('const next = nudgeSelection(selectionRef.current, nudgeX * step, nudgeY * step, bootstrap.bounds);'));
