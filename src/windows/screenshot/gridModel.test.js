@@ -20,6 +20,26 @@ test('thirdsGrid 尺寸不可整除时按四舍五入取整', () => {
   assert.deepEqual(lines.horizontal.map((line) => line.top), [200, 400]);
 });
 
+test('thirdsGrid 任意合法边界下两条三分线不重合且贯穿画布', () => {
+  const cases = [
+    { width: 300, height: 150 },
+    { width: 800, height: 600 },
+    { width: 1920, height: 1080 },
+    { width: 1366, height: 768 },
+    { width: 1, height: 1 },
+  ];
+  for (const bounds of cases) {
+    const grid = thirdsGrid(bounds);
+    // 两条垂直线按 1/3 与 2/3 四舍五入，宽度足够时不得重合。
+    const [v1, v2] = grid.vertical;
+    assert.ok(v1.left < v2.left, `宽 ${bounds.width} 垂直线必须分开`);
+    assert.ok(v1.height === bounds.height && v2.height === bounds.height, '垂直线必须贯穿画布');
+    const [h1, h2] = grid.horizontal;
+    assert.ok(h1.top < h2.top, `高 ${bounds.height} 水平线必须分开`);
+    assert.ok(h1.width === bounds.width && h2.width === bounds.width, '水平线必须贯穿画布');
+  }
+});
+
 test('thirdsGrid 拒绝非法边界', () => {
   assert.throws(() => thirdsGrid(null), /边界尺寸/);
   assert.throws(() => thirdsGrid({ width: 0, height: 100 }), /边界尺寸必须为正数/);
