@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   createRafWriter,
   hitSelectionEdge,
@@ -591,6 +592,25 @@ test('nudgeSelection 拒绝无效边界或非有限位移', () => {
     () => nudgeSelection({ left: 0, top: 0, right: 1, bottom: 1 }, Number.NaN, 1, bounds),
     /横向位移 必须是有限数字/
   );
+});
+
+test('全部选区变换函数必须夹紧到显示器边界内', () => {
+  const source = readFileSync(new URL('./selectionModel.js', import.meta.url), 'utf8');
+  // 拖拽/调整/移动/方形四种变换都必须以边界为约束，禁止裸输出越界矩形。
+  const sections = [
+    ['normalizeSelection', 'normalizeAxis(start.x, end.x, bounds.width)'],
+    ['squareSelection', 'bounds.height - side'],
+    ['resizeSelection', 'clamp(point.x, 0, bounds.width)'],
+    ['nudgeSelection', 'clamp(current.left + dx, 0, maxLeft)'],
+  ];
+  for (const [name, marker] of sections) {
+    const start = source.indexOf(`export function ${name}`);
+    assert.ok(start !== -1, `缺少变换函数 ${name}`);
+    const tail = source.slice(start);
+    const endOffset = tail.indexOf('\nexport function ');
+    const body = endOffset === -1 ? tail : tail.slice(0, endOffset);
+    assert.ok(body.includes(marker), `${name} 必须把结果夹紧到边界内（${marker}）`);
+  }
 });
 
 test('createRafWriter 在一帧内只提交最后一次几何', () => {
