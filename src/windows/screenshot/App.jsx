@@ -444,6 +444,7 @@ function App() {
   useEffect(() => {
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') { event.preventDefault(); void cancelScreenshot(); return; }
+      if (event.target instanceof Element && event.target.closest('[data-screenshot-control]')) return;
       if (!selectionRef.current || busyAction) return;
       const [nudgeX, nudgeY] = NUDGE_DIRECTIONS[event.key] || [];
       if (nudgeX !== undefined) {
