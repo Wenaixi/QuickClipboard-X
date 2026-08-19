@@ -355,7 +355,12 @@ function App() {
 
   const completeScreenshot = async (action) => {
     const currentSelection = selectionRef.current;
-    if (!currentSelection || busyAction || !actionIsEnabled(action, bootstrap)) return;
+    if (!currentSelection || busyAction) return;
+    if (!actionIsEnabled(action, bootstrap)) {
+      // 未配置 AI 时按数字键 4 引导进入设置，与工具栏“配置 AI”按钮行为一致。
+      if (action === 'ai') void openAiSettings();
+      return;
+    }
     if (!bootstrap.sessionId) {
       setActionError(t('screenshot.sessionNotReady'));
       return;
@@ -367,6 +372,8 @@ function App() {
       await invoke(COMPLETE_COMMAND, { sessionId: bootstrap.sessionId, selection: physicalSelection, action });
     } catch (error) {
       setActionError(t('screenshot.actionFailed', { action: actionLabel(action, t), error: String(error) }));
+    } finally {
+      // 无论成功失败都解除动作占用，避免成功路径永久卡在处理中。
       setBusyAction('');
     }
   };
@@ -544,6 +551,7 @@ function App() {
 
   useEffect(() => {
     const handleKeyDown = (event) => {
+      if (event.key === 'Escape' && showHelp) { event.preventDefault(); setShowHelp(false); return; }
       if (event.key === 'Escape' && (!selectionRef.current || canResetSelection(selectionRef.current))) { event.preventDefault(); void cancelScreenshot(); return; }
       if (event.target instanceof Element && event.target.closest('[data-screenshot-control]')) return;
       if (isHelpShortcut(event)) { event.preventDefault(); setShowHelp((current) => !current); return; }
@@ -561,9 +569,9 @@ function App() {
         applySelectionStyle(rootRef.current, next);
         return;
       }
-      if (!selectionRef.current || busyAction) return;
+      if (!selectionRef.current || busyAction || draftRef.current || moveRef.current || resizeRef.current) return;
       const [nudgeX, nudgeY] = NUDGE_DIRECTIONS[event.key] || [];
-      if (nudgeX !== undefined) {
+      if (nudgeX !== undefined && !event.altKey && !event.metaKey) {
         event.preventDefault();
         const step = event.ctrlKey ? NUDGE_FAST_STEP : NUDGE_STEP;
         selectionHistoryRef.current = pushSelectionHistory(selectionHistoryRef.current, selectionRef.current);
@@ -588,14 +596,14 @@ function App() {
       const completeAction = completeShortcutForEvent(event);
       if (completeAction) { event.preventDefault(); void completeScreenshot(completeAction); }
     };
-    const handleBlur = () => { if (draftRef.current || selectionRef.current) void cancelScreenshot(); };
+    const handleBlur = () => { if (busyAction) return; if (draftRef.current || selectionRef.current) void cancelScreenshot(); };
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('blur', handleBlur);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('blur', handleBlur);
     };
-  }, [bootstrap.sessionId, busyAction]);
+  }, [bootstrap.sessionId, busyAction, showHelp]);
 
   return (
     <main ref={rootRef} className="screenshot-root" data-selection-active="false" data-selecting={selecting ? 'true' : 'false'} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={cancelScreenshot} onDoubleClick={handleDoubleClick} onWheel={handleWheel} onContextMenu={(event) => { event.preventDefault(); if (!selectionRef.current || canResetSelection(selectionRef.current)) void cancelScreenshot(); }} aria-label={t('screenshot.selectionLabel')}>

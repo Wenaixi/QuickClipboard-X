@@ -107,6 +107,25 @@ test('选区建立后显示完成动作邀请提示且不遮挡操作', () => {
   }
 });
 
+test('完成动作成功后清理占用且 AI 未配置回落配置入口', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('} finally {'));
+  assert.ok(source.includes('setBusyAction(\'\');'));
+  assert.ok(source.includes("if (action === 'ai') void openAiSettings();"));
+});
+
+test('帮助面板打开时按 Esc 关闭且失焦不打断处理', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes("if (event.key === 'Escape' && showHelp) { event.preventDefault(); setShowHelp(false); return; }"));
+  assert.ok(source.includes('const handleBlur = () => { if (busyAction) return;'));
+});
+
+test('选区调整进行中键盘不触发完成与快速微调', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('busyAction || draftRef.current || moveRef.current || resizeRef.current) return;'));
+  assert.ok(source.includes('if (nudgeX !== undefined && !event.altKey && !event.metaKey) {'));
+});
+
 test('快捷键帮助面板随 F1 切换并列出全部快捷键', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('import { helpEntries, isHelpShortcut } from \'./helpModel.js\';'));

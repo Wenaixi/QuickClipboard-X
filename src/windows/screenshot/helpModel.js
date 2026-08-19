@@ -12,7 +12,7 @@ const HELP_ITEMS = [
   { id: 'square', keys: ['Shift'], labelKey: 'screenshot.help.square' },
   { id: 'center', keys: ['Ctrl'], labelKey: 'screenshot.help.center' },
   { id: 'undo', keys: ['Ctrl+Z'], labelKey: 'screenshot.help.undo' },
-  { id: 'quickAction', keys: ['1-9'], labelKey: 'screenshot.help.quickAction' },
+  { id: 'quickAction', keys: ['1', '2', '3', '4'], labelKey: 'screenshot.help.quickAction' },
 ];
 
 export function helpEntries(t) {
