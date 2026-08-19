@@ -66,6 +66,61 @@ test('保存设置时后端字段仍属于 defaultSettings 序列化集合', () 
   );
 });
 
+test('全部截图与 AI 字段在 Rust 模型与前端默认值三处同步且 UI 可编辑', () => {
+  // 第五十轮审计：动态提取 model.rs 中全部 screenshot_*/ai_* 字段，逐一验证
+  // ①前端 defaultSettings 声明同一 camelCase key；②设置 UI 各分节消费对应字段。
+  const modelSource = fs.readFileSync(
+    path.join(root, 'src-tauri/src/services/settings/model.rs'),
+    'utf8'
+  );
+  const rustFields = [...modelSource.matchAll(/pub (screenshot_\w+|ai_\w+):/g)].map((m) => m[1]);
+  assert.ok(rustFields.length >= 20, `截图与 AI 字段应不少于 20 个，实际 ${rustFields.length}`);
+  const toCamel = (snake) => snake.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+  const missingInDefaults = rustFields
+    .map(toCamel)
+    .filter((camel) => !new RegExp(`\\b${camel}\\s*:`).test(defaultSettingsBody));
+  assert.deepEqual(missingInDefaults, [], '每个 Rust 截图/AI 字段都必须在前端默认值声明');
+  // 运行时隐私确认状态由 AI 截图路径的确认对话框自动置位并持久化，
+  // 设置 UI 不暴露是合理设计（用户反悔时应由确认对话框重新询问，而非偏好开关）。
+  const runtimeStateFields = new Set(['screenshotAiCloudConfirmed']);
+  // 快捷键字段在 ShortcutsSection 消费。
+  const shortcutsUi = fs.readFileSync(
+    path.join(root, 'src/windows/settings/sections/ShortcutsSection.jsx'),
+    'utf8'
+  );
+  for (const key of ['screenshotShortcut', 'screenshotQuickSaveShortcut', 'screenshotQuickPinShortcut', 'screenshotQuickOcrShortcut']) {
+    assert.ok(shortcutsUi.includes(`settings.${key}`), `ShortcutsSection 必须消费 ${key}`);
+  }
+  // 截图功能字段在 ScreenshotSection 消费。
+  const screenshotUi = fs.readFileSync(
+    path.join(root, 'src/windows/settings/sections/ScreenshotSection.jsx'),
+    'utf8'
+  );
+  for (const camel of rustFields.map(toCamel)) {
+    if (runtimeStateFields.has(camel)) continue;
+    if (['screenshotShortcut', 'screenshotQuickSaveShortcut', 'screenshotQuickPinShortcut', 'screenshotQuickOcrShortcut'].includes(camel)) continue;
+    if (camel.startsWith('ai') && camel !== 'screenshotAiEnabled' && camel !== 'screenshotAiPrompt') continue;
+    assert.ok(screenshotUi.includes(`settings.${camel}`), `ScreenshotSection 必须消费 ${camel}`);
+  }
+  // AI 翻译组在 TranslationSection 消费，AI 视觉配置（key/model/baseUrl）在 AIConfigSection 消费。
+  const translationUi = fs.readFileSync(
+    path.join(root, 'src/windows/settings/sections/TranslationSection.jsx'),
+    'utf8'
+  );
+  for (const camel of rustFields.map(toCamel)) {
+    if (!camel.startsWith('ai') || camel.startsWith('screenshotAi')) continue;
+    if (['aiApiKey', 'aiModel', 'aiBaseUrl'].includes(camel)) continue;
+    assert.ok(translationUi.includes(`settings.${camel}`), `TranslationSection 必须消费 ${camel}`);
+  }
+  const aiUi = fs.readFileSync(
+    path.join(root, 'src/windows/settings/sections/AIConfigSection.jsx'),
+    'utf8'
+  );
+  for (const key of ['aiApiKey', 'aiModel', 'aiBaseUrl']) {
+    assert.ok(aiUi.includes(`settings.${key}`), `AIConfigSection 必须消费 ${key}`);
+  }
+});
+
 test('AI 配置四字段在 defaultSettings 声明且设置 UI 消费同一组 key', () => {
   // AI 视觉识别配置必须在前端默认值、Rust model.rs 与设置页 UI 三处同步，
   // 任何一处遗漏都会导致配置保存后无法回读或 UI 无法编辑。
