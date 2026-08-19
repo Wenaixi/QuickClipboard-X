@@ -103,7 +103,11 @@ pub fn start_edge_monitoring() {
                 continue;
             }
 
-            if is_near && state.is_hidden {
+            // show 分支:内部 is_hidden 或原生可见性兜底。
+            // 窗口被系统原生隐藏(Win+D/任务视图)但内部仍记为贴边可见(is_hidden=false)时,
+            // 仅看 state.is_hidden 会短路,鼠标悬停边缘永远唤不出。
+            // 短路顺序:is_hidden=true 时不必查 OS;只有 is_hidden=false 且近边才查 is_visible。
+            if is_near && (state.is_hidden || window.is_visible().map(|v| !v).unwrap_or(false)) {
                 if !crate::services::system::is_front_app_globally_disabled_from_settings() {
                     let window_for_task = window.clone();
                     let _ = window.app_handle().run_on_main_thread(move || {
@@ -253,6 +257,23 @@ mod tests {
         assert!(
             body.contains("return;"),
             "worker 停止条件必须直接退出线程"
+        );
+    }
+
+    // 切片3:show 分支必须同时看内部 is_hidden 与原生可见性,
+    // 否则窗口被系统原生隐藏(Win+D/任务视图)但内部仍记为贴边可见时,
+    // 鼠标悬停边缘不会唤出——is_hidden=false 直接短路,兜底永远不触发。
+    #[test]
+    fn edge_monitor_show_branch_falls_back_to_native_visibility() {
+        let source = source_file("src/windows/main_window/edge_monitor.rs");
+        let body = strip_line_comments(fn_body(&source, "start_edge_monitoring"));
+        let show_cond = body
+            .find("is_near && (state.is_hidden")
+            .expect("show 分支必须包含原生可见性兜底:is_near && (state.is_hidden || ...)");
+        let after = &body[show_cond..];
+        assert!(
+            after.contains("is_visible()"),
+            "show 分支兜底必须调用 is_visible() 检查原生可见性"
         );
     }
 
