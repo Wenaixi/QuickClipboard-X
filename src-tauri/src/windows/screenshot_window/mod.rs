@@ -275,6 +275,25 @@ mod source_guards {
     }
 
     #[test]
+    fn configure_window_orders_position_size_topmost_interaction_show_focus() {
+        let source = source_file("windows/screenshot_window/mod.rs");
+        // 行首锚定生产声明，避免测试模块内 configure_window 字面自指命中（§10.4）。
+        let start = source
+            .find("\nfn configure_window")
+            .expect("缺少截图窗口配置函数");
+        let body = &source[start..];
+        let pos = body.find("window.set_position(").expect("缺少位置配置");
+        let size = body.find("window.set_size(").expect("缺少尺寸配置");
+        let topmost = body.find("window.set_always_on_top(true)").expect("缺少置顶配置");
+        let ignore = body.find("window.set_ignore_cursor_events(false)").expect("缺少交互配置");
+        let show = body.find("window.show()").expect("缺少显示调用");
+        let focus = body.find("window.set_focus()").expect("缺少聚焦调用");
+        // 先定位再显示避免目标位置闪烁，置顶先于显示避免非置顶闪现，聚焦放最后。
+        assert!(pos < size && size < topmost && topmost < ignore && ignore < show && show < focus,
+            "配置顺序必须为 位置→尺寸→置顶→交互→显示→聚焦: {pos} {size} {topmost} {ignore} {show} {focus}");
+    }
+
+    #[test]
     fn window_selection_fully_outside_monitor_returns_none() {
         // 窗口完全在显示器左侧之外（right < monitor.left），无可截图区域。
         let monitor = crate::services::screenshot::MonitorRect::new(-1920, 0, 1920, 1080).unwrap();
