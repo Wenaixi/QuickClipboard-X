@@ -49,6 +49,9 @@ struct ScreenshotWindowState {
     visibility_revision: u64,
     pending_bootstrap: Option<ScreenshotBootstrap>,
     window_ready: bool,
+    // 截图窗口自动释放代际：每次启动截图（复用/新建窗口）时递增，
+    // 使在飞的 auto 超时销毁任务失效，避免新会话被旧定时器销毁。
+    dispose_generation: u64,
 }
 
 static STATE: Lazy<Mutex<ScreenshotWindowState>> = Lazy::new(|| Mutex::new(ScreenshotWindowState::default()));
@@ -277,6 +280,32 @@ mod source_guards {
         );
         settings.screenshot_ai_enabled = true;
         assert!(validate_ai_screenshot_action(&settings).is_ok());
+    }
+
+    #[test]
+    fn auto_lifecycle_schedules_dispose_and_start_screenshot_invalidates_it() {
+        // 测试模块位于文件中部，cleanup_plan 等生产函数在其后：find 会命中测试
+        // 自身断言字面量（§10.4 自指陷阱），rfind 从文件尾找到生产定义，唯一可靠。
+        let source = source_file("windows/screenshot_window/mod.rs");
+        let schedule_start = source.rfind("fn schedule_auto_dispose_if_needed").expect("缺少 auto 释放调度函数");
+        let schedule_end = source[schedule_start..]
+            .find("fn is_current_processing_session")
+            .map(|offset| schedule_start + offset)
+            .expect("缺少调度函数结束锚点");
+        let schedule = &source[schedule_start..schedule_end];
+        // 仅 auto 模式调度 + 读取分钟数 + 代际检查 + 销毁窗口。
+        assert!(schedule.contains("\"auto\""), "必须判断生命周期模式为 auto");
+        assert!(schedule.contains("screenshot_auto_dispose_minutes.max(1)"), "必须读取自动释放分钟数");
+        assert!(schedule.contains("dispose_generation == generation"), "代际不匹配必须放弃销毁");
+        assert!(schedule.contains("window.destroy()"), "超时后必须销毁窗口");
+        // start_screenshot 必须递增代际使在飞定时器失效（rfind 取生产定义）。
+        let bump = source
+            .rfind("STATE.lock().dispose_generation += 1;")
+            .expect("启动截图必须递增释放代际");
+        let window_reuse = source
+            .rfind("let window = if let Some(window) = app.get_webview_window")
+            .expect("缺少窗口复用锚点");
+        assert!(bump < window_reuse, "代际递增必须先于窗口获取");
     }
 
     #[test]
@@ -517,6 +546,7 @@ fn cleanup_plan(plan: crate::services::screenshot::CleanupPlan, app: &AppHandle)
         if let Some(window) = app.get_webview_window(SCREENSHOT_WINDOW_LABEL) {
             window.hide().map_err(|error| format!("隐藏截图窗口失败: {error}"))?;
         }
+        schedule_auto_dispose_if_needed(app);
     }
     for path in plan.temp_files {
         let _ = std::fs::remove_file(path);
@@ -527,6 +557,30 @@ fn cleanup_plan(plan: crate::services::screenshot::CleanupPlan, app: &AppHandle)
         }
     }
     Ok(())
+}
+
+/// auto 模式：截图窗口隐藏后按 screenshot_auto_dispose_minutes 超时销毁，
+/// 释放后台资源；期间再次截图（代际递增）或用户切换 dispose 会取消在飞任务。
+fn schedule_auto_dispose_if_needed(app: &AppHandle) {
+    let settings = get_settings();
+    if settings.screenshot_window_lifecycle_mode != "auto" {
+        return;
+    }
+    let minutes = settings.screenshot_auto_dispose_minutes.max(1);
+    let generation = STATE.lock().dispose_generation;
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(minutes as u64 * 60)).await;
+        let still_valid = {
+            let state = STATE.lock();
+            state.dispose_generation == generation && state.sessions.phase().is_none()
+        };
+        if still_valid {
+            if let Some(window) = app.get_webview_window(SCREENSHOT_WINDOW_LABEL) {
+                let _ = window.destroy();
+            }
+        }
+    });
 }
 
 fn is_current_processing_session(session_id: &str) -> bool {
@@ -620,6 +674,8 @@ pub fn start_screenshot(app: &AppHandle, initial_action: Option<&str>) -> Result
             StartSessionResult::Existing { session_id, .. } => (session_id, true),
         }
     };
+    // 任何一次启动截图都会使旧的 auto 超时销毁任务失效（代际递增）。
+    STATE.lock().dispose_generation += 1;
     let window = if let Some(window) = app.get_webview_window(SCREENSHOT_WINDOW_LABEL) {
         window
     } else {
