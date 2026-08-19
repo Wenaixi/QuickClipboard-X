@@ -251,6 +251,7 @@
       "configureAi": "配置 AI"
     },
     "processing": "处理中",
+    "toolbarLabel": "截图操作工具栏",
     "selectionLabel": "截图选区",
     "cancelLabel": "取消截图",
     "cancelFailed": "取消截图失败：{{error}}",
@@ -263,7 +264,7 @@
       "move": "拖动以移动选区",
       "resize": "拖动以调整选区大小"
     },
-    "idleHint": "拖动以框选截图区域，按 F1 查看快捷键",
+    "idleHint": "拖动以框选截图区域，按 Esc 取消，按 F1 查看快捷键",
     "invite": "截图后按 Enter 复制，F1 查看全部快捷键",
     "help": {
       "title": "快捷键",

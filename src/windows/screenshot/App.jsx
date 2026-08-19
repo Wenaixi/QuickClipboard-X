@@ -121,8 +121,8 @@ function ThirdsGrid({ bounds }) {
   const grid = thirdsGrid(bounds);
   return (
     <>
-      {grid.vertical.map((line) => <div key={`v-${line.left}`} className="screenshot-thirds screenshot-thirds-v" data-screenshot-thirds="true" style={{ left: `${line.left}px`, top: `${line.top}px`, width: `${line.width}px`, height: `${line.height}px` }} />)}
-      {grid.horizontal.map((line) => <div key={`h-${line.top}`} className="screenshot-thirds screenshot-thirds-h" data-screenshot-thirds="true" style={{ left: `${line.left}px`, top: `${line.top}px`, width: `${line.width}px`, height: `${line.height}px` }} />)}
+      {grid.vertical.map((line) => <div key={`v-${line.left}`} aria-hidden="true" className="screenshot-thirds screenshot-thirds-v" data-screenshot-thirds="true" style={{ left: `${line.left}px`, top: `${line.top}px`, width: `${line.width}px`, height: `${line.height}px` }} />)}
+      {grid.horizontal.map((line) => <div key={`h-${line.top}`} aria-hidden="true" className="screenshot-thirds screenshot-thirds-h" data-screenshot-thirds="true" style={{ left: `${line.left}px`, top: `${line.top}px`, width: `${line.width}px`, height: `${line.height}px` }} />)}
     </>
   );
 }
@@ -150,7 +150,7 @@ function SelectionHandles({ selection }) {
   return (
     <>
       {selectionHandles(selection).map((handle) => (
-        <div key={handle.edge} className={`screenshot-handle screenshot-handle-${handle.edge}`} data-screenshot-handle="true" style={{ left: `${handle.left}px`, top: `${handle.top}px` }} />
+        <div key={handle.edge} aria-hidden="true" className={`screenshot-handle screenshot-handle-${handle.edge}`} data-screenshot-handle="true" style={{ left: `${handle.left}px`, top: `${handle.top}px` }} />
       ))}
     </>
   );
@@ -160,8 +160,8 @@ function CrosshairGuides({ point, bounds }) {
   const lines = guideLines(point, bounds);
   return (
     <>
-      <div className="screenshot-guide screenshot-guide-v" data-screenshot-guide="true" style={{ left: `${lines.vertical.left}px`, top: `${lines.vertical.top}px`, width: `${lines.vertical.width}px`, height: `${lines.vertical.height}px` }} />
-      <div className="screenshot-guide screenshot-guide-h" data-screenshot-guide="true" style={{ left: `${lines.horizontal.left}px`, top: `${lines.horizontal.top}px`, width: `${lines.horizontal.width}px`, height: `${lines.horizontal.height}px` }} />
+      <div aria-hidden="true" className="screenshot-guide screenshot-guide-v" data-screenshot-guide="true" style={{ left: `${lines.vertical.left}px`, top: `${lines.vertical.top}px`, width: `${lines.vertical.width}px`, height: `${lines.vertical.height}px` }} />
+      <div aria-hidden="true" className="screenshot-guide screenshot-guide-h" data-screenshot-guide="true" style={{ left: `${lines.horizontal.left}px`, top: `${lines.horizontal.top}px`, width: `${lines.horizontal.width}px`, height: `${lines.horizontal.height}px` }} />
     </>
   );
 }
@@ -654,15 +654,15 @@ function App() {
       <div className="screenshot-mask screenshot-mask-right" aria-hidden="true" />
       <div className="screenshot-mask screenshot-mask-bottom" aria-hidden="true" />
       <div className="screenshot-selection screenshot-selection-line" aria-hidden="true" style={selectionLineStyle()}>{selection && <span className={selectionSizeLabelClass(selection, bootstrap.bounds)} style={selectionSizeLabelStyle(selection, bootstrap.bounds)}>{selectionSizeLabelText(selection, bootstrap)}</span>}</div>
-      {selection && <div className="screenshot-toolbar" style={toolbarStyle} data-screenshot-control onPointerDown={(event) => event.stopPropagation()}>{ACTIONS.map((action) => { const label = actionLabel(action.id, t); return <button key={action.id} type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction) || !actionIsEnabled(action.id, bootstrap)} onClick={() => void completeScreenshot(action.id)} title={[action.shortcut && t('screenshot.shortcutHint', { label, shortcut: action.shortcut }), hotkeyForAction(action.id) && t('screenshot.shortcutHint', { label, shortcut: hotkeyForAction(action.id) })].filter(Boolean).join(' · ') || label}>{busyAction === action.id ? t('screenshot.processing') : label}</button>; })}{!bootstrap.screenshotAiConfigured && <button type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction)} onClick={() => void openAiSettings()}>{t('screenshot.actions.configureAi')}</button>}</div>}
+      {selection && <div className="screenshot-toolbar" style={toolbarStyle} role="toolbar" aria-label={t('screenshot.toolbarLabel')} data-screenshot-control onPointerDown={(event) => event.stopPropagation()}>{ACTIONS.map((action) => { const label = actionLabel(action.id, t); return <button key={action.id} type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction) || !actionIsEnabled(action.id, bootstrap)} onClick={() => void completeScreenshot(action.id)} title={t('screenshot.shortcutHint', { label, shortcut: [action.shortcut, hotkeyForAction(action.id)].filter(Boolean).join(' / ') })}>{busyAction === action.id ? t('screenshot.processing') : label}</button>; })}{!bootstrap.screenshotAiConfigured && <button type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction)} onClick={() => void openAiSettings()}>{t('screenshot.actions.configureAi')}</button>}</div>}
       {bootstrap.screenshotMagnifierEnabled && bootstrap.magnifierBackground && magnifierPoint && (draftRef.current || moveRef.current || resizeRef.current) && (
         <>
           <canvas className="screenshot-magnifier" data-screenshot-magnifier="true" style={magnifierLayout} ref={magnifierCanvasRef} />
-          {magnifierColor && <div className="screenshot-color" data-screenshot-color="true" style={colorPanelStyle(magnifierLayout, bootstrap.bounds)}>{formatRgb(magnifierColor)}</div>}
+          {magnifierColor && <div className="screenshot-color" aria-hidden="true" data-screenshot-color="true" style={colorPanelStyle(magnifierLayout, bootstrap.bounds)}>{formatRgb(magnifierColor)}</div>}
         </>
       )}
       {magnifierPoint && (draftRef.current || moveRef.current || resizeRef.current) && (
-        <div className="screenshot-coordinates" data-screenshot-coordinates="true" style={coordinatePanelStyle(magnifierPoint, bootstrap.bounds)}>{formatCursorCoordinate(magnifierPoint)}</div>
+        <div className="screenshot-coordinates" aria-hidden="true" data-screenshot-coordinates="true" style={coordinatePanelStyle(magnifierPoint, bootstrap.bounds)}>{formatCursorCoordinate(magnifierPoint)}</div>
       )}
       {magnifierPoint && (draftRef.current || moveRef.current || resizeRef.current) && (
         <CrosshairGuides point={magnifierPoint} bounds={bootstrap.bounds} />
@@ -670,9 +670,9 @@ function App() {
       {selection && <ThirdsGrid bounds={bootstrap.bounds} />}
       {selection && <Ruler bounds={bootstrap.bounds} />}
       {selection && <SelectionHandles selection={selection} />}
-      {!selecting && !selection && !showHelp && <div className="screenshot-idle-hint" data-screenshot-idle="true">{idleHint(t)}</div>}
+      {!selecting && !selection && !showHelp && <div className="screenshot-idle-hint" aria-live="polite" data-screenshot-idle="true">{idleHint(t)}</div>}
       {selection && !selecting && !moving && !resizing && !busyAction && !showHelp && <div className="screenshot-invite" data-screenshot-invite="true">{includeInvite(t)}</div>}
-      {modeHint(modeForState({ selecting, moving, resizing }), t) && <div className="screenshot-mode-hint" data-screenshot-mode="true">{modeHint(modeForState({ selecting, moving, resizing }), t)}</div>}
+      {modeHint(modeForState({ selecting, moving, resizing }), t) && <div className="screenshot-mode-hint" aria-hidden="true" data-screenshot-mode="true">{modeHint(modeForState({ selecting, moving, resizing }), t)}</div>}
       {showHelp && (
         <div className="screenshot-help" data-screenshot-help="true" data-screenshot-control role="dialog" aria-label={t('screenshot.help.title')} onPointerDown={(event) => event.stopPropagation()}>
           <div className="screenshot-help-title">{t('screenshot.help.title')}</div>
