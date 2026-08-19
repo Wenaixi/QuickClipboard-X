@@ -297,6 +297,12 @@ mod source_guards {
         assert!(schedule.contains("\"auto\""), "必须判断生命周期模式为 auto");
         assert!(schedule.contains("screenshot_auto_dispose_minutes.max(1)"), "必须读取自动释放分钟数");
         assert!(schedule.contains("dispose_generation == generation"), "代际不匹配必须放弃销毁");
+        // 定时器醒来后若存在进行中会话（用户中途开始处理选区），不得销毁窗口：
+        // 否则销毁瞬间会话正在执行的动作会丢失窗口上下文。
+        let still_valid = schedule
+            .find("dispose_generation == generation && state.sessions.phase().is_none()")
+            .expect("销毁守卫必须同时要求无进行中会话");
+        assert!(still_valid < schedule.find("window.destroy()").expect("缺少销毁调用"), "守卫必须先于销毁");
         assert!(schedule.contains("window.destroy()"), "超时后必须销毁窗口");
         // start_screenshot 必须递增代际使在飞定时器失效（rfind 取生产定义）。
         let bump = source
