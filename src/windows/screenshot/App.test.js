@@ -375,6 +375,19 @@ test('尺寸标签统一走格式化模块并含位置与百万像素', () => {
   assert.ok(source.includes('const position = formatSelectionPosition(selection, { dpr: bootstrap.dpr, monitorLeft: bootstrap.monitorLeft, monitorTop: bootstrap.monitorTop });'));
 });
 
+test('尺寸标签四要素以分隔符相连且渲染取实时选区', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  // 文本模型：四个要素（像素/比例/百万像素/位置）必须全部用 ` · ` 分隔符连接，
+  // 缺一个分隔符就会渲染成粘连文本；且分隔符必须来自常量拼接，保证渲染一致性。
+  assert.ok(source.includes("return `${pixels} · ${ratio} · ${megapixels} · ${position}`;"), '四要素必须以三个分隔符相连');
+  // 渲染接线：尺寸标签必须取实时选区（拖拽过程中即时更新），
+  // 且三个辅助函数（文本/类名/样式）必须使用同一实时选区表达式。
+  const liveCount = (source.match(/selectionSizeLabelText\(liveSelection \|\| selection, bootstrap\)/g) || []).length;
+  assert.ok(liveCount >= 1, '渲染必须取实时选区');
+  assert.ok(source.includes('selectionSizeLabelClass(liveSelection || selection, bootstrap.bounds)'), '类名必须取实时选区');
+  assert.ok(source.includes('selectionSizeLabelStyle(liveSelection || selection, bootstrap.bounds)'), '样式必须取实时选区');
+});
+
 test('尺寸标签随选区贴近边缘翻转防溢出', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   // 类名与内联样式两个辅助函数都必须调用放置函数，任何一处绕过都应被捕获。
