@@ -1,6 +1,8 @@
 import '@tabler/icons-webfont/dist/tabler-icons.min.css';
 import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { toast } from '@shared/store/toastStore';
 import SettingsSection from '../components/SettingsSection';
 import SettingItem from '../components/SettingItem';
 import Input from '@shared/components/ui/Input';
@@ -14,10 +16,11 @@ function AIConfigSection({
     t
   } = useTranslation();
   const [testing, setTesting] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
+  // 推荐模型必须是视觉模型：Qwen2-7B-Instruct 会被后端 ensure_vision_model 拒绝
+  // （含 instruct 且不含 vision/vl），列为推荐会让用户必然测试失败。
   const modelOptions = [{
-    value: 'Qwen/Qwen2-7B-Instruct',
-    label: 'Qwen2-7B-Instruct (推荐)'
+    value: 'Qwen/Qwen2.5-VL-7B-Instruct',
+    label: 'Qwen2.5-VL-7B-Instruct (推荐)'
   }, {
     value: 'deepseek-v3',
     label: 'DeepSeek V3'
@@ -33,11 +36,14 @@ function AIConfigSection({
   }];
   const handleTestConfig = async () => {
     setTesting(true);
-    setTimeout(() => setTesting(false), 2000);
-  };
-  const handleRefreshModels = async () => {
-    setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1000);
+    try {
+      await invoke('test_screenshot_ai_config');
+      toast.success(t('settings.aiConfig.testSuccess'));
+    } catch (error) {
+      toast.error(t('settings.aiConfig.testFailed', { error: String(error) }));
+    } finally {
+      setTesting(false);
+    }
   };
   return <SettingsSection title={t('settings.aiConfig.title')} description={t('settings.aiConfig.description')}>
       <SettingItem label={t('settings.aiConfig.apiKey')} description={t('settings.aiConfig.apiKeyDesc')}>
@@ -45,10 +51,7 @@ function AIConfigSection({
       </SettingItem>
 
       <SettingItem label={t('settings.aiConfig.model')} description={t('settings.aiConfig.modelDesc')}>
-        <div className="flex items-center gap-2">
-          <Select value={settings.aiModel} onChange={value => onSettingChange('aiModel', value)} options={modelOptions} className="w-64" />
-          <Button onClick={handleRefreshModels} loading={refreshing} variant="secondary" size="sm" icon={<i className="ti ti-refresh w-4 h-4"></i>} title={t('settings.aiConfig.refreshModels')} />
-        </div>
+        <Select value={settings.aiModel} onChange={value => onSettingChange('aiModel', value)} options={modelOptions} className="w-64" />
       </SettingItem>
 
       <SettingItem label={t('settings.aiConfig.baseUrl')} description={t('settings.aiConfig.baseUrlDesc')}>

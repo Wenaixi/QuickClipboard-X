@@ -860,7 +860,9 @@
       "refreshModels": "Refresh Models",
       "test": "Test Configuration",
       "testDesc": "Test if current AI configuration works",
-      "testButton": "Test Connection"
+      "testButton": "Test Connection",
+      "testSuccess": "AI configuration works",
+      "testFailed": "AI configuration test failed: {{error}}"
     },
     "translation": {
       "title": "AI Translation",
