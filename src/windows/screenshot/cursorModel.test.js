@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { cursorForEdge, cursorForSelectionHover } from './cursorModel.js';
 
 const bounds = { width: 1920, height: 1080 };
@@ -38,6 +39,22 @@ test('cursorForSelectionHover 选区外或无边选区返回 null', () => {
   const selection = { left: 400, top: 300, right: 700, bottom: 500, width: 300, height: 200 };
   assert.equal(cursorForSelectionHover({ x: 100, y: 100 }, selection, bounds), null);
   assert.equal(cursorForSelectionHover({ x: 550, y: 400 }, null, bounds), null);
+});
+
+test('cursorForEdge 八方向映射完整且悬停优先边缘后内部', () => {
+  const source = readFileSync(new URL('./cursorModel.js', import.meta.url), 'utf8');
+  // 源码护栏：8 个边缘方向的光标映射必须全部存在，缺任何一方向选区角点悬停就退化为十字。
+  for (const [edge, cursor] of [['n', 'ns-resize'], ['s', 'ns-resize'], ['e', 'ew-resize'], ['w', 'ew-resize'], ['ne', 'nesw-resize'], ['sw', 'nesw-resize'], ['nw', 'nwse-resize'], ['se', 'nwse-resize']]) {
+    assert.ok(source.includes(`${edge}: '${cursor}'`), `EDGE_CURSORS 必须包含 ${edge} 映射`);
+    assert.equal(cursorForEdge(edge), cursor, `cursorForEdge('${edge}') 必须返回 ${cursor}`);
+  }
+  // 行为属性：悬停时边缘/角点优先于内部（边缘点绝不返回 move），选区外返回 null。
+  const selection = { left: 500, top: 300, right: 700, bottom: 500 };
+  assert.equal(cursorForSelectionHover({ x: 699, y: 400 }, selection, bounds), 'ew-resize', '东边缘必须优先');
+  assert.equal(cursorForSelectionHover({ x: 699, y: 300 }, selection, bounds), 'nesw-resize', '东北角必须优先');
+  assert.equal(cursorForSelectionHover({ x: 600, y: 499 }, selection, bounds), 'ns-resize', '南边缘必须优先');
+  assert.equal(cursorForSelectionHover({ x: 600, y: 400 }, selection, bounds), 'move', '内部返回移动光标');
+  assert.equal(cursorForSelectionHover({ x: 100, y: 100 }, selection, bounds), null, '选区外返回 null');
 });
 
 test('cursorForSelectionHover 拒绝无效坐标或边界', () => {
