@@ -275,6 +275,51 @@ mod source_guards {
     }
 
     #[test]
+    fn window_selection_fully_outside_monitor_returns_none() {
+        // 窗口完全在显示器左侧之外（right < monitor.left），无可截图区域。
+        let monitor = crate::services::screenshot::MonitorRect::new(-1920, 0, 1920, 1080).unwrap();
+        let selection = super::window_selection_from_rect(
+            monitor,
+            super::PhysicalWindowRect { left: -4000, top: 0, right: -3000, bottom: 1080 },
+        );
+        assert!(selection.is_none(), "窗口完全在显示器外时不得产生选区");
+
+        // 窗口完全在显示器下方之外。
+        let below = super::window_selection_from_rect(
+            monitor,
+            super::PhysicalWindowRect { left: 0, top: 2000, right: 100, bottom: 3000 },
+        );
+        assert!(below.is_none(), "窗口完全在显示器下方时不得产生选区");
+    }
+
+    #[test]
+    fn window_selection_inside_monitor_keeps_exact_rect() {
+        let monitor = crate::services::screenshot::MonitorRect::new(-1920, 0, 1920, 1080).unwrap();
+        // 负坐标显示器上的完整内部窗口：坐标是显示器内相对值。
+        let selection = super::window_selection_from_rect(
+            monitor,
+            super::PhysicalWindowRect { left: -1800, top: 100, right: -800, bottom: 600 },
+        )
+        .expect("内部窗口应原样保留");
+        assert_eq!((selection.left, selection.top, selection.right, selection.bottom), (120, 100, 1120, 600));
+        assert_eq!((selection.width, selection.height), (1000, 500));
+    }
+
+    #[test]
+    fn window_selection_partially_overflowing_each_edge_is_clamped() {
+        let monitor = crate::services::screenshot::MonitorRect::new(-1920, 0, 1920, 1080).unwrap();
+        // 左上越界 + 右下越界：四侧同时夹紧。返回值是显示器内相对坐标：
+        // left -3000 夹到 0，right 100 在显示器内是 100-(-1920)=2020 超过宽度夹到 1920。
+        let selection = super::window_selection_from_rect(
+            monitor,
+            super::PhysicalWindowRect { left: -3000, top: -100, right: 100, bottom: 2000 },
+        )
+        .expect("部分越界窗口应保留显示器内区域");
+        assert_eq!((selection.left, selection.top, selection.right, selection.bottom), (0, 0, 1920, 1080));
+        assert_eq!((selection.width, selection.height), (1920, 1080));
+    }
+
+    #[test]
     fn window_selection_is_clamped_to_the_active_monitor() {
         let monitor = crate::services::screenshot::MonitorRect::new(-1920, 0, 1920, 1080).unwrap();
         let selection = super::window_selection_from_rect(
