@@ -461,6 +461,15 @@ test('选区建立后数字键快捷执行动作且快捷键提示展示', () =>
   assert.ok(source.includes('hotkeyForAction(action.id)'));
 });
 
+test('AI 未配置时工具栏禁用 AI 动作且数字键 4 引导进入设置', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  // 工具栏按钮：disabled 判定必须与可用性函数一致。
+  assert.ok(source.includes('disabled={Boolean(busyAction) || !actionIsEnabled(action.id, bootstrap)}'), '按钮禁用必须跟随可用性');
+  // completeScreenshot 内二次守卫：AI 未配置时按数字键 4 引导进入设置（与按钮点击一致）。
+  assert.ok(source.includes("if (action === 'ai') void openAiSettings();"), 'AI 未配置时数字键 4 必须引导进入设置');
+  assert.ok(source.includes('return action !== \'ai\' || (bootstrap.screenshotAiEnabled !== false && bootstrap.screenshotAiConfigured === true);'), 'AI 可用性判断必须要求已配置');
+});
+
 test('截图键盘微调接线调用 nudgeSelection 并同步选区状态', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('const next = nudgeSelection(selectionRef.current, nudgeX * step, nudgeY * step, bootstrap.bounds);'));
