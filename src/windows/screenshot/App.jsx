@@ -342,6 +342,10 @@ function App() {
       setMagnifierPoint(null);
       setMagnifierScale(DEFAULT_MAGNIFIER_SCALE);
       setActionError('');
+      // 复用窗口时复位跨会话 UI 状态：上次打开的帮助面板与处理中占用
+      // 若不清理会在下次快捷键复用窗口时闪现/卡死。
+      setShowHelp(false);
+      setBusyAction('');
       applySelectionStyle(rootRef.current, null);
       if (rootRef.current) rootRef.current.style.cursor = 'crosshair';
     });
