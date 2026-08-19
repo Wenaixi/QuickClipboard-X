@@ -519,3 +519,17 @@ test('normalizeBootstrap 缺失尺寸时以视口和 DPR 推导安全默认值',
     Object.defineProperty(globalThis, 'devicePixelRatio', { configurable: true, value: oldDpr });
   }
 });
+
+test('快速动作 initialAction 从配置事件接收并在指针释放后一次性消费', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  // 配置事件必须把后端初始动作写入 ref。
+  assert.ok(source.includes('initialActionRef.current = nextBootstrap.initialAction;'), 'configure 必须写入快速动作');
+  // 指针释放后读取并立即清空，确保同一会话内只触发一次。
+  assert.ok(source.includes('const action = initialActionRef.current;'), '指针释放必须读取快速动作');
+  assert.ok(source.includes("initialActionRef.current = '';"), '消费后必须清空快速动作');
+  assert.ok(source.includes('void completeScreenshot(action);'), '快速动作必须直接走完成流程');
+  // 顺序：读取 ref 必须在清空之前。
+  const readIndex = source.indexOf('const action = initialActionRef.current;');
+  const clearIndex = source.indexOf("initialActionRef.current = '';");
+  assert.ok(readIndex !== -1 && clearIndex !== -1 && readIndex < clearIndex, '必须先读取再清空');
+});
