@@ -166,6 +166,13 @@ test('初次拖拽按住 Shift 时实时走正方形框选', () => {
   assert.ok(source.includes('? squareSelection(draft.start, draft.end, bootstrap.bounds)'));
 });
 
+test('拖动收尾时非单击选区吸附到屏幕引导线且单击选窗不吸附', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('if (!clicked) finalSelection = magnetSelection(finalSelection, bootstrap.bounds);'));
+  assert.ok(source.includes('magnetSelection(resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds, { keepAspectRatio: event.shiftKey, fromCenter: event.ctrlKey }), bootstrap.bounds, { edge: resizing.edge })'));
+  assert.ok(source.includes('magnetSelection(nudgeSelection(moving.selectionStart, current.x - moving.start.x, current.y - moving.start.y, bootstrap.bounds), bootstrap.bounds)'));
+});
+
 test('松开时按住 Shift 生成正方形且跳过选窗逻辑', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('const square = event.shiftKey && !clicked ? squareSelection(draft.start, end, bootstrap.bounds) : null;'));
@@ -180,27 +187,27 @@ test('选区边缘按下进入调整大小模式', () => {
 
 test('调整大小拖拽按住 Shift 保持宽高比', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
-  // 分别锚定实时移动与收尾两条调用，防止任一路径丢失 Shift 传参。
-  assert.ok(source.includes('const next = resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds, { keepAspectRatio: event.shiftKey, fromCenter: event.ctrlKey });'));
-  assert.ok(source.includes('const finalSelection = resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds, { keepAspectRatio: event.shiftKey, fromCenter: event.ctrlKey });'));
+  // 分别锚定实时移动与收尾两条调用，防止任一路径丢失 Shift 传参或磁吸接线。
+  assert.ok(source.includes('const next = magnetSelection(resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds, { keepAspectRatio: event.shiftKey, fromCenter: event.ctrlKey }), bootstrap.bounds, { edge: resizing.edge });'));
+  assert.ok(source.includes('const finalSelection = magnetSelection(resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds, { keepAspectRatio: event.shiftKey, fromCenter: event.ctrlKey }), bootstrap.bounds, { edge: resizing.edge });'));
 });
 
 test('调整大小拖拽调用 resizeSelection 并实时同步选区', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
-  assert.ok(source.includes('const next = resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds, { keepAspectRatio: event.shiftKey, fromCenter: event.ctrlKey });'));
+  assert.ok(source.includes('const next = magnetSelection(resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds, { keepAspectRatio: event.shiftKey, fromCenter: event.ctrlKey }), bootstrap.bounds, { edge: resizing.edge });'));
   assert.ok(source.includes('selectionRef.current = next;'));
 });
 
 test('调整大小结束后保留选区且清理调整状态', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
-  assert.ok(source.includes('const finalSelection = resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds, { keepAspectRatio: event.shiftKey, fromCenter: event.ctrlKey });'));
+  assert.ok(source.includes('const finalSelection = magnetSelection(resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds, { keepAspectRatio: event.shiftKey, fromCenter: event.ctrlKey }), bootstrap.bounds, { edge: resizing.edge });'));
   assert.ok(source.includes('resizeRef.current = null;'));
   assert.ok(source.includes('selectionRef.current = finalSelection;'));
 });
 
 test('平移拖拽调用 nudgeSelection 并实时同步选区', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
-  assert.ok(source.includes('const next = nudgeSelection(moving.selectionStart, current.x - moving.start.x, current.y - moving.start.y, bootstrap.bounds);'));
+  assert.ok(source.includes('const next = magnetSelection(nudgeSelection(moving.selectionStart, current.x - moving.start.x, current.y - moving.start.y, bootstrap.bounds), bootstrap.bounds);'));
   assert.ok(source.includes('selectionRef.current = next;'));
 });
 
