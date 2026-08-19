@@ -375,6 +375,21 @@ test('初次拖拽按住 Shift 时实时走正方形框选', () => {
   assert.ok(source.includes('const next = selectionFromDraft(draft, event, bootstrap.bounds);'));
 });
 
+test('拖拽框选/移动/调整时实时显示尺寸标签且收尾清空', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  // 尺寸标签渲染必须同时接受 liveSelection 与 selection（拖拽中无正式选区）。
+  assert.ok(source.includes('{(liveSelection || selection) &&'), '尺寸标签必须支持拖拽中实时选区');
+  assert.ok(source.includes('selectionSizeLabelText(liveSelection || selection, bootstrap)'), '尺寸文本必须取实时选区');
+  // 三条移动路径（resize/move/draft）必须每帧同步实时选区。
+  const resizeSync = source.match(/magnetSelection\(resizeSelection/g);
+  const moveSync = source.match(/nudgeSelection\(moving\.selectionStart/g);
+  assert.ok(resizeSync && resizeSync.length >= 2, '调整大小实时路径必须存在');
+  assert.ok(source.includes('const next = selectionFromDraft(draft, event, bootstrap.bounds);\n    setLiveSelection(next);'), '拖拽框选必须实时同步');
+  assert.ok(source.includes('setLiveSelection(null);'), '交互收尾必须清空实时选区');
+  // 清空次数：resize + move + draft 三条 pointerUp 路径 + configure 重置。
+  assert.ok(source.split('setLiveSelection(null);').length >= 5, '收尾与重置路径都必须清空实时选区');
+});
+
 test('拖动收尾时非单击选区吸附到屏幕引导线且单击选窗不吸附', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('if (!clicked) finalSelection = magnetSelection(finalSelection, bootstrap.bounds);'));
