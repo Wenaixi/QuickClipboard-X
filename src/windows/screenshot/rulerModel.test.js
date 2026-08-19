@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { rulerMajorStep, rulerTicks } from './rulerModel.js';
 
 test('rulerMajorStep 按屏幕尺寸自适应主刻度间隔', () => {
@@ -43,6 +44,33 @@ test('rulerTicks 小数长度下主刻度标签完整且不越界', () => {
   assert.equal(majors[0].label, '0');
   assert.equal(majors[1].label, '100');
   assert.equal(majors[2].label, '200');
+});
+
+test('rulerTicks 标签为主刻度整数倍且文本整数并单调不越界', () => {
+  // 属性测试：任意合法长度下，
+  // ①带标签的刻度位置必须是主刻度间隔的整数倍（0 / majorStep / 2*majorStep ...）；
+  // ②标签文本必须是整数（不含小数），否则渲染会出现 99.99999 类脏值；
+  // ③刻度位置必须严格递增且不超过长度。
+  const source = readFileSync(new URL('./rulerModel.js', import.meta.url), 'utf8');
+  // 源码护栏：必须用整数计数循环（index 从 0 计数到 total，position = index * minorStep），
+  // 禁止浮点累加（position += minorStep），否则小数长度下漂移。
+  assert.ok(source.includes('for (let index = 0; index <= total; index += 1)'), '必须使用整数计数循环');
+  assert.ok(source.includes('const position = index * minorStep;'), '位置必须由计数乘步进得到');
+  assert.ok(!source.includes('position += minorStep'), '禁止浮点累加产生漂移');
+  for (const length of [300, 1080, 1365.33, 1920, 3840, 800, 1600]) {
+    const ticks = rulerTicks(length);
+    const majorStep = rulerMajorStep(length);
+    for (let i = 0; i < ticks.length; i += 1) {
+      const tick = ticks[i];
+      assert.ok(tick.position >= 0 && tick.position <= length, '刻度不得越界');
+      if (i > 0) assert.ok(ticks[i].position > ticks[i - 1].position, '刻度必须严格递增');
+      if (tick.label !== null) {
+        assert.equal(tick.position % majorStep, 0, '带标签刻度必须是主刻度整数倍');
+        assert.ok(Number.isInteger(tick.position), '标签文本对应的位置必须是整数');
+        assert.equal(tick.label, String(tick.position), '标签文本必须与位置一致');
+      }
+    }
+  }
 });
 
 test('rulerTicks 拒绝非正或非法长度', () => {
