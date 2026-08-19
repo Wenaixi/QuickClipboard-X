@@ -419,4 +419,42 @@ mod tests {
         assert_eq!(manager.phase(), None);
         assert!(manager.current().is_none());
     }
+
+    #[test]
+    fn committing_finish_retains_final_file_and_cleans_only_remaining_temp_files() {
+        let mut manager = ScreenshotSessionManager::default();
+        let monitor = MonitorRect::new(0, 0, 1920, 1080).unwrap();
+        let session_id = match manager.start(monitor, true) {
+            StartSessionResult::Started(session) => session.session_id().to_string(),
+            other => panic!("首次启动应创建会话，实际为 {other:?}"),
+        };
+        manager.begin_processing(&session_id).unwrap();
+        manager
+            .register_temp_file(&session_id, PathBuf::from("temporary/encoded.png"))
+            .unwrap();
+        manager
+            .register_temp_file(&session_id, PathBuf::from("temporary/capture.png"))
+            .unwrap();
+        manager
+            .mark_main_window_hidden(&session_id, MainWindowVisibilityRevision(3))
+            .unwrap();
+        manager.begin_commit(&session_id).unwrap();
+
+        let retained = PathBuf::from("temporary/encoded.png");
+        let cleanup = manager
+            .finish_and_retain_file(&session_id, MainWindowVisibilityRevision(3), &retained)
+            .unwrap();
+
+        assert_eq!(cleanup.session_id, session_id);
+        // 成功保留的最终文件必须从清理清单剔除，其余会话临时文件仍应清理。
+        assert_eq!(
+            cleanup.temp_files,
+            vec![PathBuf::from("temporary/capture.png")]
+        );
+        assert!(!cleanup.temp_files.contains(&retained));
+        assert!(cleanup.hide_overlay);
+        assert!(cleanup.restore_main_window);
+        assert_eq!(manager.phase(), None);
+        assert!(manager.current().is_none());
+    }
 }
