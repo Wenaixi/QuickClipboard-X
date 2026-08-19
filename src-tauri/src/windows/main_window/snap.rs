@@ -941,6 +941,9 @@ pub fn restore_from_snap(window: &WebviewWindow) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
 
+    // 贴边隐藏期间可能残留 WS_EX_TRANSPARENT(整窗穿透),恢复自由窗口时必须清掉,
+    // 否则鼠标无法操作窗口(唤出后只能快捷键)。
+    let _ = window.set_ignore_cursor_events(false);
     clear_snap();
     Ok(())
 }
@@ -1038,6 +1041,24 @@ mod tests {
             .expect("restore_from_snap 必须清理贴边状态");
         assert!(cancel < position, "取消动画必须位于 set_position 之前");
         assert!(cancel < clear, "取消动画必须位于 clear_snap 之前");
+    }
+
+
+    // 切片2:restore_from_snap 从贴边态恢复为自由窗口时必须清掉 WS_EX_TRANSPARENT,
+    // 否则窗口残留整窗穿透,鼠标无法操作。
+    #[test]
+    fn restore_from_snap_restores_interactive_after_position() {
+        let body = strip_line_comments(fn_body(snap_source(), "restore_from_snap"));
+        let position = body
+            .find("set_position")
+            .expect("restore_from_snap 必须包含位置恢复");
+        let interactive = body
+            .find("set_ignore_cursor_events(false)")
+            .expect("restore_from_snap 必须恢复鼠标交互(清 WS_EX_TRANSPARENT)");
+        assert!(
+            position < interactive,
+            "restore_from_snap 必须先落位再恢复交互"
+        );
     }
 
     // edge_monitor 50ms 轮询 + snap_ratio 双 None 时每 tick 都走
