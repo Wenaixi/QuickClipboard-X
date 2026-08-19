@@ -8,7 +8,7 @@ const HELP_ITEMS = [
   { id: 'pin', keys: ['Ctrl+P'], labelKey: 'screenshot.help.pin' },
   { id: 'fullscreen', keys: ['Ctrl+A'], labelKey: 'screenshot.help.fullscreen' },
   { id: 'cancel', keys: ['Esc'], labelKey: 'screenshot.help.cancel' },
-  { id: 'nudge', keys: ['方向键'], labelKey: 'screenshot.help.nudge' },
+  { id: 'nudge', keys: ['←↑→↓'], labelKey: 'screenshot.help.nudge' },
   { id: 'square', keys: ['Shift'], labelKey: 'screenshot.help.square' },
   { id: 'center', keys: ['Ctrl'], labelKey: 'screenshot.help.center' },
   { id: 'undo', keys: ['Ctrl+Z'], labelKey: 'screenshot.help.undo' },
