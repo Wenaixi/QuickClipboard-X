@@ -13,7 +13,7 @@ import { actionForHotkey, hotkeyForAction } from './actionModel.js';
 import { selectionLabelPlacement } from './labelModel.js';
 import { cursorForSelectionHover } from './cursorModel.js';
 import { lineStyle } from './annotationModel.js';
-import { readCenterPixel, formatRgb, hexFromRgb } from './colorModel.js';
+import { readCenterPixel, formatRgb } from './colorModel.js';
 import { magnifierScaleForWheel } from './magnifierZoomModel.js';
 import { formatPixelSize, formatMegapixels, formatAspectRatio, physicalSize } from './sizeModel.js';
 import { magnetSelection } from './magnetModel.js';
@@ -176,6 +176,18 @@ function magnifierCanvasStyle(point, bounds, scale = 6) {
   };
 }
 
+// 颜色板跟随放大镜翻转：放大镜贴底翻转上置时，颜色板放放大镜上方，
+// 避免 `top = panelTop + panelHeight + 4` 在贴底时溢出 bounds.height 被裁掉。
+function colorPanelStyle(magnifierLayout, bounds) {
+  const panelTop = parseFloat(magnifierLayout.top);
+  const panelHeight = parseFloat(magnifierLayout.height);
+  const below = panelTop + panelHeight + 4;
+  if (below + 20 <= bounds.height) {
+    return { left: magnifierLayout.left, top: `${below}px`, backgroundColor: undefined };
+  }
+  return { left: magnifierLayout.left, top: `${Math.max(0, panelTop - 24)}px`, backgroundColor: undefined };
+}
+
 function applySelectionStyle(element, selection) {
   if (!element) return;
   if (!selection) {
@@ -276,6 +288,9 @@ function App() {
         canvas.width,
         canvas.height
       );
+      // 必须在绘制任何叠加线之前读取中心像素：十字线 alpha=0.85 会污染
+      // 中心像素的 RGB，导致颜色板永远偏红。
+      const centerPixel = readCenterPixel(context.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height);
       const grid = magnifierGridLines(geometry);
       const cross = magnifierCrosshair(geometry);
       context.strokeStyle = 'rgba(255, 255, 255, 0.28)';
@@ -291,8 +306,7 @@ function App() {
       context.moveTo(0, cross.y + 0.5);
       context.lineTo(canvas.width, cross.y + 0.5);
       context.stroke();
-      const pixel = readCenterPixel(context.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height);
-      setMagnifierColor(pixel);
+      setMagnifierColor(centerPixel);
     };
     image.src = bootstrap.magnifierBackground;
   }, [bootstrap.magnifierBackground, bootstrap.bounds, magnifierPoint, magnifierScale]);
@@ -632,7 +646,7 @@ function App() {
       {bootstrap.screenshotMagnifierEnabled && bootstrap.magnifierBackground && magnifierPoint && (draftRef.current || moveRef.current || resizeRef.current) && (
         <>
           <canvas className="screenshot-magnifier" data-screenshot-magnifier="true" style={magnifierLayout} ref={magnifierCanvasRef} />
-          {magnifierColor && <div className="screenshot-color" data-screenshot-color="true" style={{ left: magnifierLayout.left, top: `${parseFloat(magnifierLayout.top) + parseFloat(magnifierLayout.height) + 4}px`, backgroundColor: hexFromRgb(magnifierColor) }}>{formatRgb(magnifierColor)}</div>}
+          {magnifierColor && <div className="screenshot-color" data-screenshot-color="true" style={colorPanelStyle(magnifierLayout, bootstrap.bounds)}>{formatRgb(magnifierColor)}</div>}
         </>
       )}
       {magnifierPoint && (draftRef.current || moveRef.current || resizeRef.current) && (

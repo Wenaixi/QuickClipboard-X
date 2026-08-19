@@ -111,7 +111,9 @@ test('放大镜背景采样按 DPR 换算物理像素且色块不遮挡面板', 
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('geometry.source.cols * dpr'));
   assert.ok(source.includes('const magnifierLayout = useMemo(() => ('));
-  assert.ok(source.includes('parseFloat(magnifierLayout.top) + parseFloat(magnifierLayout.height) + 4'));
+  // 颜色板必须跟随放大镜翻转，贴底时放到放大镜上方避免溢出被裁。
+  assert.ok(source.includes('function colorPanelStyle(magnifierLayout, bounds)'));
+  assert.ok(source.includes('below + 20 <= bounds.height'));
 });
 
 test('完成动作成功后清理占用且 AI 未配置回落配置入口', () => {
@@ -242,12 +244,18 @@ test('滚轮调整放大镜缩放倍率并随缩放重绘', () => {
 
 test('放大镜绘制后读取中心像素颜色并渲染读数标签', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
-  assert.ok(source.includes('readCenterPixel(context.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height)'));
-  assert.ok(source.includes('setMagnifierColor(pixel);'));
+  // 中心像素必须在十字线叠加之前读取，否则颜色板显示红色污染后的伪色。
+  // 顺序类不变量必须比较下标（§10.3 铁律 3）：只 contains 区分不了读取在绘制前还是后。
+  const readIndex = source.indexOf('const centerPixel = readCenterPixel(context.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height);');
+  assert.ok(readIndex !== -1, '放大镜必须读取中心像素');
+  const crossIndex = source.indexOf("context.strokeStyle = 'rgba(255, 80, 80, 0.85)'");
+  assert.ok(crossIndex !== -1, '放大镜必须绘制红色十字线');
+  assert.ok(readIndex < crossIndex, '中心像素读取必须早于十字线绘制');
+  assert.ok(source.includes('setMagnifierColor(centerPixel);'));
   assert.ok(source.includes('setMagnifierColor(null);'));
   assert.ok(source.includes('data-screenshot-color="true"'));
   assert.ok(source.includes('formatRgb(magnifierColor)'));
-  assert.ok(source.includes('hexFromRgb(magnifierColor)'));
+  assert.ok(source.includes('colorPanelStyle(magnifierLayout, bootstrap.bounds)'));
 });
 
 test('放大镜 canvas 用几何绘制背景快照且关闭平滑', () => {
