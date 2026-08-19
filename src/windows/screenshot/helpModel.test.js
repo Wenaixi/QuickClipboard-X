@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { helpEntries, isHelpShortcut } from './helpModel.js';
 
 const t = (key) => ({
@@ -53,4 +54,20 @@ test('isHelpShortcut 拒绝普通键与带修饰键的 F1', () => {
   assert.equal(isHelpShortcut({ key: 'F1', ctrlKey: true, metaKey: false, altKey: false }), false);
   assert.equal(isHelpShortcut({ key: '?', ctrlKey: true, metaKey: false, altKey: false }), false);
   assert.equal(isHelpShortcut(null), false);
+});
+
+test('帮助条目 labelKey 必须在双语言包中存在', () => {
+  const source = readFileSync(new URL('./helpModel.js', import.meta.url), 'utf8');
+  const labelKeys = [...source.matchAll(/labelKey: '([^']+)'/g)].map((match) => match[1]);
+  assert.ok(labelKeys.length >= 10, '帮助模型必须定义全部快捷键条目');
+  for (const locale of ['zh-CN', 'en-US']) {
+    const messages = JSON.parse(readFileSync(new URL(`../../shared/locales/${locale}.json`, import.meta.url)));
+    for (const key of labelKeys) {
+      const parts = key.split('.');
+      let value = messages;
+      for (const part of parts) value = value?.[part];
+      assert.equal(typeof value, 'string', `${locale} 缺少帮助条目 ${key}`);
+      assert.ok(value.length > 0, `${locale} 帮助条目 ${key} 文案为空`);
+    }
+  }
 });
