@@ -605,6 +605,28 @@ test('createRafWriter 在一帧内只提交最后一次几何', () => {
   assert.deepEqual(writes, ['second', 'third']);
 });
 
+test('createRafWriter cancel 后同帧内再次调度不丢值', () => {
+  const callbacks = [];
+  const writes = [];
+  const writer = createRafWriter(
+    (value) => writes.push(value),
+    (callback) => {
+      callbacks.push(callback);
+      return callbacks.length;
+    }
+  );
+
+  writer.schedule('first');
+  writer.cancel();
+  writer.schedule('second');
+  // 第一帧回调是 cancel 前的过期帧：必须被丢弃。
+  callbacks.shift()();
+  assert.deepEqual(writes, []);
+  // 第二帧回调写入 cancel 后的新值，不能因 cancel 复位调度标志而丢值。
+  callbacks.shift()();
+  assert.deepEqual(writes, ['second']);
+});
+
 test('createRafWriter 取消后不再写入过期几何', () => {
   const callbacks = [];
   const writes = [];

@@ -346,7 +346,8 @@ export function createRafWriter(write, requestFrame = globalThis.requestAnimatio
     requestFrame(() => {
       scheduled = false;
       if (scheduledGeneration !== generation) {
-        pendingValue = undefined;
+        // 过期帧直接丢弃，不再触碰共享 pendingValue：
+        // cancel 后同帧内新 schedule 的值不能被旧帧回调清掉。
         return;
       }
       const nextValue = pendingValue;
@@ -360,6 +361,8 @@ export function createRafWriter(write, requestFrame = globalThis.requestAnimatio
     cancel() {
       generation += 1;
       pendingValue = undefined;
+      // 复位调度标志：cancel 后同帧内再次 schedule 必须重新排队，否则值会被静默丢弃。
+      scheduled = false;
     },
   };
 }
