@@ -26,6 +26,7 @@ import { formatSelectionPosition } from './positionModel.js';
 import { selectionFromDraft, resetInteractionState } from './draftModel.js';
 import { helpEntries, isHelpShortcut } from './helpModel.js';
 import { canResetSelection } from './resetModel.js';
+import { fullScreenSelection } from './fullScreenModel.js';
 import {
   createRafWriter,
   hitSelectionEdge,
@@ -543,6 +544,20 @@ function App() {
       if (event.key === 'Escape' && (!selectionRef.current || canResetSelection(selectionRef.current))) { event.preventDefault(); void cancelScreenshot(); return; }
       if (event.target instanceof Element && event.target.closest('[data-screenshot-control]')) return;
       if (isHelpShortcut(event)) { event.preventDefault(); setShowHelp((current) => !current); return; }
+      if (event.ctrlKey && event.key.toLowerCase() === 'a') {
+        event.preventDefault();
+        if (selectionRef.current) {
+          selectionHistoryRef.current = pushSelectionHistory(selectionHistoryRef.current, selectionRef.current);
+        }
+        const next = fullScreenSelection(bootstrap.bounds);
+        selectionRef.current = next;
+        setSelecting(false);
+        setMoving(false);
+        setResizing(false);
+        setSelection(next);
+        applySelectionStyle(rootRef.current, next);
+        return;
+      }
       if (!selectionRef.current || busyAction) return;
       const [nudgeX, nudgeY] = NUDGE_DIRECTIONS[event.key] || [];
       if (nudgeX !== undefined) {
