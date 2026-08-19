@@ -622,6 +622,54 @@ mod tests {
     }
 
     #[test]
+    fn recognize_image_validates_config_before_encoding_image() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/screenshot/ai_vision.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读取 AI 视觉源码失败");
+        let start = source
+            .find("pub async fn recognize_image")
+            .expect("缺少识别入口");
+        let end = source[start..]
+            .find("#[cfg(test)]")
+            .map(|offset| start + offset)
+            .expect("缺少识别函数结束锚点");
+        let body = &source[start..end];
+        // 配置校验必须先于图片编码：无效配置不应触发图片读取与编码。
+        let not_configured = body.find("AiVisionError::NotConfigured").expect("缺少未配置守卫");
+        let vision_model = body.find("ensure_vision_model(model)?").expect("缺少视觉模型守卫");
+        let base_url = body.find("normalized_base_url(base_url)?").expect("缺少地址归一化");
+        let encode = body.find("encode_image(&image_path)").expect("缺少图片编码");
+        assert!(
+            not_configured < vision_model && vision_model < base_url && base_url < encode,
+            "识别必须按 配置校验→视觉模型→地址归一化→图片编码 顺序执行"
+        );
+    }
+
+    #[test]
+    fn recognition_retry_hint_only_injected_on_retry_attempts() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/screenshot/ai_vision.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读取 AI 视觉源码失败");
+        let start = source
+            .find("async fn recognize_encoded_image")
+            .expect("缺少编码识别函数");
+        let end = source[start..]
+            .find("pub async fn recognize_image")
+            .map(|offset| start + offset)
+            .expect("缺少识别函数结束锚点");
+        let body = &source[start..end];
+        // 重试提示只应注入到后续尝试（attempt == 0 时为空），防止首轮提示污染结果。
+        assert!(body.contains("let retry_hint = if attempt == 0 {"), "重试提示必须按尝试次数分支");
+        assert!(body.contains("\"\""), "首次尝试不得注入重试提示");
+        assert!(body.contains("MAX_RECOGNITION_ATTEMPTS"), "必须使用重试次数常量");
+        assert!(body.contains("if !retry_hint.is_empty()"), "仅非空提示才追加内容");
+    }
+
+    #[test]
     fn errors_do_not_include_credentials_or_raw_response() {
         let error = AiVisionError::Request("secret-key raw response".to_string()).to_string();
         assert!(!error.contains("secret-key"));
