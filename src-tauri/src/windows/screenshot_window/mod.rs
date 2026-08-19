@@ -370,6 +370,11 @@ mod source_guards {
         let existing = body
             .find("if existing {\n        // 已有会话：窗口已按原显示器配置，仅重新显示与聚焦")
             .expect("已有会话提前返回分支缺失");
+        assert!(
+            body.find("register_screenshot_temp_file(session_id, stored.absolute_path.clone()) {\n        let _ = std::fs::remove_file(&stored.absolute_path);\n        finish_failed_screenshot(app, session_id);\n        return Err(error);")
+                .is_some(),
+            "register 失败必须与其它失败路径对称清理"
+        );
         let busy_guard = body
             .find("if !matches!(STATE.lock().sessions.phase(), Some(SessionPhase::Selecting)) {")
             .expect("已有会话分支缺少处理中拒绝重入");
@@ -749,6 +754,7 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
     }
     if let Err(error) = register_screenshot_temp_file(session_id, stored.absolute_path.clone()) {
         let _ = std::fs::remove_file(&stored.absolute_path);
+        finish_failed_screenshot(app, session_id);
         return Err(error);
     }
 
@@ -880,10 +886,14 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
     let plan = {
         let mut state = STATE.lock();
         let revision = MainWindowVisibilityRevision(state.visibility_revision);
-        state
-            .sessions
-            .finish_and_retain_file(session_id, revision, &stored.absolute_path)
-            .map_err(|e| format!("完成截图会话失败: {e:?}"))?
+        match state.sessions.finish_and_retain_file(session_id, revision, &stored.absolute_path) {
+            Ok(plan) => plan,
+            Err(error) => {
+                // 与其它失败路径保持对称：完成失败也走统一失败清理，避免会话残留。
+                finish_failed_screenshot(app, session_id);
+                return Err(format!("完成截图会话失败: {error:?}"));
+            }
+        }
     };
     cleanup_plan(plan, app)
 }
