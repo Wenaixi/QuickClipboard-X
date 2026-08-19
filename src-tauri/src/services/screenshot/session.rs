@@ -367,6 +367,26 @@ mod tests {
     }
 
     #[test]
+    fn finish_and_retain_file_removes_retained_file_before_taking_cleanup() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/screenshot/session.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读取会话源码失败");
+        let start = source.find("pub fn finish_and_retain_file").expect("缺少保留文件完成函数");
+        let end = source[start..]
+            .find("pub fn mark_main_window_hidden")
+            .map(|offset| start + offset)
+            .expect("缺少函数结束锚点");
+        let body = &source[start..end];
+        // 若顺序颠倒，take_cleanup 的清理计划会包含保留文件，cleanup_plan 将删除
+        // 刚写入历史库的最终 PNG——顺序不变量必须锁定。
+        let retain = body.find("session.temp_files.retain").expect("缺少保留文件剔除");
+        let take = body.find("self.take_cleanup").expect("缺少清理计划获取");
+        assert!(retain < take, "必须先剔除保留文件再取清理计划");
+    }
+
+    #[test]
     fn cancelled_processing_session_cannot_finish_a_new_session() {
         let mut manager = ScreenshotSessionManager::default();
         let monitor = MonitorRect::new(0, 0, 1920, 1080).unwrap();
