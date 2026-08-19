@@ -163,6 +163,26 @@ mod tests {
     }
 
     #[test]
+    fn history_update_event_uses_store_id_and_notifies_frontend() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/screenshot/actions.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读取截图动作源码失败");
+        // emit_screenshot_history_update 必须用 store 返回的 clipboard_id 读取历史项。
+        // 切片终点锚定测试模块：尾部含测试自身断言字面量会自指误命中（§10.4）。
+        let emit_start = source.find("pub fn emit_screenshot_history_update").expect("缺少历史事件函数");
+        let emit_end = source[emit_start..]
+            .find("#[cfg(test)]")
+            .map(|offset| emit_start + offset)
+            .expect("缺少测试模块锚点");
+        let emit_body = &source[emit_start..emit_end];
+        assert!(emit_body.contains("get_clipboard_item_by_id(clipboard_id)"), "必须用 store id 读取历史项");
+        assert!(emit_body.contains("kind: \"created\""), "必须发出 created 事件");
+        assert!(emit_body.contains("emit_clipboard_updated_event"), "必须通知前端主窗口");
+    }
+
+    #[test]
     fn screenshot_history_content_contains_content_addressed_image_reference() {
         let stored = StoredScreenshot {
             relative_path: "clipboard_images/0123456789abcdef.png".to_string(),
