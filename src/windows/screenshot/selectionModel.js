@@ -89,6 +89,32 @@ export function selectionForPointerGesture(start, end, bounds, windowSelections 
   return normalizeSelection(start, end, bounds);
 }
 
+export function nudgeSelection(selection, dx, dy, bounds) {
+  if (!bounds || !Number.isFinite(bounds.width) || !Number.isFinite(bounds.height) || bounds.width <= 0 || bounds.height <= 0) {
+    throw new RangeError('边界尺寸必须为正数');
+  }
+  assertFiniteNumber(dx, '横向位移');
+  assertFiniteNumber(dy, '纵向位移');
+
+  const current = normalizeSelection(
+    { x: selection.left, y: selection.top },
+    { x: selection.right, y: selection.bottom },
+    bounds
+  );
+  const maxLeft = Math.max(0, bounds.width - current.width);
+  const maxTop = Math.max(0, bounds.height - current.height);
+  const left = clamp(current.left + dx, 0, maxLeft);
+  const top = clamp(current.top + dy, 0, maxTop);
+  return {
+    left,
+    top,
+    right: left + current.width,
+    bottom: top + current.height,
+    width: current.width,
+    height: current.height,
+  };
+}
+
 export function selectionToPhysical(selection, devicePixelRatio, physicalBounds) {
   if (!physicalBounds || physicalBounds.width <= 0 || physicalBounds.height <= 0) {
     throw new RangeError('边界尺寸必须为正数');

@@ -4,6 +4,7 @@ import {
   createRafWriter,
   isCurrentGesture,
   normalizeSelection,
+  nudgeSelection,
   selectionForPointerGesture,
   selectionFromPhysical,
   selectionToPhysical,
@@ -184,6 +185,71 @@ test('selectionToPhysical 不允许越过物理显示器边界', () => {
       width: 2,
       height: 2,
     }
+  );
+});
+
+test('nudgeSelection 按 1px 移动选区并保持尺寸不变', () => {
+  const moved = nudgeSelection(
+    { left: 100, top: 80, right: 300, bottom: 240, width: 200, height: 160 },
+    1,
+    1,
+    bounds
+  );
+
+  assert.deepEqual(selectionValues(moved), {
+    left: 101,
+    top: 81,
+    right: 301,
+    bottom: 241,
+    width: 200,
+    height: 160,
+  });
+});
+
+test('nudgeSelection 在边界处夹紧且不改变尺寸', () => {
+  const moved = nudgeSelection(
+    { left: 0, top: 0, right: 200, bottom: 160, width: 200, height: 160 },
+    -5,
+    -5,
+    bounds
+  );
+
+  assert.deepEqual(selectionValues(moved), {
+    left: 0,
+    top: 0,
+    right: 200,
+    bottom: 160,
+    width: 200,
+    height: 160,
+  });
+});
+
+test('nudgeSelection 支持 10px 快速步长并夹在右下方边界', () => {
+  const moved = nudgeSelection(
+    { left: 700, top: 500, right: 780, bottom: 580, width: 80, height: 80 },
+    10,
+    10,
+    bounds
+  );
+
+  assert.deepEqual(selectionValues(moved), {
+    left: 710,
+    top: 510,
+    right: 790,
+    bottom: 590,
+    width: 80,
+    height: 80,
+  });
+});
+
+test('nudgeSelection 拒绝无效边界或非有限位移', () => {
+  assert.throws(
+    () => nudgeSelection({ left: 0, top: 0, right: 1, bottom: 1 }, 1, 1, { width: 0, height: 100 }),
+    /边界尺寸必须为正数/
+  );
+  assert.throws(
+    () => nudgeSelection({ left: 0, top: 0, right: 1, bottom: 1 }, Number.NaN, 1, bounds),
+    /横向位移 必须是有限数字/
   );
 });
 
