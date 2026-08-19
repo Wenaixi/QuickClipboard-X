@@ -62,6 +62,13 @@ pub fn start_edge_monitoring() {
                 continue;
             }
 
+            // 截图会话活跃期间抑制贴边悬浮：截图界面是全屏置顶遮罩，
+            // 鼠标移到屏幕边缘框选时贴边主窗口若弹出会遮挡选区并造成误触。
+            if crate::windows::screenshot_window::is_screenshot_active() {
+                std::thread::sleep(Duration::from_millis(100));
+                continue;
+            }
+
             // 拖拽时跳过监控
             if !state.is_snapped || state.is_dragging {
                 std::thread::sleep(Duration::from_millis(100));
@@ -253,6 +260,18 @@ mod tests {
         assert!(
             body.contains("return;"),
             "worker 停止条件必须直接退出线程"
+        );
+    }
+
+    #[test]
+    fn screenshot_session_suppresses_edge_hover_while_active() {
+        let source = source_file("src/windows/main_window/edge_monitor.rs");
+        let body = strip_line_comments(fn_body(&source, "start_edge_monitoring"));
+        // 截图会话活跃期间必须抑制贴边悬浮，否则用户框选到屏幕边缘时
+        // 被截图隐藏的主窗口会被 edge_monitor 弹回遮挡选区。
+        assert!(
+            body.contains("crate::windows::screenshot_window::is_screenshot_active()"),
+            "start_edge_monitoring 必须检查截图会话活跃状态"
         );
     }
 
