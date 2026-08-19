@@ -37,29 +37,6 @@ pub fn init_pin_image_window() {
     PIN_IMAGE_DATA_MAP.get_or_init(|| Mutex::new(HashMap::new()));
 }
 
-// 更新贴图图片文件路径
-pub fn update_pin_image_file(label: &str, new_file_path: String) {
-    let mut map = lock_pin_data();
-    if let Some(data) = map.get_mut(label) {
-        data.file_path = new_file_path;
-    }
-}
-
-// 更新贴图图片数据
-pub fn update_pin_image_data(
-    label: &str,
-    new_file_path: String,
-    original_image_path: Option<String>,
-    edit_data: Option<String>,
-) {
-    let mut map = lock_pin_data();
-    if let Some(data) = map.get_mut(label) {
-        data.file_path = new_file_path;
-        data.original_image_path = original_image_path;
-        data.edit_data = edit_data;
-    }
-}
-
 
 // 从文件路径创建贴图窗口
 #[tauri::command]
@@ -477,6 +454,40 @@ mod tests {
     static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
     fn lock_serial() -> std::sync::MutexGuard<'static, ()> {
         SERIAL.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    #[test]
+    fn pin_image_update_functions_are_not_reintroduced() {
+        // 死功能链：后端的两个零调用更新函数与前端无发射端的刷新监听
+        // 一并删除后不得回归。注释不得出现被断言标识符（§10.4 自命中陷阱）。
+        let read_self = || {
+            std::fs::read_to_string(format!(
+                "{}/src/windows/pin_image_window/pin_image_window.rs",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .expect("读取贴图窗口源码失败")
+        };
+        let code = read_self()
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        // 断言目标用拆分拼接构造：本测试读自己源码，若断言语句直接写完整
+        // 标识符会自命中永远红（§10.4 自指陷阱）。
+        let dead_fn_a = ["update_pin_", "image_file"].concat();
+        let dead_fn_b = ["update_pin_", "image_data"].concat();
+        let dead_event = ["pin-", "image:refresh"].concat();
+        assert!(
+            !code.contains(&dead_fn_a) && !code.contains(&dead_fn_b),
+            "后端零调用更新函数不得重新引入"
+        );
+        assert!(!code.contains(&dead_event), "后端不得重新引入刷新事件发射");
+        let front = std::fs::read_to_string(format!(
+            "{}/../src/windows/pinImage/index.js",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读取贴图前端源码失败");
+        assert!(!front.contains(&dead_event), "前端死监听不得重新引入");
     }
 
     #[test]
