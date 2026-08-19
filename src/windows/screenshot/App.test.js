@@ -70,6 +70,16 @@ test('放大镜拖拽时更新指针点并在结束/取消时清空', () => {
   assert.ok(source.includes('setMagnifierPoint(null);'));
 });
 
+test('放大镜绘制后读取中心像素颜色并渲染读数标签', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('readCenterPixel(context.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height)'));
+  assert.ok(source.includes('setMagnifierColor(pixel);'));
+  assert.ok(source.includes('setMagnifierColor(null);'));
+  assert.ok(source.includes('data-screenshot-color="true"'));
+  assert.ok(source.includes('formatRgb(magnifierColor)'));
+  assert.ok(source.includes('hexFromRgb(magnifierColor)'));
+});
+
 test('放大镜 canvas 用几何绘制背景快照且关闭平滑', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('context.imageSmoothingEnabled = false;'));

@@ -39,6 +39,7 @@ button { font: inherit; }
 .screenshot-selection-size { position: absolute; right: 0; bottom: 100%; margin-bottom: 6px; padding: 3px 6px; border-radius: 4px; color: #fff; background: rgba(0, 0, 0, 0.72); font-size: 12px; line-height: 1.2; white-space: nowrap; }
 .screenshot-selection-size-below { top: 100%; bottom: auto; margin-top: 6px; margin-bottom: 0; }
 .screenshot-selection-line { border-style: solid; border-width: 0; }
+.screenshot-color { position: absolute; z-index: 3; pointer-events: none; padding: 2px 6px; border-radius: 3px; color: #fff; background: rgba(0, 0, 0, 0.72); font-size: 11px; line-height: 1.4; white-space: nowrap; }
 .screenshot-selection-size-left { right: auto; left: 0; }
 
 .screenshot-toolbar { position: absolute; z-index: 4; display: flex; align-items: center; gap: 4px; min-height: 48px; padding: 6px; border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 8px; background: rgba(24, 24, 27, 0.94); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.28); pointer-events: auto; }
