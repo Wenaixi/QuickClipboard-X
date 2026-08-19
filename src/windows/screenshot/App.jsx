@@ -233,6 +233,8 @@ function App() {
     devicePixelRatio: globalThis.devicePixelRatio,
   }));
   const [selection, setSelection] = useState(null);
+  // 拖拽/移动/调整中的实时选区：每帧同步用于尺寸标签，避免等待 pointerUp 才显示（ShareX 公开行为）。
+  const [liveSelection, setLiveSelection] = useState(null);
   const [showHelp, setShowHelp] = useState(false);
   const [selecting, setSelecting] = useState(false);
   const [moving, setMoving] = useState(false);
@@ -336,6 +338,7 @@ function App() {
       gestureIdRef.current += 1;
       selectionHistoryRef.current = [];
       resetInteractionState({ draftRef, selectionRef, moveRef, resizeRef, setSelection, setSelecting, setMoving, setResizing });
+      setLiveSelection(null);
       setMagnifierPoint(null);
       setMagnifierScale(DEFAULT_MAGNIFIER_SCALE);
       setActionError('');
@@ -467,6 +470,7 @@ function App() {
       setMagnifierPoint(current);
       const next = magnetSelection(resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds, { keepAspectRatio: event.shiftKey, fromCenter: event.ctrlKey }), bootstrap.bounds, { edge: resizing.edge });
       selectionRef.current = next;
+      setLiveSelection(next);
       rafWriterRef.current?.schedule(next);
       return;
     }
@@ -476,6 +480,7 @@ function App() {
       setMagnifierPoint(current);
       const next = magnetSelection(nudgeSelection(moving.selectionStart, current.x - moving.start.x, current.y - moving.start.y, bootstrap.bounds), bootstrap.bounds);
       selectionRef.current = next;
+      setLiveSelection(next);
       rafWriterRef.current?.schedule(next);
       return;
     }
@@ -490,6 +495,7 @@ function App() {
     draft.end = pointFromPointerEvent(event, root);
     setMagnifierPoint(draft.end);
     const next = selectionFromDraft(draft, event, bootstrap.bounds);
+    setLiveSelection(next);
     rafWriterRef.current?.schedule(next);
   };
 
@@ -530,6 +536,7 @@ function App() {
       applySelectionStyle(root, finalSelection);
       selectionRef.current = finalSelection;
       setSelection(finalSelection);
+      setLiveSelection(null);
       return;
     }
     const moving = moveRef.current;
@@ -547,6 +554,7 @@ function App() {
       applySelectionStyle(root, finalSelection);
       selectionRef.current = finalSelection;
       setSelection(finalSelection);
+      setLiveSelection(null);
       return;
     }
     const draft = draftRef.current;
@@ -585,6 +593,7 @@ function App() {
     applySelectionStyle(root, finalSelection);
     selectionRef.current = finalSelection;
     setSelection(finalSelection);
+    setLiveSelection(null);
     setSelecting(false);
     setMoving(false);
     setResizing(false);
@@ -661,7 +670,7 @@ function App() {
       <div className="screenshot-mask screenshot-mask-left" aria-hidden="true" />
       <div className="screenshot-mask screenshot-mask-right" aria-hidden="true" />
       <div className="screenshot-mask screenshot-mask-bottom" aria-hidden="true" />
-      <div className="screenshot-selection screenshot-selection-line" aria-hidden="true" style={selectionLineStyle()}>{selection && <span className={selectionSizeLabelClass(selection, bootstrap.bounds)} style={selectionSizeLabelStyle(selection, bootstrap.bounds)}>{selectionSizeLabelText(selection, bootstrap)}</span>}</div>
+      <div className="screenshot-selection screenshot-selection-line" aria-hidden="true" style={selectionLineStyle()}>{(liveSelection || selection) && <span className={selectionSizeLabelClass(liveSelection || selection, bootstrap.bounds)} style={selectionSizeLabelStyle(liveSelection || selection, bootstrap.bounds)}>{selectionSizeLabelText(liveSelection || selection, bootstrap)}</span>}</div>
       {selection && <div className="screenshot-toolbar" style={toolbarStyle} role="toolbar" aria-label={t('screenshot.toolbarLabel')} data-screenshot-control onPointerDown={(event) => event.stopPropagation()}>{ACTIONS.map((action) => { const label = actionLabel(action.id, t); return <button key={action.id} type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction) || !actionIsEnabled(action.id, bootstrap)} onClick={() => void completeScreenshot(action.id)} title={t('screenshot.shortcutHint', { label, shortcut: [action.shortcut, hotkeyForAction(action.id)].filter(Boolean).join(' / ') })}>{busyAction === action.id ? t('screenshot.processing') : label}</button>; })}{!bootstrap.screenshotAiConfigured && <button type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction)} onClick={() => void openAiSettings()}>{t('screenshot.actions.configureAi')}</button>}</div>}
       {bootstrap.screenshotMagnifierEnabled && bootstrap.magnifierBackground && magnifierPoint && (draftRef.current || moveRef.current || resizeRef.current) && (
         <>
