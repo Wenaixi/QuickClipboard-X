@@ -24,6 +24,7 @@ import { selectionHandles } from './handleModel.js';
 import { formatSelectionPosition } from './positionModel.js';
 import { selectionFromDraft, resetInteractionState } from './draftModel.js';
 import { helpEntries, isHelpShortcut } from './helpModel.js';
+import { canResetSelection } from './resetModel.js';
 import {
   createRafWriter,
   hitSelectionEdge,
@@ -523,7 +524,7 @@ function App() {
 
   useEffect(() => {
     const handleKeyDown = (event) => {
-      if (event.key === 'Escape') { event.preventDefault(); void cancelScreenshot(); return; }
+      if (event.key === 'Escape' && (!selectionRef.current || canResetSelection(selectionRef.current))) { event.preventDefault(); void cancelScreenshot(); return; }
       if (event.target instanceof Element && event.target.closest('[data-screenshot-control]')) return;
       if (isHelpShortcut(event)) { event.preventDefault(); setShowHelp((current) => !current); return; }
       if (!selectionRef.current || busyAction) return;
@@ -564,7 +565,7 @@ function App() {
   }, [bootstrap.sessionId, busyAction]);
 
   return (
-    <main ref={rootRef} className="screenshot-root" data-selection-active="false" data-selecting={selecting ? 'true' : 'false'} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={cancelScreenshot} onDoubleClick={handleDoubleClick} onWheel={handleWheel} onContextMenu={(event) => { event.preventDefault(); void cancelScreenshot(); }} aria-label={t('screenshot.selectionLabel')}>
+    <main ref={rootRef} className="screenshot-root" data-selection-active="false" data-selecting={selecting ? 'true' : 'false'} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={cancelScreenshot} onDoubleClick={handleDoubleClick} onWheel={handleWheel} onContextMenu={(event) => { event.preventDefault(); if (!selectionRef.current || canResetSelection(selectionRef.current)) void cancelScreenshot(); }} aria-label={t('screenshot.selectionLabel')}>
       <div className="screenshot-mask screenshot-mask-top" aria-hidden="true" />
       <div className="screenshot-mask screenshot-mask-left" aria-hidden="true" />
       <div className="screenshot-mask screenshot-mask-right" aria-hidden="true" />

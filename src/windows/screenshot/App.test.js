@@ -49,6 +49,16 @@ test('工具栏放置与定位统一走自适应模块', () => {
   assert.ok(source.includes('return toolbarStyleModel(selection, bootstrap.bounds, placement);'));
 });
 
+test('Esc 与右键仅在无选区或小选区时取消截图', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('import { canResetSelection } from \'./resetModel.js\';'));
+  assert.ok(source.includes("if (event.key === 'Escape' && (!selectionRef.current || canResetSelection(selectionRef.current))) { event.preventDefault(); void cancelScreenshot(); return; }"));
+  assert.ok(source.includes("if (!selectionRef.current || canResetSelection(selectionRef.current)) void cancelScreenshot();"));
+  const keydownIndex = source.indexOf('const handleKeyDown = (event) => {');
+  const body = source.slice(keydownIndex);
+  assert.ok(body.includes('canResetSelection'), 'keydown 必须使用小选区重置守卫');
+});
+
 test('快捷键帮助面板随 F1 切换并列出全部快捷键', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('import { helpEntries, isHelpShortcut } from \'./helpModel.js\';'));
