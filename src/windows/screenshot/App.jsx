@@ -20,6 +20,7 @@ import { toolbarPlacement, toolbarStyle as toolbarStyleModel } from './toolbarMo
 import { pushSelectionHistory, undoSelectionHistory } from './historyModel.js';
 import { rulerTicks } from './rulerModel.js';
 import { modeForState, modeHint } from './modeModel.js';
+import { selectionHandles } from './handleModel.js';
 import {
   createRafWriter,
   hitSelectionEdge,
@@ -129,6 +130,16 @@ function Ruler({ bounds }) {
           <span key={tick.position} className={tick.label !== null ? 'screenshot-ruler-tick screenshot-ruler-tick-major' : 'screenshot-ruler-tick'} style={{ top: `${tick.position}px` }}>{tick.label ?? ''}</span>
         ))}
       </div>
+    </>
+  );
+}
+
+function SelectionHandles({ selection }) {
+  return (
+    <>
+      {selectionHandles(selection).map((handle) => (
+        <div key={handle.edge} className={`screenshot-handle screenshot-handle-${handle.edge}`} data-screenshot-handle="true" style={{ left: `${handle.left}px`, top: `${handle.top}px` }} />
+      ))}
     </>
   );
 }
@@ -579,6 +590,7 @@ function App() {
       )}
       {selection && <ThirdsGrid bounds={bootstrap.bounds} />}
       {selection && <Ruler bounds={bootstrap.bounds} />}
+      {selection && <SelectionHandles selection={selection} />}
       {modeHint(modeForState({ selecting, moving, resizing }), t) && <div className="screenshot-mode-hint" data-screenshot-mode="true">{modeHint(modeForState({ selecting, moving, resizing }), t)}</div>}
       {actionError && <div className="screenshot-error" role="alert" data-screenshot-control>{actionError}</div>}
       <button type="button" className="screenshot-cancel" data-screenshot-control onPointerDown={(event) => event.stopPropagation()} onClick={() => void cancelScreenshot()} aria-label={t('screenshot.cancelLabel')} title={t('screenshot.shortcutHint', { label: t('screenshot.cancelLabel'), shortcut: 'Esc' })}>{t('screenshot.cancel')}</button>

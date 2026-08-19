@@ -48,6 +48,7 @@ button { font: inherit; }
 .screenshot-selection-line { border-style: solid; border-width: 0; }
 .screenshot-color { position: absolute; z-index: 3; pointer-events: none; padding: 2px 6px; border-radius: 3px; color: #fff; background: rgba(0, 0, 0, 0.72); font-size: 11px; line-height: 1.4; white-space: nowrap; }
 .screenshot-selection-size-left { right: auto; left: 0; }
+.screenshot-handle { position: absolute; z-index: 3; width: 9px; height: 9px; border-radius: 50%; background: rgba(255, 255, 255, 0.95); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5); transform: translate(-50%, -50%); pointer-events: none; }
 
 .screenshot-toolbar { position: absolute; z-index: 4; display: flex; align-items: center; gap: 4px; min-height: 48px; padding: 6px; border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 8px; background: rgba(24, 24, 27, 0.94); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.28); pointer-events: auto; }
 .screenshot-action, .screenshot-cancel { border: 0; border-radius: 5px; color: #f4f4f5; background: transparent; cursor: pointer; white-space: nowrap; }
