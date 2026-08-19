@@ -186,7 +186,11 @@ impl SettingsStorage {
             return match fs::read_to_string(target) {
                 Ok(content) => match recover_settings_from_content(&content) {
                     Ok((settings, rejected_any_field, unknown_any_field)) => {
-                        if rejected_any_field || unknown_any_field {
+                        // 未知字段已由 #[serde(flatten)] extra_fields 保留并随保存写回，
+                        // 不需要 backup 兜底；只有真正无法反序列化的字段才需要备份原文，
+                        // 避免升级后旧配置里的已删除字段反复触发备份累积到 1000 个上限。
+                        let _ = unknown_any_field;
+                        if rejected_any_field {
                             preserve_incompatible_settings(target, &content)?;
                         }
                         if rejected_any_field {
@@ -213,7 +217,9 @@ impl SettingsStorage {
             };
             let settings = match recover_settings_from_content(&content) {
                 Ok((settings, rejected_any_field, unknown_any_field)) => {
-                    if rejected_any_field || unknown_any_field {
+                    // 同主路径：仅真正拒绝的字段触发备份，未知字段由 extra_fields 保留。
+                    let _ = unknown_any_field;
+                    if rejected_any_field {
                         preserve_incompatible_settings(source, &content)?;
                     }
                     settings
@@ -540,7 +546,8 @@ mod tests {
             r#"{ "unknownFutureSetting": "old-value" }"#,
         )
         .unwrap();
-        let original = r#"{ "toggleShortcut": "Ctrl+Alt+V", "unknownFutureSetting": "new-value" }"#;
+        // 用真正无法反序列化的字段（toggleShortcut 给了数字）触发备份，验证新旧配置独立备份。
+        let original = r#"{ "toggleShortcut": 12345, "unknownFutureSetting": "new-value" }"#;
         fs::write(&target, original).unwrap();
 
         SettingsStorage::load_settings_from_paths(&target, &[]).expect("不同原始配置仍应可恢复");
@@ -593,10 +600,33 @@ mod tests {
     }
 
     #[test]
+    fn unknown_field_does_not_create_backup_after_recover() {
+        let dir = test_dir();
+        let target = dir.join("settings.json");
+        fs::write(
+            &target,
+            r#"{ "toggleShortcut": "Ctrl+Alt+V", "futureSetting": "keep-me" }"#,
+        )
+        .unwrap();
+
+        let loaded = SettingsStorage::load_settings_from_paths(&target, &[])
+            .expect("未知字段不应阻止恢复")
+            .expect("存在设置文件时必须返回恢复结果");
+
+        assert!(
+            !incompatible_settings_backup_path(&target).exists(),
+            "未知字段已被 extra_fields 保留，不应触发备份累积"
+        );
+        assert_eq!(loaded.0.toggle_shortcut, "Ctrl+Alt+V");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn backup_failure_refuses_to_overwrite_an_incompatible_settings_document() {
         let dir = test_dir();
         let target = dir.join("settings.json");
-        let original = r#"{ "toggleShortcut": "Ctrl+Alt+V", "unknownFutureSetting": "bad" }"#;
+        // 用真正无法反序列化的字段（toggleShortcut 给了数字）验证备份失败时拒绝覆盖。
+        let original = r#"{ "toggleShortcut": 12345, "unknownFutureSetting": "bad" }"#;
         fs::write(&target, original).unwrap();
         fs::create_dir(incompatible_settings_backup_path(&target)).unwrap();
 
