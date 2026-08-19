@@ -16,6 +16,7 @@ import { readCenterPixel, formatRgb, hexFromRgb } from './colorModel.js';
 import { magnifierScaleForWheel } from './magnifierZoomModel.js';
 import { formatPixelSize, formatMegapixels } from './sizeModel.js';
 import { magnetSelection } from './magnetModel.js';
+import { toolbarPlacement, toolbarStyle as toolbarStyleModel } from './toolbarModel.js';
 import {
   createRafWriter,
   hitSelectionEdge,
@@ -183,15 +184,9 @@ function App() {
 
   const toolbarStyle = useMemo(() => {
     if (!selection) return undefined;
-    const toolbarWidth = 300;
-    const toolbarHeight = 48;
-    const left = clamp(selection.left, 8, Math.max(8, bootstrap.bounds.width - toolbarWidth - 8));
-    const belowTop = selection.bottom + 12;
-    const top = belowTop + toolbarHeight <= bootstrap.bounds.height - 8
-      ? belowTop
-      : Math.max(8, selection.top - toolbarHeight - 12);
-    return { left: `${left}px`, top: `${top}px` };
-  }, [bootstrap.bounds.height, bootstrap.bounds.width, selection]);
+    const placement = toolbarPlacement(selection, bootstrap.bounds);
+    return toolbarStyleModel(selection, bootstrap.bounds, placement);
+  }, [bootstrap.bounds, selection]);
 
   useEffect(() => {
     const root = rootRef.current;

@@ -43,6 +43,12 @@ test('normalizeBootstrap 使用显式显示器物理尺寸与逻辑尺寸', () =
   });
 });
 
+test('工具栏放置与定位统一走自适应模块', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('const placement = toolbarPlacement(selection, bootstrap.bounds);'));
+  assert.ok(source.includes('return toolbarStyleModel(selection, bootstrap.bounds, placement);'));
+});
+
 test('选区建立后渲染三分法构图辅助网格', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('{selection && <ThirdsGrid bounds={bootstrap.bounds} />}'));
