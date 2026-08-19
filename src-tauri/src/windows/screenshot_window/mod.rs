@@ -4,6 +4,8 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+
 use crate::services::screenshot::capture::{capture_monitor, ensure_com_initialized, get_monitor_handle, CaptureRect};
 use crate::services::screenshot::{choose_screenshot_save_destination, copy_screenshot, copy_screenshot_text, emit_screenshot_history_update, encode_and_store_png, prepare_pin_path, recognize_image, save_screenshot, validate_configuration, MainWindowVisibilityRevision, MonitorRect, SessionPhase, ScreenshotSessionManager, StartSessionResult};
 use crate::services::settings::{get_settings, update_with};
@@ -34,6 +36,8 @@ pub struct ScreenshotBootstrap {
     pub initial_action: Option<String>,
     pub screenshot_ai_enabled: bool,
     pub screenshot_ai_configured: bool,
+    pub screenshot_magnifier_enabled: bool,
+    pub magnifier_background: Option<String>,
 }
 
 #[derive(Default)]
@@ -73,6 +77,8 @@ fn bootstrap_for_session(
     initial_action: Option<&str>,
     screenshot_ai_enabled: bool,
     screenshot_ai_configured: bool,
+    screenshot_magnifier_enabled: bool,
+    magnifier_background: Option<String>,
 ) -> ScreenshotBootstrap {
     ScreenshotBootstrap {
         device_pixel_ratio: monitor.scale_factor,
@@ -82,7 +88,30 @@ fn bootstrap_for_session(
         initial_action: initial_action.map(str::to_string),
         screenshot_ai_enabled,
         screenshot_ai_configured,
+        screenshot_magnifier_enabled,
+        magnifier_background,
     }
+}
+
+// 放大镜背景快照：在会话开始时捕获一次当前显示器全屏并编码为 data URL。
+// 快照只作为放大镜采样源，捕获失败时优雅降级为 None，不阻塞截图主流程。
+fn capture_magnifier_background(app: &AppHandle, monitor: &ScreenshotMonitorInfo) -> Option<String> {
+    let cursor = app.cursor_position().ok()?;
+    let hmonitor = get_monitor_handle(cursor.x as i32, cursor.y as i32);
+    let selection = CaptureRect {
+        left: 0,
+        top: 0,
+        width: monitor.physical_width,
+        height: monitor.physical_height,
+    };
+    let frame = capture_monitor(hmonitor, selection).ok()?;
+    let png_bytes = crate::services::screenshot::encode_snapshot_png(
+        frame.width,
+        frame.height,
+        &frame.rgba,
+    )
+    .ok()?;
+    Some(format!("data:image/png;base64,{}", BASE64.encode(png_bytes)))
 }
 
 fn screenshot_ai_is_configured(settings: &crate::services::settings::AppSettings) -> bool {
@@ -311,6 +340,15 @@ mod source_guards {
     }
 
     #[test]
+    fn screenshot_bootstrap_carries_magnifier_flag_and_background_snapshot() {
+        let source = source_file("windows/screenshot_window/mod.rs");
+        assert!(source.contains("pub screenshot_magnifier_enabled: bool"));
+        assert!(source.contains("pub magnifier_background: Option<String>"));
+        assert!(source.contains("fn capture_magnifier_background"));
+        assert!(source.contains("encode_snapshot_png"));
+    }
+
+    #[test]
     fn screenshot_capability_has_no_private_or_global_filesystem_scope() {
         let source = source_file("../capabilities/screenshot.json");
         assert!(!source.contains("screenshot-suite:default"));
@@ -447,12 +485,19 @@ pub fn start_screenshot(app: &AppHandle, initial_action: Option<&str>) -> Result
             }
         }
     };
+    let magnifier_background = if settings.screenshot_magnifier_enabled {
+        capture_magnifier_background(app, &monitor)
+    } else {
+        None
+    };
     let bootstrap = bootstrap_for_session(
         session_id,
         monitor.clone(),
         if existing { None } else { initial_action },
         settings.screenshot_ai_enabled,
         screenshot_ai_is_configured(&settings),
+        settings.screenshot_magnifier_enabled,
+        magnifier_background,
     );
     if let Err(error) = configure_window(&window, &monitor) {
         finish_failed_screenshot(app, &bootstrap.session_id);

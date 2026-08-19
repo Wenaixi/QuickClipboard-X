@@ -55,7 +55,7 @@ impl std::fmt::Display for ImageStoreError {
 
 impl std::error::Error for ImageStoreError {}
 
-fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, ImageStoreError> {
+pub(crate) fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, ImageStoreError> {
     if width == 0 || height == 0 {
         return Err(ImageStoreError::InvalidDimensions);
     }
