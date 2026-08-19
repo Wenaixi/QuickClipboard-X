@@ -41,6 +41,25 @@ test('normalizeBootstrap 使用显式显示器物理尺寸与逻辑尺寸', () =
   });
 });
 
+test('选区内部按下进入整体平移模式', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('if (selectionRef.current && hitSelectionInterior(start, selectionRef.current, MOVE_INSET)) {'));
+  assert.ok(source.includes('moveRef.current = { pointerId: event.pointerId, start, selectionStart: selectionRef.current };'));
+});
+
+test('平移拖拽调用 nudgeSelection 并实时同步选区', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('const next = nudgeSelection(moving.selectionStart, current.x - moving.start.x, current.y - moving.start.y, bootstrap.bounds);'));
+  assert.ok(source.includes('selectionRef.current = next;'));
+});
+
+test('平移结束后保留选区且不触发选窗或清空', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('moveRef.current = null;'));
+  assert.ok(source.includes('selectionRef.current = finalSelection;'));
+  assert.ok(source.includes('setSelection(finalSelection);'));
+});
+
 test('截图键盘微调接线调用 nudgeSelection 并同步选区状态', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('const next = nudgeSelection(selectionRef.current, nudgeX * step, nudgeY * step, bootstrap.bounds);'));

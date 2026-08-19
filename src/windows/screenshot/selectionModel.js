@@ -89,6 +89,23 @@ export function selectionForPointerGesture(start, end, bounds, windowSelections 
   return normalizeSelection(start, end, bounds);
 }
 
+export function hitSelectionInterior(point, selection, inset = 4) {
+  assertFiniteNumber(point?.x, '点 x');
+  assertFiniteNumber(point?.y, '点 y');
+  for (const key of ['left', 'top', 'right', 'bottom']) {
+    assertFiniteNumber(selection?.[key], `selection.${key}`);
+  }
+  assertFiniteNumber(inset, '内部边距');
+  if (inset < 0) {
+    throw new RangeError('内部边距不能为负数');
+  }
+  const left = selection.left + inset;
+  const top = selection.top + inset;
+  const right = selection.right - inset;
+  const bottom = selection.bottom - inset;
+  return point.x >= left && point.x < right && point.y >= top && point.y < bottom;
+}
+
 export function nudgeSelection(selection, dx, dy, bounds) {
   if (!bounds || !Number.isFinite(bounds.width) || !Number.isFinite(bounds.height) || bounds.width <= 0 || bounds.height <= 0) {
     throw new RangeError('边界尺寸必须为正数');

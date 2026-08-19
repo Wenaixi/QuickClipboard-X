@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createRafWriter,
+  hitSelectionInterior,
   isCurrentGesture,
   normalizeSelection,
   nudgeSelection,
@@ -186,6 +187,27 @@ test('selectionToPhysical 不允许越过物理显示器边界', () => {
       height: 2,
     }
   );
+});
+
+test('hitSelectionInterior 识别选区内部点并排除边缘与外部', () => {
+  const selection = { left: 100, top: 80, right: 300, bottom: 240 };
+  assert.equal(hitSelectionInterior({ x: 200, y: 160 }, selection), true);
+  assert.equal(hitSelectionInterior({ x: 104, y: 84 }, selection), true);
+  assert.equal(hitSelectionInterior({ x: 102, y: 160 }, selection), false);
+  assert.equal(hitSelectionInterior({ x: 200, y: 82 }, selection), false);
+  assert.equal(hitSelectionInterior({ x: 400, y: 160 }, selection), false);
+});
+
+test('hitSelectionInterior 自定义内部边距并可调大', () => {
+  const selection = { left: 100, top: 80, right: 300, bottom: 240 };
+  assert.equal(hitSelectionInterior({ x: 120, y: 100 }, selection, 8), true);
+  assert.equal(hitSelectionInterior({ x: 106, y: 100 }, selection, 8), false);
+});
+
+test('hitSelectionInterior 拒绝无效点、选区或负边距', () => {
+  assert.throws(() => hitSelectionInterior({ x: Number.NaN, y: 1 }, { left: 0, top: 0, right: 1, bottom: 1 }), /点 x 必须是有限数字/);
+  assert.throws(() => hitSelectionInterior({ x: 1, y: 1 }, { left: 0, top: 0, right: 1 }, 0), /selection.bottom 必须是有限数字/);
+  assert.throws(() => hitSelectionInterior({ x: 1, y: 1 }, { left: 0, top: 0, right: 1, bottom: 1 }, -1), /内部边距不能为负数/);
 });
 
 test('nudgeSelection 按 1px 移动选区并保持尺寸不变', () => {
