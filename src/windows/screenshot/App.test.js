@@ -86,6 +86,15 @@ test('normalizeBootstrap 透传放大镜开关与背景快照', () => {
   assert.equal(result.magnifierBackground, 'data:image/png;base64,AAAA');
 });
 
+test('尺寸标签随选区贴近边缘翻转防溢出', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  // 类名与内联样式两个辅助函数都必须调用放置函数，任何一处绕过都应被捕获。
+  const placements = (source.match(/selectionLabelPlacement\(selection, bounds\)/g) || []).length;
+  assert.ok(placements >= 2, `期望至少 2 处放置调用，实际 ${placements}`);
+  assert.ok(source.includes('screenshot-selection-size-below'));
+  assert.ok(source.includes('screenshot-selection-size-left'));
+});
+
 test('选区内部按下进入整体平移模式', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('if (hitSelectionInterior(start, selectionRef.current, MOVE_INSET)) {'));

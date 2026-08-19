@@ -37,6 +37,8 @@ button { font: inherit; }
 .screenshot-selection { position: absolute; z-index: 2; top: var(--selection-top); left: var(--selection-left); width: var(--selection-width); height: var(--selection-height); border: 1px solid rgba(255, 255, 255, 0.96); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.42); pointer-events: none; opacity: 0; }
 .screenshot-root[data-selection-active="true"] .screenshot-selection { opacity: 1; }
 .screenshot-selection-size { position: absolute; right: 0; bottom: 100%; margin-bottom: 6px; padding: 3px 6px; border-radius: 4px; color: #fff; background: rgba(0, 0, 0, 0.72); font-size: 12px; line-height: 1.2; white-space: nowrap; }
+.screenshot-selection-size-below { top: 100%; bottom: auto; margin-top: 6px; margin-bottom: 0; }
+.screenshot-selection-size-left { right: auto; left: 0; }
 
 .screenshot-toolbar { position: absolute; z-index: 4; display: flex; align-items: center; gap: 4px; min-height: 48px; padding: 6px; border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 8px; background: rgba(24, 24, 27, 0.94); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.28); pointer-events: auto; }
 .screenshot-action, .screenshot-cancel { border: 0; border-radius: 5px; color: #f4f4f5; background: transparent; cursor: pointer; white-space: nowrap; }

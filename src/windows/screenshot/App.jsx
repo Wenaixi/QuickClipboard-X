@@ -8,6 +8,7 @@ import { magnifierGeometry } from './magnifierModel.js';
 import { coordinatePanelPosition, formatCursorCoordinate } from './coordinateModel.js';
 import { guideLines } from './guideModel.js';
 import { actionForHotkey, hotkeyForAction } from './actionModel.js';
+import { selectionLabelPlacement } from './labelModel.js';
 import {
   createRafWriter,
   hitSelectionEdge,
@@ -57,6 +58,19 @@ function pointFromPointerEvent(event, element) {
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
+}
+
+function selectionSizeLabelClass(selection, bounds) {
+  const placement = selectionLabelPlacement(selection, bounds);
+  const classes = ['screenshot-selection-size'];
+  if (!placement.above) classes.push('screenshot-selection-size-below');
+  if (placement.alignLeft) classes.push('screenshot-selection-size-left');
+  return classes.join(' ');
+}
+
+function selectionSizeLabelStyle(selection, bounds) {
+  const placement = selectionLabelPlacement(selection, bounds);
+  return placement.alignLeft ? { left: `${selection.left}px` } : { right: `${Math.max(0, bounds.width - selection.right)}px` };
 }
 
 function coordinatePanelStyle(point, bounds) {
@@ -446,7 +460,7 @@ function App() {
       <div className="screenshot-mask screenshot-mask-left" aria-hidden="true" />
       <div className="screenshot-mask screenshot-mask-right" aria-hidden="true" />
       <div className="screenshot-mask screenshot-mask-bottom" aria-hidden="true" />
-      <div className="screenshot-selection" aria-hidden="true"><span className="screenshot-selection-size">{selection ? `${Math.round(selection.width)} × ${Math.round(selection.height)}` : ''}</span></div>
+      <div className="screenshot-selection" aria-hidden="true">{selection && <span className={selectionSizeLabelClass(selection, bootstrap.bounds)} style={selectionSizeLabelStyle(selection, bootstrap.bounds)}>{Math.round(selection.width)} × {Math.round(selection.height)}</span>}</div>
       {selection && <div className="screenshot-toolbar" style={toolbarStyle} data-screenshot-control onPointerDown={(event) => event.stopPropagation()}>{ACTIONS.map((action) => { const label = actionLabel(action.id, t); return <button key={action.id} type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction) || !actionIsEnabled(action.id, bootstrap)} onClick={() => void completeScreenshot(action.id)} title={[action.shortcut && t('screenshot.shortcutHint', { label, shortcut: action.shortcut }), hotkeyForAction(action.id) && t('screenshot.shortcutHint', { label, shortcut: hotkeyForAction(action.id) })].filter(Boolean).join(' · ') || label}>{busyAction === action.id ? t('screenshot.processing') : label}</button>; })}{!bootstrap.screenshotAiConfigured && <button type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction)} onClick={() => void openAiSettings()}>{t('screenshot.actions.configureAi')}</button>}</div>}
       {bootstrap.screenshotMagnifierEnabled && bootstrap.magnifierBackground && magnifierPoint && (draftRef.current || moveRef.current || resizeRef.current) && (
         <canvas className="screenshot-magnifier" data-screenshot-magnifier="true" style={magnifierCanvasStyle(magnifierPoint, bootstrap.bounds)} ref={magnifierCanvasRef} />
