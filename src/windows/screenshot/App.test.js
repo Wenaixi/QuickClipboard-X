@@ -90,7 +90,7 @@ test('完成快捷键统一走模型且支持 Ctrl+C 复制', () => {
 test('选区建立前显示初始引导提示且不遮挡拖拽', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('import { idleHint } from \'./idleModel.js\';'));
-  assert.ok(source.includes('!selecting && !selection && !showHelp && <div className="screenshot-idle-hint" data-screenshot-idle="true">{idleHint(t)}</div>'));
+  assert.ok(source.includes('!selecting && !selection && !showHelp && <div className="screenshot-idle-hint" aria-live="polite" data-screenshot-idle="true">{idleHint(t)}</div>'));
   for (const locale of ['zh-CN', 'en-US']) {
     const messages = JSON.parse(readFileSync(new URL(`../../shared/locales/${locale}.json`, import.meta.url)));
     assert.equal(typeof messages.screenshot.idleHint, 'string', `${locale} 缺少 screenshot.idleHint`);
@@ -143,6 +143,22 @@ test('帮助面板可交互且点击不穿透底层拖拽', () => {
   assert.ok(helpRule && helpRule.includes('pointer-events: auto;'), '帮助面板必须可交互');
   assert.ok(source.includes('data-screenshot-control role="dialog"'), '帮助面板必须阻止底层拖拽');
   assert.ok(source.includes('onPointerDown={(event) => event.stopPropagation()}'), '帮助面板必须停止事件冒泡');
+});
+
+test('截图界面无障碍标注完整且高频面板不产生朗读噪音', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('role="toolbar" aria-label={t(\'screenshot.toolbarLabel\')}'), '工具栏必须有 role 与可访问名称');
+  assert.ok(source.includes('className="screenshot-coordinates" aria-hidden="true"'), '坐标面板必须对屏幕阅读器隐藏');
+  assert.ok(source.includes('className="screenshot-color" aria-hidden="true"'), '颜色面板必须对屏幕阅读器隐藏');
+  assert.ok(source.includes('className="screenshot-mode-hint" aria-hidden="true"'), '模式提示必须对屏幕阅读器隐藏');
+  assert.ok(source.includes('className="screenshot-idle-hint" aria-live="polite"'), '初始引导必须声明实时区域');
+  assert.ok(source.includes('aria-hidden="true" className="screenshot-guide screenshot-guide-v"'), '十字参考线必须声明装饰性');
+  assert.ok(source.includes('aria-hidden="true" className={`screenshot-handle screenshot-handle-'), '调整手柄必须声明装饰性');
+  for (const locale of ['zh-CN', 'en-US']) {
+    const messages = JSON.parse(readFileSync(new URL(`../../shared/locales/${locale}.json`, import.meta.url)));
+    assert.equal(typeof messages.screenshot.toolbarLabel, 'string', `${locale} 缺少 screenshot.toolbarLabel`);
+    assert.ok(messages.screenshot.idleHint.includes('Esc'), `${locale} idleHint 必须提示 Esc 取消`);
+  }
 });
 
 test('快捷键帮助面板随 F1 切换并列出全部快捷键', () => {
@@ -216,7 +232,7 @@ test('十字参考线在拖拽时渲染并贯穿画布', () => {
 
 test('坐标指示面板在拖拽时渲染并显示光标坐标', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
-  assert.ok(source.includes('<div className="screenshot-coordinates" data-screenshot-coordinates="true" style={coordinatePanelStyle(magnifierPoint, bootstrap.bounds)}>{formatCursorCoordinate(magnifierPoint)}</div>'));
+  assert.ok(source.includes('<div className="screenshot-coordinates" aria-hidden="true" data-screenshot-coordinates="true" style={coordinatePanelStyle(magnifierPoint, bootstrap.bounds)}>{formatCursorCoordinate(magnifierPoint)}</div>'));
   assert.ok(source.includes('coordinatePanelPosition(point, bounds)'));
 });
 

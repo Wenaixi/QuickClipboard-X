@@ -251,6 +251,7 @@
       "configureAi": "Configure AI"
     },
     "processing": "Processing",
+    "toolbarLabel": "Screenshot actions",
     "selectionLabel": "Screenshot selection",
     "cancelLabel": "Cancel screenshot",
     "cancelFailed": "Failed to cancel screenshot: {{error}}",
@@ -263,7 +264,7 @@
       "move": "Drag to move the selection",
       "resize": "Drag to resize the selection"
     },
-    "idleHint": "Drag to select a region, press F1 for shortcuts",
+    "idleHint": "Drag to select a region, press Esc to cancel, F1 for shortcuts",
     "invite": "Press Enter to copy, F1 for all shortcuts",
     "help": {
       "title": "Shortcuts",
