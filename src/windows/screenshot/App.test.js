@@ -49,6 +49,15 @@ test('工具栏放置与定位统一走自适应模块', () => {
   assert.ok(source.includes('return toolbarStyleModel(selection, bootstrap.bounds, placement);'));
 });
 
+test('选区建立后渲染八个调整手柄', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('import { selectionHandles } from \'./handleModel.js\';'));
+  assert.ok(source.includes('selectionHandles(selection).map((handle) =>'));
+  assert.ok(source.includes('{selection && <SelectionHandles selection={selection} />}'));
+  assert.ok(source.includes('data-screenshot-handle="true"'));
+  assert.ok(source.includes('screenshot-handle-${handle.edge}'));
+});
+
 test('交互模式提示随拖拽/移动/调整状态渲染', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('modeHint(modeForState({ selecting, moving, resizing }), t)'));
