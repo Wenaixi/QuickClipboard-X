@@ -308,7 +308,9 @@ impl SettingsStorage {
             if result.is_ok() {
                 return Ok(());
             }
-            let _ = fs::remove_file(&temporary_path);
+            // 原子替换失败时尽力清理临时文件；若清理也失败，
+            // 残留文件名含递增 ID 不会被后续保存复用，属理论性垃圾累积。
+            let _ = fs::remove_file(&temporary_path).ok();
             return Err(result.err().map_or_else(
                 || "Windows 设置文件原子替换失败".to_string(),
                 |error| error.to_string(),

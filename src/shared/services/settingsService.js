@@ -15,7 +15,7 @@ export const defaultSettings = {
   // 常规设置
   autoStart: false,
   runAsAdmin: false,
-  startHidden: false,
+  startHidden: true,
   showTrayIcon: true,
   showStartupNotification: true,
   autoLowMemoryEnabled: false,
@@ -84,7 +84,7 @@ export const defaultSettings = {
   imagePreview: true,
   textPreview: true,
   filePreview: true,
-  settingsMigrationVersion: 1,
+  settingsMigrationVersion: 3,
   displayPriorityOrder: 'text,html,image',
   autoScrollToTopOnShow: false,
   autoClearSearch: false,
@@ -134,11 +134,10 @@ export const defaultSettings = {
   
   // 截屏设置
   screenshotEnabled: true,
-  screenshotShortcut: 'Ctrl+Shift+A',
   screenshotQuickSaveShortcut: '',
   screenshotQuickPinShortcut: '',
   screenshotQuickOcrShortcut: '',
-  screenshotAutoSave: false,
+  screenshotAutoSave: true,
   screenshotShowHints: true,
   screenshotElementDetection: 'all',
   screenshotMagnifierEnabled: true,
