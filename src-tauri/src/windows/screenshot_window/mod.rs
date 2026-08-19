@@ -370,7 +370,11 @@ mod source_guards {
         let existing = body
             .find("if existing {\n        // 已有会话：窗口已按原显示器配置，仅重新显示与聚焦")
             .expect("已有会话提前返回分支缺失");
+        let busy_guard = body
+            .find("if !matches!(STATE.lock().sessions.phase(), Some(SessionPhase::Selecting)) {")
+            .expect("已有会话分支缺少处理中拒绝重入");
         let show = body.find("window.show()").expect("已有会话分支缺少重新显示");
+        assert!(busy_guard < show, "处理中守卫必须先于窗口显示");
         let ok = body.find("return Ok(());").expect("已有会话分支缺少提前返回");
         assert!(existing < show && show < ok, "已有会话必须重新显示并提前返回: existing={existing} show={show} ok={ok}");
         assert!(body.contains("capture_magnifier_background(&monitor)"), "放大镜背景必须用已解析监视器采样");
@@ -525,6 +529,10 @@ pub fn start_screenshot(app: &AppHandle, initial_action: Option<&str>) -> Result
     if existing {
         // 已有会话：窗口已按原显示器配置，仅重新显示与聚焦，
         // 避免用新光标显示器重配导致视图层与捕获层显示器信息错位。
+        // 前一次截图仍在处理中时拒绝重入：避免全局快捷键闪现处理中的窗口。
+        if !matches!(STATE.lock().sessions.phase(), Some(SessionPhase::Selecting)) {
+            return Err("截图正在处理中，请稍候".to_string());
+        }
         if let Err(error) = window.show() {
             finish_failed_screenshot(app, &session_id);
             return Err(format!("显示截图窗口失败: {error}"));
