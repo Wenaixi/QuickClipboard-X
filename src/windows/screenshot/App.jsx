@@ -17,6 +17,7 @@ import { magnifierScaleForWheel } from './magnifierZoomModel.js';
 import { formatPixelSize, formatMegapixels } from './sizeModel.js';
 import { magnetSelection } from './magnetModel.js';
 import { toolbarPlacement, toolbarStyle as toolbarStyleModel } from './toolbarModel.js';
+import { pushSelectionHistory, undoSelectionHistory } from './historyModel.js';
 import {
   createRafWriter,
   hitSelectionEdge,
@@ -167,6 +168,7 @@ function App() {
   const pointerIdRef = useRef(null);
   const moveRef = useRef(null);
   const resizeRef = useRef(null);
+  const selectionHistoryRef = useRef([]);
   const gestureIdRef = useRef(0);
   const [bootstrap, setBootstrap] = useState(() => normalizeBootstrap(globalThis.__QC_SCREENSHOT_BOOT__ || {}, {
     width: globalThis.innerWidth,
@@ -243,6 +245,7 @@ function App() {
       setBootstrap(nextBootstrap);
       initialActionRef.current = nextBootstrap.initialAction;
       gestureIdRef.current += 1;
+      selectionHistoryRef.current = [];
       draftRef.current = null;
       selectionRef.current = null;
       setSelection(null);
@@ -277,6 +280,7 @@ function App() {
   const cancelScreenshot = async () => {
     const sessionId = bootstrap.sessionId;
     gestureIdRef.current += 1;
+    selectionHistoryRef.current = [];
     draftRef.current = null;
     selectionRef.current = null;
     setMagnifierPoint(null);
@@ -322,17 +326,20 @@ function App() {
     if (selectionRef.current) {
       const edge = hitSelectionEdge(start, selectionRef.current, RESIZE_TOLERANCE);
       if (edge) {
+        selectionHistoryRef.current = pushSelectionHistory(selectionHistoryRef.current, selectionRef.current);
         resizeRef.current = { pointerId: event.pointerId, edge };
         root.setPointerCapture?.(event.pointerId);
         return;
       }
       if (hitSelectionInterior(start, selectionRef.current, MOVE_INSET)) {
+        selectionHistoryRef.current = pushSelectionHistory(selectionHistoryRef.current, selectionRef.current);
         moveRef.current = { pointerId: event.pointerId, start, selectionStart: selectionRef.current };
         root.setPointerCapture?.(event.pointerId);
         return;
       }
     }
     gestureIdRef.current += 1;
+    selectionHistoryRef.current = [];
     draftRef.current = { start, end: start };
     pointerIdRef.current = event.pointerId;
     root.setPointerCapture?.(event.pointerId);
@@ -484,10 +491,21 @@ function App() {
       if (nudgeX !== undefined) {
         event.preventDefault();
         const step = event.ctrlKey ? NUDGE_FAST_STEP : NUDGE_STEP;
+        selectionHistoryRef.current = pushSelectionHistory(selectionHistoryRef.current, selectionRef.current);
         const next = nudgeSelection(selectionRef.current, nudgeX * step, nudgeY * step, bootstrap.bounds);
         selectionRef.current = next;
         setSelection(next);
         applySelectionStyle(rootRef.current, next);
+        return;
+      }
+      if (event.ctrlKey && event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        const undone = undoSelectionHistory(selectionHistoryRef.current);
+        if (!undone) return;
+        selectionHistoryRef.current = undone.history;
+        selectionRef.current = undone.selection;
+        setSelection(undone.selection);
+        applySelectionStyle(rootRef.current, undone.selection);
         return;
       }
       const hotkeyAction = actionForHotkey(event.key);
