@@ -38,6 +38,9 @@ pub struct ScreenshotBootstrap {
     pub screenshot_ai_configured: bool,
     pub screenshot_magnifier_enabled: bool,
     pub magnifier_background: Option<String>,
+    // 截图提示开关（空闲引导/模式提示）：设置项此前在截图窗口零消费，
+    // 必须随 bootstrap 下发，前端据此决定是否渲染 idle/mode 提示。
+    pub screenshot_hints_enabled: bool,
     // 截图窗口生命周期模式：quick（隐藏复用）/ dispose（销毁）/ auto（超时释放），
     // 前端据此决定成功路径是否关闭窗口，实现设置项的真实后端消费（此前零消费）。
     pub lifecycle_mode: String,
@@ -86,6 +89,7 @@ fn bootstrap_for_session(
     screenshot_magnifier_enabled: bool,
     magnifier_background: Option<String>,
     lifecycle_mode: String,
+    screenshot_hints_enabled: bool,
 ) -> ScreenshotBootstrap {
     ScreenshotBootstrap {
         device_pixel_ratio: monitor.scale_factor,
@@ -98,6 +102,7 @@ fn bootstrap_for_session(
         screenshot_magnifier_enabled,
         magnifier_background,
         lifecycle_mode,
+        screenshot_hints_enabled,
     }
 }
 
@@ -661,6 +666,9 @@ mod source_guards {
     fn screenshot_bootstrap_carries_magnifier_flag_and_background_snapshot() {
         let source = source_file("windows/screenshot_window/mod.rs");
         assert!(source.contains("pub screenshot_magnifier_enabled: bool"));
+        // 用 format! 拼接逗号，避免测试模块自身 assert 的字符串字面量自指误命中（§10.4 陷阱）。
+        let hints_field = format!("pub screenshot_hints_enabled: bool{}", ",");
+        assert!(source.contains(&hints_field), "bootstrap 必须携带截图提示开关");
         assert!(source.contains("pub magnifier_background: Option<String>"));
         assert!(source.contains("fn capture_magnifier_background"));
         assert!(source.contains("encode_snapshot_png"));
@@ -867,6 +875,7 @@ pub fn start_screenshot(app: &AppHandle, initial_action: Option<&str>) -> Result
         settings.screenshot_magnifier_enabled,
         magnifier_background,
         settings.screenshot_window_lifecycle_mode.clone(),
+        settings.screenshot_hints_enabled,
     );
     if let Err(error) = configure_window(&window, &monitor) {
         finish_failed_screenshot(app, &bootstrap.session_id);
