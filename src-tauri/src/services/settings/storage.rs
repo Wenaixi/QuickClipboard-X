@@ -475,7 +475,7 @@ mod tests {
                 "screenshotShortcut": "Ctrl+Shift+S",
                 "quickpasteShortcut": "Alt+Q",
                 "navigateUpShortcut": "W",
-                "screenshotQuality": "not-a-number",
+                "screenshotAutoSave": "not-a-number",
                 "hotkeysEnabled": { "invalid": true },
                 "unknownFutureSetting": { "keepForFuture": true }
             }"#,
@@ -491,8 +491,8 @@ mod tests {
         assert_eq!(loaded.0.quickpaste_shortcut, "Alt+Q");
         assert_eq!(loaded.0.navigate_up_shortcut, "W");
         assert_eq!(
-            loaded.0.screenshot_quality,
-            AppSettings::default().screenshot_quality
+            loaded.0.screenshot_auto_save,
+            AppSettings::default().screenshot_auto_save
         );
         let backup = incompatible_settings_backup_path(&target);
         assert!(backup.exists(), "不兼容配置必须先保留完整备份");
@@ -540,7 +540,7 @@ mod tests {
             r#"{ "unknownFutureSetting": "old-value" }"#,
         )
         .unwrap();
-        let original = r#"{ "toggleShortcut": "Ctrl+Alt+V", "screenshotQuality": "bad", "unknownFutureSetting": "new-value" }"#;
+        let original = r#"{ "toggleShortcut": "Ctrl+Alt+V", "unknownFutureSetting": "new-value" }"#;
         fs::write(&target, original).unwrap();
 
         SettingsStorage::load_settings_from_paths(&target, &[]).expect("不同原始配置仍应可恢复");
@@ -574,7 +574,7 @@ mod tests {
                 "history_limit": 321,
                 "custom_storage_path": "D:/QuickClipboardData",
                 "use_custom_storage": true,
-                "screenshotQuality": "bad"
+                "unknownFutureSetting": "bad"
             }"#,
         )
         .unwrap();
@@ -596,7 +596,7 @@ mod tests {
     fn backup_failure_refuses_to_overwrite_an_incompatible_settings_document() {
         let dir = test_dir();
         let target = dir.join("settings.json");
-        let original = r#"{ "toggleShortcut": "Ctrl+Alt+V", "screenshotQuality": "bad" }"#;
+        let original = r#"{ "toggleShortcut": "Ctrl+Alt+V", "unknownFutureSetting": "bad" }"#;
         fs::write(&target, original).unwrap();
         fs::create_dir(incompatible_settings_backup_path(&target)).unwrap();
 
