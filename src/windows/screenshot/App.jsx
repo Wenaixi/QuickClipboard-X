@@ -28,6 +28,7 @@ import { helpEntries, isHelpShortcut } from './helpModel.js';
 import { canResetSelection } from './resetModel.js';
 import { fullScreenSelection } from './fullScreenModel.js';
 import { completeShortcutForEvent } from './completeShortcutModel.js';
+import { idleHint } from './idleModel.js';
 import {
   createRafWriter,
   hitSelectionEdge,
@@ -618,6 +619,7 @@ function App() {
       {selection && <ThirdsGrid bounds={bootstrap.bounds} />}
       {selection && <Ruler bounds={bootstrap.bounds} />}
       {selection && <SelectionHandles selection={selection} />}
+      {!selecting && !selection && !showHelp && <div className="screenshot-idle-hint" data-screenshot-idle="true">{idleHint(t)}</div>}
       {modeHint(modeForState({ selecting, moving, resizing }), t) && <div className="screenshot-mode-hint" data-screenshot-mode="true">{modeHint(modeForState({ selecting, moving, resizing }), t)}</div>}
       {showHelp && (
         <div className="screenshot-help" data-screenshot-help="true" role="dialog" aria-label={t('screenshot.help.title')}>
