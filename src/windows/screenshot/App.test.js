@@ -133,6 +133,16 @@ test('选区调整进行中键盘不触发完成与快速微调', () => {
   assert.ok(source.includes('if (nudgeX !== undefined && !event.altKey && !event.metaKey) {'));
 });
 
+test('帮助面板可交互且点击不穿透底层拖拽', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('./screenshot.css', import.meta.url), 'utf8');
+  // 锚定 .screenshot-help 完整规则，避免被 toolbar/cancel 的 pointer-events: auto 误命中。
+  const helpRule = css.split('\n').find((line) => line.includes('.screenshot-help {'));
+  assert.ok(helpRule && helpRule.includes('pointer-events: auto;'), '帮助面板必须可交互');
+  assert.ok(source.includes('data-screenshot-control role="dialog"'), '帮助面板必须阻止底层拖拽');
+  assert.ok(source.includes('onPointerDown={(event) => event.stopPropagation()}'), '帮助面板必须停止事件冒泡');
+});
+
 test('快捷键帮助面板随 F1 切换并列出全部快捷键', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('import { helpEntries, isHelpShortcut } from \'./helpModel.js\';'));

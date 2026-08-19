@@ -648,7 +648,7 @@ function App() {
       {selection && !selecting && !moving && !resizing && !busyAction && !showHelp && <div className="screenshot-invite" data-screenshot-invite="true">{includeInvite(t)}</div>}
       {modeHint(modeForState({ selecting, moving, resizing }), t) && <div className="screenshot-mode-hint" data-screenshot-mode="true">{modeHint(modeForState({ selecting, moving, resizing }), t)}</div>}
       {showHelp && (
-        <div className="screenshot-help" data-screenshot-help="true" role="dialog" aria-label={t('screenshot.help.title')}>
+        <div className="screenshot-help" data-screenshot-help="true" data-screenshot-control role="dialog" aria-label={t('screenshot.help.title')} onPointerDown={(event) => event.stopPropagation()}>
           <div className="screenshot-help-title">{t('screenshot.help.title')}</div>
           {helpEntries(t).map((entry) => (
             <div key={entry.id} className="screenshot-help-row">
