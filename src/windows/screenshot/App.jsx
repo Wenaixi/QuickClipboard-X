@@ -7,6 +7,7 @@ import { normalizeBootstrap } from './screenshotModel.js';
 import { magnifierGeometry } from './magnifierModel.js';
 import { coordinatePanelPosition, formatCursorCoordinate } from './coordinateModel.js';
 import { guideLines } from './guideModel.js';
+import { thirdsGrid } from './gridModel.js';
 import { actionForHotkey, hotkeyForAction } from './actionModel.js';
 import { selectionLabelPlacement } from './labelModel.js';
 import { cursorForSelectionHover } from './cursorModel.js';
@@ -95,6 +96,16 @@ function coordinatePanelStyle(point, bounds) {
     left: `${position.left}px`,
     top: `${position.top}px`,
   };
+}
+
+function ThirdsGrid({ bounds }) {
+  const grid = thirdsGrid(bounds);
+  return (
+    <>
+      {grid.vertical.map((line) => <div key={`v-${line.left}`} className="screenshot-thirds screenshot-thirds-v" data-screenshot-thirds="true" style={{ left: `${line.left}px`, top: `${line.top}px`, width: `${line.width}px`, height: `${line.height}px` }} />)}
+      {grid.horizontal.map((line) => <div key={`h-${line.top}`} className="screenshot-thirds screenshot-thirds-h" data-screenshot-thirds="true" style={{ left: `${line.left}px`, top: `${line.top}px`, width: `${line.width}px`, height: `${line.height}px` }} />)}
+    </>
+  );
 }
 
 function CrosshairGuides({ point, bounds }) {
@@ -515,6 +526,7 @@ function App() {
       {magnifierPoint && (draftRef.current || moveRef.current || resizeRef.current) && (
         <CrosshairGuides point={magnifierPoint} bounds={bootstrap.bounds} />
       )}
+      {selection && <ThirdsGrid bounds={bootstrap.bounds} />}
       {actionError && <div className="screenshot-error" role="alert" data-screenshot-control>{actionError}</div>}
       <button type="button" className="screenshot-cancel" data-screenshot-control onPointerDown={(event) => event.stopPropagation()} onClick={() => void cancelScreenshot()} aria-label={t('screenshot.cancelLabel')} title={t('screenshot.shortcutHint', { label: t('screenshot.cancelLabel'), shortcut: 'Esc' })}>{t('screenshot.cancel')}</button>
     </main>

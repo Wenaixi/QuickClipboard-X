@@ -43,6 +43,13 @@ test('normalizeBootstrap 使用显式显示器物理尺寸与逻辑尺寸', () =
   });
 });
 
+test('选区建立后渲染三分法构图辅助网格', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('{selection && <ThirdsGrid bounds={bootstrap.bounds} />}'));
+  assert.ok(source.includes('const grid = thirdsGrid(bounds);'));
+  assert.ok(source.includes('data-screenshot-thirds="true"'));
+});
+
 test('十字参考线在拖拽时渲染并贯穿画布', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('<CrosshairGuides point={magnifierPoint} bounds={bootstrap.bounds} />'));
