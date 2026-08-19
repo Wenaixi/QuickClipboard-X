@@ -147,6 +147,23 @@ test('帮助面板打开时按 Esc 关闭且失焦不打断处理', () => {
   assert.ok(source.includes('const handleBlur = () => { if (busyAction) return;'));
 });
 
+test('Ctrl+A 与调整中守卫必须先于动作与完成快捷键', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  // 顺序不变量：
+  // 1) 选区调整进行中（draft/move/resize）必须提前 return，使 Enter/数字键/Ctrl+S 等
+  //    完成快捷键不会在拖拽中途误触发完成（防误触核心）。
+  // 2) Ctrl+A 全选必须在调整守卫之前处理，保证任何状态下按 Ctrl+A 都能全选。
+  const ctrlAIndex = source.indexOf("if (event.ctrlKey && event.key.toLowerCase() === 'a') {", 610);
+  const guardIndex = source.indexOf('busyAction || draftRef.current || moveRef.current || resizeRef.current) return;', 610);
+  const hotkeyIndex = source.indexOf('const hotkeyAction = actionForHotkey(event.key);', 610);
+  const completeIndex = source.indexOf('const completeAction = completeShortcutForEvent(event);', 610);
+  assert.ok(ctrlAIndex >= 0, 'Ctrl+A 全选分支必须存在');
+  assert.ok(guardIndex >= 0, '调整中守卫必须存在');
+  assert.ok(hotkeyIndex >= 0 && completeIndex >= 0, '动作与完成快捷键必须存在');
+  assert.ok(ctrlAIndex < guardIndex, 'Ctrl+A 必须先于调整守卫处理');
+  assert.ok(guardIndex < hotkeyIndex && hotkeyIndex < completeIndex, '调整守卫必须先于动作与完成快捷键');
+});
+
 test('选区调整进行中键盘不触发完成与快速微调', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('busyAction || draftRef.current || moveRef.current || resizeRef.current) return;'));
