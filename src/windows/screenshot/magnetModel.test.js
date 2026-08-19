@@ -84,6 +84,44 @@ test('magnetSelection 任何输入都返回边界内最小 1px 合法选区', ()
   assert.ok(w.width >= 1 && w.height >= 1 && w.left >= 0, 'w 边越界输入必须夹紧且最小 1px');
 });
 
+test('magnetSelection 平移只改位置不改尺寸且吸附点精确落线', () => {
+  // 属性测试：平移路径（edge=''）必须保持选区尺寸不变，仅允许位移；
+  // 若发生吸附，吸附后的左缘/右缘/垂直中心必须精确落在 0 / 宽度 / 半宽之一。
+  const source = readFileSync(new URL('./magnetModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function magnetSelection');
+  const body = source.slice(start);
+  // 源码护栏：平移候选线必须完整——左缘 0 / 右缘 bounds.width / 垂直中心 bounds.width/2 三条缺一不可。
+  // 用完整多行块锚定平移路径（调整分支 edge='e' 也有单行右缘候选，contains 会被稀释，§10.4）。
+  const dxBlock = 'const dx = bestSnapDelta([\n      { delta: 0 - left },\n      { delta: bounds.width - right },\n      { delta: bounds.width / 2 - (left + right) / 2 },\n    ], tolerance);';
+  const dyBlock = 'const dy = bestSnapDelta([\n      { delta: 0 - top },\n      { delta: bounds.height - bottom },\n      { delta: bounds.height / 2 - (top + bottom) / 2 },\n    ], tolerance);';
+  assert.ok(body.includes(dxBlock), '平移 dx 候选必须完整（左缘/右缘/垂直中心）');
+  assert.ok(body.includes(dyBlock), '平移 dy 候选必须完整（顶缘/底缘/水平中心）');
+  const cases = [
+    { left: 3, top: 100, right: 403, bottom: 400 },
+    { left: 1517, top: 100, right: 1917, bottom: 400 },
+    { left: 953, top: 100, right: 973, bottom: 400 },
+    { left: 10, top: 100, right: 410, bottom: 400 },
+    { left: 2, top: 3, right: 402, bottom: 203 },
+    { left: 600, top: 500, right: 900, bottom: 700 },
+    { left: 0, top: 0, right: 1920, bottom: 1080 },
+    { left: -5, top: -5, right: 805, bottom: 605 },
+  ];
+  for (const input of cases) {
+    const result = magnetSelection(input, bounds);
+    const inWidth = input.right - input.left;
+    const inHeight = input.bottom - input.top;
+    assert.equal(result.width, inWidth, '平移不得改变宽度');
+    assert.equal(result.height, inHeight, '平移不得改变高度');
+    assert.ok(result.left >= 0 && result.top >= 0 && result.right <= bounds.width && result.bottom <= bounds.height, '平移结果必须完全在边界内');
+    // 吸附生效时，左缘/右缘/中心必须命中候选线；否则输出与输入一致。
+    const snappedLines = [0, bounds.width, bounds.width / 2];
+    const onLine = snappedLines.some((line) => result.left === line || result.right === line || (result.left + result.right) / 2 === line);
+    if (result.left !== input.left || result.right !== input.right) {
+      assert.ok(onLine, `发生吸附时必须精确落线: ${JSON.stringify(result)}`);
+    }
+  }
+});
+
 test('magnetSelection 拒绝无效输入', () => {
   assert.throws(() => magnetSelection({ left: 0, top: 0, right: 1, bottom: 1 }, { width: 0, height: 10 }), /边界尺寸必须为正数/);
   assert.throws(() => magnetSelection({ left: 0, top: 0, right: 1, bottom: 1 }, bounds, { tolerance: -1 }), /吸附容差不能为负数/);
