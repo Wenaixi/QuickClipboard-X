@@ -532,6 +532,26 @@ mod source_guards {
     }
 
     #[test]
+    fn pin_action_cleans_up_on_prepare_failure_and_commits_before_window_creation() {
+        let source = source_file("windows/screenshot_window/mod.rs");
+        let pin_start = source.find("\"pin\" => {").expect("缺少贴图截图动作");
+        let ai_start = source.find("\"ai\" => {").expect("缺少 AI 截图动作");
+        let pin_body = &source[pin_start..ai_start];
+        // prepare 失败两条路径（文件准备错误/线程错误）必须统一走失败清理，否则会话卡在处理中。
+        assert!(pin_body.contains("Ok(Err(error)) => {"), "缺少文件准备失败分支");
+        assert!(pin_body.contains("Err(error) => {"), "缺少线程失败分支");
+        // 逐分支精确断言：文件准备错误分支与线程失败分支都必须各自走统一清理。
+        let file_error_block = "Ok(Err(error)) => {\n                    finish_failed_screenshot(app, session_id);\n                    return Err(error.to_string());\n                }";
+        let thread_error_block = "Err(error) => {\n                    finish_failed_screenshot(app, session_id);\n                    return Err(format!(\"贴图文件准备线程失败: {error}\"));\n                }";
+        assert!(pin_body.contains(file_error_block), "文件准备错误分支必须走统一清理");
+        assert!(pin_body.contains(thread_error_block), "线程失败分支必须走统一清理");
+        // commit 必须先于贴图窗口创建：贴图窗口依赖已提交的持久化文件。
+        let commit = pin_body.find("begin_screenshot_commit(session_id)?;").expect("缺少会话提交");
+        let pin_window = pin_body.find("pin_image_from_file(").expect("缺少贴图窗口创建");
+        assert!(commit < pin_window, "必须先提交会话再创建贴图窗口");
+    }
+
+    #[test]
     fn save_dialog_cancel_runs_failure_cleanup_and_ends_session() {
         let source = source_file("windows/screenshot_window/mod.rs");
         let save_start = source.find("\"save\" => {").expect("缺少保存截图动作");
