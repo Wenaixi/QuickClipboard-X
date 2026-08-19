@@ -137,8 +137,6 @@ export const defaultSettings = {
   screenshotQuickSaveShortcut: '',
   screenshotQuickPinShortcut: '',
   screenshotQuickOcrShortcut: '',
-  screenshotAutoSave: true,
-  screenshotShowHints: true,
   screenshotElementDetection: 'all',
   screenshotMagnifierEnabled: true,
   screenshotHintsEnabled: true,

@@ -473,6 +473,26 @@ mod tests {
     }
 
     #[test]
+    fn dead_screenshot_settings_are_not_reintroduced() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/settings/model.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到设置模型源文件");
+        let code = source
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        // 死设置字段：无 UI 暴露、无业务消费，删除后不得回归（旧配置键由
+        // extra_fields 保留，不触发备份）。
+        assert!(
+            !code.contains("screenshot_auto_save") && !code.contains("screenshot_show_hints"),
+            "死设置字段 screenshot_auto_save / screenshot_show_hints 不得重新引入"
+        );
+    }
+
+    #[test]
     fn incompatible_field_recovers_each_compatible_shortcut_instead_of_resetting_settings() {
         let dir = test_dir();
         let target = dir.join("settings.json");
@@ -483,7 +503,7 @@ mod tests {
                 "screenshotShortcut": "Ctrl+Shift+S",
                 "quickpasteShortcut": "Alt+Q",
                 "navigateUpShortcut": "W",
-                "screenshotAutoSave": "not-a-number",
+                "screenshotHintsEnabled": "not-a-number",
                 "hotkeysEnabled": { "invalid": true },
                 "unknownFutureSetting": { "keepForFuture": true }
             }"#,
@@ -499,8 +519,8 @@ mod tests {
         assert_eq!(loaded.0.quickpaste_shortcut, "Alt+Q");
         assert_eq!(loaded.0.navigate_up_shortcut, "W");
         assert_eq!(
-            loaded.0.screenshot_auto_save,
-            AppSettings::default().screenshot_auto_save
+            loaded.0.screenshot_hints_enabled,
+            AppSettings::default().screenshot_hints_enabled
         );
         let backup = incompatible_settings_backup_path(&target);
         assert!(backup.exists(), "不兼容配置必须先保留完整备份");
