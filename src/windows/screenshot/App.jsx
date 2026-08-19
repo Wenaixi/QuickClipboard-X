@@ -418,7 +418,11 @@ function App() {
     // 先清空交互状态：close 触发的 blur 若 selectionRef 仍非空，handleBlur 会误判为
     // 取消而发出多余的 cancel_screenshot 请求（会话已完成返回 NoActiveSession）。
     resetInteractionState({ draftRef, selectionRef, moveRef, resizeRef, setSelection, setSelecting, setMoving, setResizing });
-    await getCurrentWindow().close().catch(() => {});
+    // 生命周期模式：dispose 销毁窗口释放资源；quick/auto 仅隐藏复用（后端 cleanup_plan
+    // 会 hide，React 状态已清空，下次 configure 事件再次重置，不会闪现旧选区）。
+    if (bootstrap.lifecycleMode === 'dispose') {
+      await getCurrentWindow().close().catch(() => {});
+    }
   };
 
   const handlePointerDown = (event) => {

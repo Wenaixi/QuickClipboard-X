@@ -38,6 +38,9 @@ pub struct ScreenshotBootstrap {
     pub screenshot_ai_configured: bool,
     pub screenshot_magnifier_enabled: bool,
     pub magnifier_background: Option<String>,
+    // 截图窗口生命周期模式：quick（隐藏复用）/ dispose（销毁）/ auto（超时释放），
+    // 前端据此决定成功路径是否关闭窗口，实现设置项的真实后端消费（此前零消费）。
+    pub lifecycle_mode: String,
 }
 
 #[derive(Default)]
@@ -79,6 +82,7 @@ fn bootstrap_for_session(
     screenshot_ai_configured: bool,
     screenshot_magnifier_enabled: bool,
     magnifier_background: Option<String>,
+    lifecycle_mode: String,
 ) -> ScreenshotBootstrap {
     ScreenshotBootstrap {
         device_pixel_ratio: monitor.scale_factor,
@@ -90,6 +94,7 @@ fn bootstrap_for_session(
         screenshot_ai_configured,
         screenshot_magnifier_enabled,
         magnifier_background,
+        lifecycle_mode,
     }
 }
 
@@ -272,6 +277,17 @@ mod source_guards {
         );
         settings.screenshot_ai_enabled = true;
         assert!(validate_ai_screenshot_action(&settings).is_ok());
+    }
+
+    #[test]
+    fn bootstrap_carries_screenshot_window_lifecycle_mode() {
+        let source = source_file("windows/screenshot_window/mod.rs");
+        assert!(source.contains("pub lifecycle_mode: String"), "bootstrap 必须携带生命周期模式");
+        // 用 \n+缩进行首锚定生产调用点，避免命中测试自身断言字面量（§10.4 自指陷阱）。
+        assert!(
+            source.contains("\n        settings.screenshot_window_lifecycle_mode.clone(),"),
+            "bootstrap 必须从设置读取生命周期模式"
+        );
     }
 
     #[test]
@@ -660,6 +676,7 @@ pub fn start_screenshot(app: &AppHandle, initial_action: Option<&str>) -> Result
         screenshot_ai_is_configured(&settings),
         settings.screenshot_magnifier_enabled,
         magnifier_background,
+        settings.screenshot_window_lifecycle_mode.clone(),
     );
     if let Err(error) = configure_window(&window, &monitor) {
         finish_failed_screenshot(app, &bootstrap.session_id);

@@ -22,5 +22,8 @@ export function normalizeBootstrap(payload = {}, viewport = {}) {
     screenshotAiConfigured: payload.screenshotAiConfigured === true,
     screenshotMagnifierEnabled: payload.screenshotMagnifierEnabled !== false,
     magnifierBackground: typeof payload.magnifierBackground === 'string' ? payload.magnifierBackground : null,
+    // 截图窗口生命周期模式：quick 隐藏复用 / dispose 销毁 / auto 超时释放。
+    // 默认 quick 与后端 AppSettings 默认一致，旧会话（无此字段）按 quick 处理。
+    lifecycleMode: payload.lifecycleMode === 'dispose' || payload.lifecycleMode === 'auto' ? payload.lifecycleMode : 'quick',
   };
 }
