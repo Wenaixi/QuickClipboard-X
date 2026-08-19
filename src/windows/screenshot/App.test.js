@@ -368,6 +368,17 @@ test('选区内部按下进入整体平移模式', () => {
   assert.ok(source.includes('moveRef.current = { pointerId: event.pointerId, start, selectionStart: selectionRef.current };'));
 });
 
+test('双击选区内部时触发复制完成动作且防重入', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  // 双击是选区完成的快捷入口：无选区/控件区/选区外必须直接返回。
+  const doubleStart = source.indexOf('const handleDoubleClick = (event) => {');
+  const doubleBody = source.slice(doubleStart, doubleStart + 500);
+  assert.ok(doubleBody.includes("if (!selectionRef.current || busyAction) return;"), '无选区或动作中必须直接返回');
+  assert.ok(doubleBody.includes("closest('[data-screenshot-control]')"), '控件区必须忽略双击');
+  assert.ok(doubleBody.includes("hitSelectionInterior(point, selectionRef.current, 0)"), '必须命中选区内部才完成');
+  assert.ok(doubleBody.includes("void completeScreenshot('copy');"), '双击必须触发复制完成动作');
+});
+
 test('双击选区内部时完成截图且忽略控件区', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('onDoubleClick={handleDoubleClick}'));
