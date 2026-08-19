@@ -183,6 +183,24 @@ mod tests {
     }
 
     #[test]
+    fn save_action_uses_atomic_copy_and_content_addressed_filename() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/screenshot/actions.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读取截图动作源码失败");
+        let save_start = source.find("pub fn save_screenshot").expect("缺少保存动作");
+        let save_body = &source[save_start..source.find("pub fn choose_screenshot_save_destination").expect("缺少选择保存函数")];
+        // 保存必须走原子复制：普通 fs::copy 半写入会损坏目标文件。
+        assert!(save_body.contains("copy_file_atomic"), "保存必须走原子复制");
+        // 默认文件名必须内容寻址，避免不同截图互相覆盖。
+        let choose_start = source.find("pub fn choose_screenshot_save_destination").expect("缺少选择保存函数");
+        let choose_body = &source[choose_start..source.find("#[cfg(test)]").expect("缺少测试锚点")];
+        assert!(choose_body.contains("QC_{}.png"), "默认文件名必须使用内容寻址 id");
+        assert!(choose_body.contains("blocking_save_file()"), "必须弹出系统保存对话框");
+    }
+
+    #[test]
     fn screenshot_history_content_contains_content_addressed_image_reference() {
         let stored = StoredScreenshot {
             relative_path: "clipboard_images/0123456789abcdef.png".to_string(),
