@@ -449,6 +449,26 @@ test('松开时按住 Shift 生成正方形且跳过选窗逻辑', () => {
   assert.ok(source.includes('if (!square && clicked && bootstrap.sessionId) {'));
 });
 
+test('选区边缘命中优先于内部平移且记录历史进入调整', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const downIndex = source.indexOf('const handlePointerDown = (event) => {');
+  const body = source.slice(downIndex);
+  // 顺序不变量：边缘命中检查必须先于内部平移检查。边缘点若落到平移分支，
+  // 手柄拖拽会变成选区整体移动（ShareX 行为：边缘优先调整大小）。
+  const edgeHit = body.indexOf('const edge = hitSelectionEdge(start, selectionRef.current, RESIZE_TOLERANCE);');
+  const interiorHit = body.indexOf('if (hitSelectionInterior(start, selectionRef.current, MOVE_INSET)) {');
+  assert.ok(edgeHit >= 0 && interiorHit >= 0 && edgeHit < interiorHit, '边缘命中必须先于内部平移');
+  // 边缘命中后必须保留撤销历史（调整可被 Ctrl+Z 撤销）并进入 resize 模式。
+  const resizeBlock = body.slice(edgeHit, edgeHit + 400);
+  assert.ok(resizeBlock.includes('selectionHistoryRef.current = pushSelectionHistory(selectionHistoryRef.current, selectionRef.current);'), '边缘命中必须保留撤销历史');
+  assert.ok(resizeBlock.includes('resizeRef.current = { pointerId: event.pointerId, edge };'), '边缘命中必须设置 resize 引用');
+  assert.ok(resizeBlock.includes('setResizing(true);'), '边缘命中必须进入调整状态');
+  // 内部命中（平移）也必须保留撤销历史。
+  const moveBlock = body.slice(interiorHit, interiorHit + 350);
+  assert.ok(moveBlock.includes('pushSelectionHistory'), '内部平移也必须保留撤销历史');
+  assert.ok(moveBlock.includes('moveRef.current = { pointerId: event.pointerId, start, selectionStart: selectionRef.current };'), '内部命中必须设置移动引用');
+});
+
 test('选区边缘按下进入调整大小模式', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('const edge = hitSelectionEdge(start, selectionRef.current, RESIZE_TOLERANCE);'));
