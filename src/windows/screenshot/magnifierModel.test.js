@@ -25,6 +25,29 @@ test('magnifierGeometry 采样源夹紧到显示器边界且不超出', () => {
   assert.ok(geometry.source.top + geometry.source.rows <= bounds.height);
 });
 
+test('magnifierGeometry 任意光标位置面板不越界且采样源完整', () => {
+  const corners = [
+    { x: 0, y: 0 },
+    { x: bounds.width - 1, y: 0 },
+    { x: 0, y: bounds.height - 1 },
+    { x: bounds.width - 1, y: bounds.height - 1 },
+    { x: bounds.width / 2, y: bounds.height / 2 },
+    { x: -50, y: -50 },
+    { x: bounds.width + 50, y: bounds.height + 50 },
+  ];
+  for (const point of corners) {
+    const geometry = magnifierGeometry(point, bounds);
+    // 面板必须完全落在显示器边界内（含 8px 边距）。
+    assert.ok(geometry.panel.left >= 8, `left=${point.x} 面板 left 越界`);
+    assert.ok(geometry.panel.top >= 8, `top=${point.y} 面板 top 越界`);
+    assert.ok(geometry.panel.left + geometry.panel.width <= bounds.width - 8, `left=${point.x} 面板右缘越界`);
+    assert.ok(geometry.panel.top + geometry.panel.height <= bounds.height - 8, `top=${point.y} 面板下缘越界`);
+    // 采样源必须完整落在显示器边界内。
+    assert.ok(geometry.source.left >= 0 && geometry.source.left + geometry.source.cols <= bounds.width, '采样源横向越界');
+    assert.ok(geometry.source.top >= 0 && geometry.source.top + geometry.source.rows <= bounds.height, '采样源纵向越界');
+  }
+});
+
 test('magnifierGeometry 拒绝无效点、边界或负面板尺寸', () => {
   assert.throws(() => magnifierGeometry({ x: Number.NaN, y: 1 }, bounds), /点 x 必须是有限数字/);
   assert.throws(() => magnifierGeometry({ x: 1, y: 1 }, { width: 0, height: 10 }), /边界尺寸必须为正数/);
