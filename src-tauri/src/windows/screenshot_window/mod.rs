@@ -375,6 +375,35 @@ mod source_guards {
     }
 
     #[test]
+    fn ai_failure_paths_must_cleanup_via_unified_failure_handler() {
+        let source = source_file("windows/screenshot_window/mod.rs");
+        let ai_start = source.find("\"ai\" => {").expect("缺少 AI 截图动作");
+        let other_idx = source[ai_start..]
+            .find("        other =>")
+            .map(|offset| ai_start + offset)
+            .expect("缺少动作兜底");
+        let ai_body = &source[ai_start..other_idx];
+        // AI 识别失败（Err）与未识别出文本（Ok 空）两条失败路径必须统一走失败清理。
+        assert!(ai_body.contains("Err(error) => Err(error)"), "识别错误必须原样向上传播");
+        assert!(ai_body.contains("Ok(_) => Err(\"AI 未识别出文本\".to_string())"), "空识别结果必须报错");
+        // 生产收口在 other 兜底之后；ai_body 内 rfind 会命中测试模块自身的断言字面量
+        // （§10.4 自指陷阱），必须从兜底之后正向找。
+        let cleanup_start = source[other_idx..]
+            .find("if let Err(error) = action_result {")
+            .map(|offset| other_idx + offset)
+            .expect("缺少动作结果统一收口");
+        // 收口之后是正常完成路径；必须截到函数末尾，否则后缀含测试模块自身的
+        // finish_failed_screenshot 字面量会让 contains 永远为真（§10.4 自指陷阱）。
+        let function_end = source[cleanup_start..]
+            .find("// 正常完成")
+            .map(|offset| cleanup_start + offset)
+            .expect("缺少正常完成注释锚点");
+        let cleanup_tail = &source[cleanup_start..function_end];
+        assert!(cleanup_tail.contains("finish_failed_screenshot(app, session_id);"), "AI 失败必须走统一失败清理");
+        assert!(cleanup_tail.contains("return Err(error);"), "统一收口必须传播错误");
+    }
+
+    #[test]
     fn save_and_pin_actions_keep_dialogs_on_ui_path_and_file_work_off_runtime() {
         let source = source_file("windows/screenshot_window/mod.rs");
         let save_start = source.find("\"save\" => {").expect("缺少保存截图动作");
