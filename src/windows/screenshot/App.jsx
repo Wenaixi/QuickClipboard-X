@@ -6,11 +6,13 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { normalizeBootstrap } from './screenshotModel.js';
 import {
   createRafWriter,
+  hitSelectionEdge,
   hitSelectionInterior,
   isClickGesture,
   isCurrentGesture,
   normalizeSelection,
   nudgeSelection,
+  resizeSelection,
   selectionForPointerGesture,
   selectionFromPhysical,
   selectionToPhysical,
@@ -32,6 +34,7 @@ const ACTIONS = [
 const NUDGE_STEP = 1;
 const NUDGE_FAST_STEP = 10;
 const MOVE_INSET = 4;
+const RESIZE_TOLERANCE = 4;
 const NUDGE_DIRECTIONS = {
   ArrowUp: [0, -1],
   ArrowDown: [0, 1],
@@ -86,6 +89,7 @@ function App() {
   const selectionRef = useRef(null);
   const pointerIdRef = useRef(null);
   const moveRef = useRef(null);
+  const resizeRef = useRef(null);
   const gestureIdRef = useRef(0);
   const [bootstrap, setBootstrap] = useState(() => normalizeBootstrap(globalThis.__QC_SCREENSHOT_BOOT__ || {}, {
     width: globalThis.innerWidth,
@@ -206,10 +210,18 @@ function App() {
     const root = rootRef.current;
     if (!root) return;
     const start = pointFromPointerEvent(event, root);
-    if (selectionRef.current && hitSelectionInterior(start, selectionRef.current, MOVE_INSET)) {
-      moveRef.current = { pointerId: event.pointerId, start, selectionStart: selectionRef.current };
-      root.setPointerCapture?.(event.pointerId);
-      return;
+    if (selectionRef.current) {
+      const edge = hitSelectionEdge(start, selectionRef.current, RESIZE_TOLERANCE);
+      if (edge) {
+        resizeRef.current = { pointerId: event.pointerId, edge };
+        root.setPointerCapture?.(event.pointerId);
+        return;
+      }
+      if (hitSelectionInterior(start, selectionRef.current, MOVE_INSET)) {
+        moveRef.current = { pointerId: event.pointerId, start, selectionStart: selectionRef.current };
+        root.setPointerCapture?.(event.pointerId);
+        return;
+      }
     }
     gestureIdRef.current += 1;
     draftRef.current = { start, end: start };
@@ -223,6 +235,14 @@ function App() {
 
   const handlePointerMove = (event) => {
     const root = rootRef.current;
+    const resizing = resizeRef.current;
+    if (resizing && root && event.pointerId === resizing.pointerId) {
+      const current = pointFromPointerEvent(event, root);
+      const next = resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds);
+      selectionRef.current = next;
+      rafWriterRef.current?.schedule(next);
+      return;
+    }
     const moving = moveRef.current;
     if (moving && root && event.pointerId === moving.pointerId) {
       const current = pointFromPointerEvent(event, root);
@@ -239,6 +259,20 @@ function App() {
 
   const handlePointerUp = async (event) => {
     const root = rootRef.current;
+    const resizing = resizeRef.current;
+    if (resizing && root && event.pointerId === resizing.pointerId) {
+      event.preventDefault();
+      const current = pointFromPointerEvent(event, root);
+      const finalSelection = resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds);
+      resizeRef.current = null;
+      pointerIdRef.current = null;
+      rafWriterRef.current?.cancel();
+      root.releasePointerCapture?.(event.pointerId);
+      applySelectionStyle(root, finalSelection);
+      selectionRef.current = finalSelection;
+      setSelection(finalSelection);
+      return;
+    }
     const moving = moveRef.current;
     if (moving && root && event.pointerId === moving.pointerId) {
       event.preventDefault();

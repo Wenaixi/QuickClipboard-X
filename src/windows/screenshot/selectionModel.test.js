@@ -2,10 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createRafWriter,
+  hitSelectionEdge,
   hitSelectionInterior,
   isCurrentGesture,
   normalizeSelection,
   nudgeSelection,
+  resizeSelection,
   selectionForPointerGesture,
   selectionFromPhysical,
   selectionToPhysical,
@@ -208,6 +210,99 @@ test('hitSelectionInterior 拒绝无效点、选区或负边距', () => {
   assert.throws(() => hitSelectionInterior({ x: Number.NaN, y: 1 }, { left: 0, top: 0, right: 1, bottom: 1 }), /点 x 必须是有限数字/);
   assert.throws(() => hitSelectionInterior({ x: 1, y: 1 }, { left: 0, top: 0, right: 1 }, 0), /selection.bottom 必须是有限数字/);
   assert.throws(() => hitSelectionInterior({ x: 1, y: 1 }, { left: 0, top: 0, right: 1, bottom: 1 }, -1), /内部边距不能为负数/);
+});
+
+test('hitSelectionEdge 命中边缘并返回方向, 内部点返回 null', () => {
+  const selection = { left: 100, top: 80, right: 300, bottom: 240 };
+  assert.equal(hitSelectionEdge({ x: 102, y: 160 }, selection), 'w');
+  assert.equal(hitSelectionEdge({ x: 298, y: 160 }, selection), 'e');
+  assert.equal(hitSelectionEdge({ x: 200, y: 82 }, selection), 'n');
+  assert.equal(hitSelectionEdge({ x: 200, y: 238 }, selection), 's');
+  assert.equal(hitSelectionEdge({ x: 102, y: 82 }, selection), 'nw');
+  assert.equal(hitSelectionEdge({ x: 298, y: 238 }, selection), 'se');
+  assert.equal(hitSelectionEdge({ x: 200, y: 160 }, selection), null);
+  assert.equal(hitSelectionEdge({ x: 50, y: 160 }, selection), null);
+});
+
+test('hitSelectionEdge 自定义容差并拒绝负容差', () => {
+  const selection = { left: 100, top: 80, right: 300, bottom: 240 };
+  assert.equal(hitSelectionEdge({ x: 108, y: 160 }, selection, 8), 'w');
+  assert.equal(hitSelectionEdge({ x: 200, y: 160 }, selection, 8), null);
+  assert.throws(() => hitSelectionEdge({ x: 1, y: 1 }, selection, -1), /边缘容差不能为负数/);
+});
+
+test('resizeSelection 拖动右边界向右增大宽度', () => {
+  const resized = resizeSelection(
+    { left: 100, top: 80, right: 300, bottom: 240, width: 200, height: 160 },
+    'e',
+    { x: 400, y: 200 },
+    bounds
+  );
+  assert.deepEqual(selectionValues(resized), {
+    left: 100,
+    top: 80,
+    right: 400,
+    bottom: 240,
+    width: 300,
+    height: 160,
+  });
+});
+
+test('resizeSelection 拖动左边界向左扩展且不翻转', () => {
+  const resized = resizeSelection(
+    { left: 100, top: 80, right: 300, bottom: 240, width: 200, height: 160 },
+    'w',
+    { x: 50, y: 160 },
+    bounds
+  );
+  assert.deepEqual(selectionValues(resized), {
+    left: 50,
+    top: 80,
+    right: 300,
+    bottom: 240,
+    width: 250,
+    height: 160,
+  });
+});
+
+test('resizeSelection 拖动角点同时调整两个方向', () => {
+  const resized = resizeSelection(
+    { left: 100, top: 80, right: 300, bottom: 240, width: 200, height: 160 },
+    'nw',
+    { x: 80, y: 60 },
+    bounds
+  );
+  assert.deepEqual(selectionValues(resized), {
+    left: 80,
+    top: 60,
+    right: 300,
+    bottom: 240,
+    width: 220,
+    height: 180,
+  });
+});
+
+test('resizeSelection 越过对边时夹到最小 1px 且边界夹紧', () => {
+  const resized = resizeSelection(
+    { left: 100, top: 80, right: 300, bottom: 240, width: 200, height: 160 },
+    'e',
+    { x: 50, y: 160 },
+    bounds
+  );
+  assert.deepEqual(selectionValues(resized), {
+    left: 100,
+    top: 80,
+    right: 101,
+    bottom: 240,
+    width: 1,
+    height: 160,
+  });
+});
+
+test('resizeSelection 拒绝非法边缘或无效输入', () => {
+  assert.throws(() => resizeSelection({ left: 0, top: 0, right: 1, bottom: 1 }, 'x', { x: 1, y: 1 }, bounds), /edge 必须是 n\/s\/e\/w 组合/);
+  assert.throws(() => resizeSelection({ left: 0, top: 0, right: 1, bottom: 1 }, '', { x: 1, y: 1 }, bounds), /edge 必须是 n\/s\/e\/w 组合/);
+  assert.throws(() => resizeSelection({ left: 0, top: 0, right: 1, bottom: 1 }, 'e', { x: 1, y: Number.NaN }, bounds), /点 y 必须是有限数字/);
 });
 
 test('nudgeSelection 按 1px 移动选区并保持尺寸不变', () => {
