@@ -6,6 +6,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { normalizeBootstrap } from './screenshotModel.js';
 import { magnifierGeometry } from './magnifierModel.js';
 import { coordinatePanelPosition, formatCursorCoordinate } from './coordinateModel.js';
+import { guideLines } from './guideModel.js';
 import {
   createRafWriter,
   hitSelectionEdge,
@@ -63,6 +64,16 @@ function coordinatePanelStyle(point, bounds) {
     left: `${position.left}px`,
     top: `${position.top}px`,
   };
+}
+
+function CrosshairGuides({ point, bounds }) {
+  const lines = guideLines(point, bounds);
+  return (
+    <>
+      <div className="screenshot-guide screenshot-guide-v" data-screenshot-guide="true" style={{ left: `${lines.vertical.left}px`, top: `${lines.vertical.top}px`, width: `${lines.vertical.width}px`, height: `${lines.vertical.height}px` }} />
+      <div className="screenshot-guide screenshot-guide-h" data-screenshot-guide="true" style={{ left: `${lines.horizontal.left}px`, top: `${lines.horizontal.top}px`, width: `${lines.horizontal.width}px`, height: `${lines.horizontal.height}px` }} />
+    </>
+  );
 }
 
 function magnifierCanvasStyle(point, bounds) {
@@ -439,6 +450,9 @@ function App() {
       )}
       {magnifierPoint && (draftRef.current || moveRef.current || resizeRef.current) && (
         <div className="screenshot-coordinates" data-screenshot-coordinates="true" style={coordinatePanelStyle(magnifierPoint, bootstrap.bounds)}>{formatCursorCoordinate(magnifierPoint)}</div>
+      )}
+      {magnifierPoint && (draftRef.current || moveRef.current || resizeRef.current) && (
+        <CrosshairGuides point={magnifierPoint} bounds={bootstrap.bounds} />
       )}
       {actionError && <div className="screenshot-error" role="alert" data-screenshot-control>{actionError}</div>}
       <button type="button" className="screenshot-cancel" data-screenshot-control onPointerDown={(event) => event.stopPropagation()} onClick={() => void cancelScreenshot()} aria-label={t('screenshot.cancelLabel')} title={t('screenshot.shortcutHint', { label: t('screenshot.cancelLabel'), shortcut: 'Esc' })}>{t('screenshot.cancel')}</button>

@@ -43,6 +43,13 @@ test('normalizeBootstrap 使用显式显示器物理尺寸与逻辑尺寸', () =
   });
 });
 
+test('十字参考线在拖拽时渲染并贯穿画布', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('<CrosshairGuides point={magnifierPoint} bounds={bootstrap.bounds} />'));
+  assert.ok(source.includes('const lines = guideLines(point, bounds);'));
+  assert.ok(source.includes('data-screenshot-guide="true"'));
+});
+
 test('坐标指示面板在拖拽时渲染并显示光标坐标', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('<div className="screenshot-coordinates" data-screenshot-coordinates="true" style={coordinatePanelStyle(magnifierPoint, bootstrap.bounds)}>{formatCursorCoordinate(magnifierPoint)}</div>'));
