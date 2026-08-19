@@ -503,6 +503,26 @@ test('选区调整前记录历史且 Ctrl+Z 撤销恢复', () => {
   assert.ok(source.includes('selectionHistoryRef.current = [];'));
 });
 
+test('Ctrl+Z 撤销在调整守卫后且空历史保护当前选区并双写同步', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const keydownIndex = source.indexOf('const handleKeyDown = (event) => {');
+  const body = source.slice(keydownIndex);
+  // 顺序不变量：撤销分支必须位于调整中守卫之后，拖拽/调整进行中 Ctrl+Z 不触发撤销（防误触）。
+  const guardIndex = body.indexOf('busyAction || draftRef.current || moveRef.current || resizeRef.current) return;');
+  const zIndex = body.indexOf("if (event.ctrlKey && event.key.toLowerCase() === 'z') {");
+  assert.ok(guardIndex >= 0 && zIndex >= 0 && guardIndex < zIndex, '撤销分支必须位于调整中守卫之后');
+  // 空历史保护：undo 返回 null 时必须直接返回，不得触碰/清空当前选区。
+  const undoIdx = body.indexOf('const undone = undoSelectionHistory(selectionHistoryRef.current);');
+  const nullGuard = body.indexOf('if (!undone) return;', undoIdx);
+  assert.ok(nullGuard >= 0 && nullGuard < undoIdx + 200, 'undo 空历史必须直接返回保护当前选区');
+  // 双写同步：撤销恢复必须同时写 selectionHistoryRef、selectionRef 与 setSelection，缺一不可。
+  const undoBlock = body.slice(undoIdx, undoIdx + 400);
+  assert.ok(undoBlock.includes('selectionHistoryRef.current = undone.history;'), '撤销后必须同步历史 ref');
+  assert.ok(undoBlock.includes('selectionRef.current = undone.selection;'), '撤销后必须同步选区 ref');
+  assert.ok(undoBlock.includes('setSelection(undone.selection);'), '撤销后必须同步选区 state');
+  assert.ok(undoBlock.includes('applySelectionStyle(rootRef.current, undone.selection);'), '撤销后必须重绘样式');
+});
+
 test('焦点落在工具栏按钮时全局快捷键不抢原生激活', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   const keydownIndex = source.indexOf('const handleKeyDown = (event) => {');
