@@ -95,9 +95,12 @@ fn bootstrap_for_session(
 
 // 放大镜背景快照：在会话开始时捕获一次当前显示器全屏并编码为 data URL。
 // 快照只作为放大镜采样源，捕获失败时优雅降级为 None，不阻塞截图主流程。
-fn capture_magnifier_background(app: &AppHandle, monitor: &ScreenshotMonitorInfo) -> Option<String> {
-    let cursor = app.cursor_position().ok()?;
-    let hmonitor = get_monitor_handle(cursor.x as i32, cursor.y as i32);
+fn capture_magnifier_background(monitor: &ScreenshotMonitorInfo) -> Option<String> {
+    // 以监视器中心取句柄与采样原点，避免捕获期间光标移动到其它显示器导致快照来源错位。
+    let hmonitor = get_monitor_handle(
+        monitor.left.saturating_add((monitor.physical_width / 2) as i32),
+        monitor.top.saturating_add((monitor.physical_height / 2) as i32),
+    );
     let selection = CaptureRect {
         left: 0,
         top: 0,
@@ -340,6 +343,37 @@ mod source_guards {
     }
 
     #[test]
+    fn save_dialog_cancel_runs_failure_cleanup_and_ends_session() {
+        let source = source_file("windows/screenshot_window/mod.rs");
+        let save_start = source.find("\"save\" => {").expect("缺少保存截图动作");
+        let pin_start = source.find("\"pin\" => {").expect("缺少贴图截图动作");
+        let save_body = &source[save_start..pin_start];
+        let cancel = save_body.find("Ok(None) => {").expect("保存对话框取消分支缺失");
+        let after_cancel = &save_body[cancel..];
+        let cleanup = after_cancel
+            .find("finish_failed_screenshot(app, session_id);")
+            .expect("保存取消必须走统一失败清理");
+        let cancel_message = after_cancel.find("\"已取消保存截图\"").expect("缺少取消保存提示");
+        assert!(cleanup < cancel_message, "取消分支必须先清理再返回错误");
+    }
+
+    #[test]
+    fn existing_session_skips_reconfigure_to_keep_monitor_consistent() {
+        let source = source_file("windows/screenshot_window/mod.rs");
+        // 测试模块自身含 "pub fn start_screenshot" 字面量（§10.4 自指陷阱），
+        // 用 rfind 取文件中最后出现的真实函数签名，天然排除测试模块内的同名字面。
+        let start = source.rfind("pub fn start_screenshot").expect("缺少截图启动函数");
+        let body = &source[start..];
+        let existing = body
+            .find("if existing {\n        // 已有会话：窗口已按原显示器配置，仅重新显示与聚焦")
+            .expect("已有会话提前返回分支缺失");
+        let show = body.find("window.show()").expect("已有会话分支缺少重新显示");
+        let ok = body.find("return Ok(());").expect("已有会话分支缺少提前返回");
+        assert!(existing < show && show < ok, "已有会话必须重新显示并提前返回: existing={existing} show={show} ok={ok}");
+        assert!(body.contains("capture_magnifier_background(&monitor)"), "放大镜背景必须用已解析监视器采样");
+    }
+
+    #[test]
     fn screenshot_bootstrap_carries_magnifier_flag_and_background_snapshot() {
         let source = source_file("windows/screenshot_window/mod.rs");
         assert!(source.contains("pub screenshot_magnifier_enabled: bool"));
@@ -485,8 +519,21 @@ pub fn start_screenshot(app: &AppHandle, initial_action: Option<&str>) -> Result
             }
         }
     };
+    if existing {
+        // 已有会话：窗口已按原显示器配置，仅重新显示与聚焦，
+        // 避免用新光标显示器重配导致视图层与捕获层显示器信息错位。
+        if let Err(error) = window.show() {
+            finish_failed_screenshot(app, &session_id);
+            return Err(format!("显示截图窗口失败: {error}"));
+        }
+        if let Err(error) = window.set_focus() {
+            finish_failed_screenshot(app, &session_id);
+            return Err(format!("聚焦截图窗口失败: {error}"));
+        }
+        return Ok(());
+    }
     let magnifier_background = if settings.screenshot_magnifier_enabled {
-        capture_magnifier_background(app, &monitor)
+        capture_magnifier_background(&monitor)
     } else {
         None
     };
@@ -515,12 +562,6 @@ pub fn start_screenshot(app: &AppHandle, initial_action: Option<&str>) -> Result
         if let Err(error) = window.emit(SCREENSHOT_CONFIGURE_EVENT, &bootstrap) {
             finish_failed_screenshot(app, &bootstrap.session_id);
             return Err(format!("发送截图会话配置失败: {error}"));
-        }
-    }
-    if existing {
-        if let Err(error) = window.set_focus() {
-            finish_failed_screenshot(app, &bootstrap.session_id);
-            return Err(format!("聚焦截图窗口失败: {error}"));
         }
     }
     Ok(())
@@ -721,8 +762,15 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
             }
             let destination = match choose_screenshot_save_destination(&stored, app) {
                 Ok(Some(destination)) => destination,
-                Ok(None) => return Ok(()),
-                Err(error) => return Err(error.to_string()),
+                Ok(None) => {
+                    // 用户在保存对话框点了取消：等同保存失败，统一走失败清理避免会话卡在处理中。
+                    finish_failed_screenshot(app, session_id);
+                    return Err("已取消保存截图".to_string());
+                }
+                Err(error) => {
+                    finish_failed_screenshot(app, session_id);
+                    return Err(error.to_string());
+                }
             };
             if !is_current_processing_session(session_id) {
                 finish_failed_screenshot(app, session_id);
@@ -744,8 +792,14 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
             let stored_for_pin = stored.clone();
             let pin_path = match tokio::task::spawn_blocking(move || prepare_pin_path(&stored_for_pin)).await {
                 Ok(Ok(pin_path)) => pin_path,
-                Ok(Err(error)) => return Err(error.to_string()),
-                Err(error) => return Err(format!("贴图文件准备线程失败: {error}")),
+                Ok(Err(error)) => {
+                    finish_failed_screenshot(app, session_id);
+                    return Err(error.to_string());
+                }
+                Err(error) => {
+                    finish_failed_screenshot(app, session_id);
+                    return Err(format!("贴图文件准备线程失败: {error}"));
+                }
             };
             if !is_current_processing_session(session_id) {
                 finish_failed_screenshot(app, session_id);
@@ -768,6 +822,7 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
                 Err("已取消云端 AI 识别".to_string())
             } else {
                 if !is_current_processing_session(session_id) {
+                    finish_failed_screenshot(app, session_id);
                     return Err("截图会话已取消".to_string());
                 }
                 let result = recognize_image(
@@ -780,6 +835,7 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
                 .await
                 .map_err(|e| e.to_string());
                 if !is_current_processing_session(session_id) {
+                    finish_failed_screenshot(app, session_id);
                     return Err("截图会话已取消".to_string());
                 }
                 match result {
