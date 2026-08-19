@@ -860,7 +860,9 @@
       "refreshModels": "刷新模型列表",
       "test": "测试配置",
       "testDesc": "测试当前AI配置是否正常",
-      "testButton": "测试连接"
+      "testButton": "测试连接",
+      "testSuccess": "AI 配置可用",
+      "testFailed": "AI 配置测试失败：{{error}}"
     },
     "translation": {
       "title": "AI翻译设置",
