@@ -18,6 +18,7 @@ import { formatPixelSize, formatMegapixels, formatAspectRatio } from './sizeMode
 import { magnetSelection } from './magnetModel.js';
 import { toolbarPlacement, toolbarStyle as toolbarStyleModel } from './toolbarModel.js';
 import { pushSelectionHistory, undoSelectionHistory } from './historyModel.js';
+import { rulerTicks } from './rulerModel.js';
 import {
   createRafWriter,
   hitSelectionEdge,
@@ -108,6 +109,25 @@ function ThirdsGrid({ bounds }) {
     <>
       {grid.vertical.map((line) => <div key={`v-${line.left}`} className="screenshot-thirds screenshot-thirds-v" data-screenshot-thirds="true" style={{ left: `${line.left}px`, top: `${line.top}px`, width: `${line.width}px`, height: `${line.height}px` }} />)}
       {grid.horizontal.map((line) => <div key={`h-${line.top}`} className="screenshot-thirds screenshot-thirds-h" data-screenshot-thirds="true" style={{ left: `${line.left}px`, top: `${line.top}px`, width: `${line.width}px`, height: `${line.height}px` }} />)}
+    </>
+  );
+}
+
+function Ruler({ bounds }) {
+  const horizontalTicks = rulerTicks(bounds.width);
+  const verticalTicks = rulerTicks(bounds.height);
+  return (
+    <>
+      <div className="screenshot-ruler screenshot-ruler-h" aria-hidden="true">
+        {horizontalTicks.map((tick) => (
+          <span key={tick.position} className={tick.label !== null ? 'screenshot-ruler-tick screenshot-ruler-tick-major' : 'screenshot-ruler-tick'} style={{ left: `${tick.position}px` }}>{tick.label ?? ''}</span>
+        ))}
+      </div>
+      <div className="screenshot-ruler screenshot-ruler-v" aria-hidden="true">
+        {verticalTicks.map((tick) => (
+          <span key={tick.position} className={tick.label !== null ? 'screenshot-ruler-tick screenshot-ruler-tick-major' : 'screenshot-ruler-tick'} style={{ top: `${tick.position}px` }}>{tick.label ?? ''}</span>
+        ))}
+      </div>
     </>
   );
 }
@@ -545,6 +565,7 @@ function App() {
         <CrosshairGuides point={magnifierPoint} bounds={bootstrap.bounds} />
       )}
       {selection && <ThirdsGrid bounds={bootstrap.bounds} />}
+      {selection && <Ruler bounds={bootstrap.bounds} />}
       {actionError && <div className="screenshot-error" role="alert" data-screenshot-control>{actionError}</div>}
       <button type="button" className="screenshot-cancel" data-screenshot-control onPointerDown={(event) => event.stopPropagation()} onClick={() => void cancelScreenshot()} aria-label={t('screenshot.cancelLabel')} title={t('screenshot.shortcutHint', { label: t('screenshot.cancelLabel'), shortcut: 'Esc' })}>{t('screenshot.cancel')}</button>
     </main>

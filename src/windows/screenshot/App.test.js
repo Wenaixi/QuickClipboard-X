@@ -49,6 +49,14 @@ test('工具栏放置与定位统一走自适应模块', () => {
   assert.ok(source.includes('return toolbarStyleModel(selection, bootstrap.bounds, placement);'));
 });
 
+test('选区建立后渲染像素标尺并输出自适应刻度', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('const horizontalTicks = rulerTicks(bounds.width);'));
+  assert.ok(source.includes('const verticalTicks = rulerTicks(bounds.height);'));
+  assert.ok(source.includes('{selection && <Ruler bounds={bootstrap.bounds} />}'));
+  assert.ok(source.includes('screenshot-ruler-tick-major'));
+});
+
 test('选区建立后渲染三分法构图辅助网格', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('{selection && <ThirdsGrid bounds={bootstrap.bounds} />}'));
