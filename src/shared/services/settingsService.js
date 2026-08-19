@@ -138,7 +138,6 @@ export const defaultSettings = {
   screenshotQuickSaveShortcut: '',
   screenshotQuickPinShortcut: '',
   screenshotQuickOcrShortcut: '',
-  screenshotQuality: 85,
   screenshotAutoSave: false,
   screenshotShowHints: true,
   screenshotElementDetection: 'all',
