@@ -14,7 +14,7 @@ import { cursorForSelectionHover } from './cursorModel.js';
 import { lineStyle } from './annotationModel.js';
 import { readCenterPixel, formatRgb, hexFromRgb } from './colorModel.js';
 import { magnifierScaleForWheel } from './magnifierZoomModel.js';
-import { formatPixelSize, formatMegapixels, formatAspectRatio } from './sizeModel.js';
+import { formatPixelSize, formatMegapixels, formatAspectRatio, physicalSize } from './sizeModel.js';
 import { magnetSelection } from './magnetModel.js';
 import { toolbarPlacement, toolbarStyle as toolbarStyleModel } from './toolbarModel.js';
 import { pushSelectionHistory, undoSelectionHistory } from './historyModel.js';
@@ -74,9 +74,10 @@ function clamp(value, min, max) {
 }
 
 function selectionSizeLabelText(selection, bootstrap) {
-  const pixels = formatPixelSize(selection);
-  const ratio = formatAspectRatio(selection);
-  const megapixels = formatMegapixels(selection);
+  const physical = physicalSize(selection, bootstrap.dpr);
+  const pixels = formatPixelSize(physical);
+  const ratio = formatAspectRatio(physical);
+  const megapixels = formatMegapixels(physical);
   const position = formatSelectionPosition(selection, { dpr: bootstrap.dpr, monitorLeft: bootstrap.monitorLeft, monitorTop: bootstrap.monitorTop });
   return `${pixels} · ${ratio} · ${megapixels} · ${position}`;
 }

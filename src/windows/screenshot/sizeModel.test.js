@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatPixelSize, formatMegapixels, formatAspectRatio } from './sizeModel.js';
+import { formatPixelSize, formatMegapixels, formatAspectRatio, physicalSize } from './sizeModel.js';
 
 test('formatPixelSize 按国际规范输出像素尺寸', () => {
   assert.equal(formatPixelSize({ width: 1920, height: 1080 }), '1920 × 1080');
@@ -44,6 +44,21 @@ test('formatAspectRatio 互质尺寸保持原比例', () => {
 test('formatAspectRatio 先取整再化简', () => {
   assert.equal(formatAspectRatio({ width: 1920.2, height: 1080.4 }), '16:9');
   assert.equal(formatAspectRatio({ width: 300.6, height: 200.4 }), '301:200');
+});
+
+test('physicalSize 默认按 1:1 输出物理像素尺寸', () => {
+  assert.deepEqual(physicalSize({ width: 1200, height: 700 }, 1), { width: 1200, height: 700 });
+});
+
+test('physicalSize 按 DPR 换算并四舍五入到整数像素', () => {
+  assert.deepEqual(physicalSize({ width: 1200, height: 700 }, 1.5), { width: 1800, height: 1050 });
+  assert.deepEqual(physicalSize({ width: 100.4, height: 200.6 }, 1.5), { width: 151, height: 301 });
+});
+
+test('physicalSize 拒绝非法 DPR 或尺寸', () => {
+  assert.throws(() => physicalSize({ width: 1200, height: 700 }, 0), /dpr 必须是正数/);
+  assert.throws(() => physicalSize({ width: 1200, height: 700 }, Number.NaN), /dpr 必须是正数/);
+  assert.throws(() => physicalSize(null, 1), /尺寸对象/);
 });
 
 test('formatAspectRatio 拒绝零或非法输入', () => {
