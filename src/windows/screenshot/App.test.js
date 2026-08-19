@@ -97,6 +97,16 @@ test('选区建立前显示初始引导提示且不遮挡拖拽', () => {
   }
 });
 
+test('选区建立后显示完成动作邀请提示且不遮挡操作', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('import { includeInvite } from \'./inviteModel.js\';'));
+  assert.ok(source.includes('selection && !busyAction && !showHelp && <div className="screenshot-invite" data-screenshot-invite="true">{includeInvite(t)}</div>'));
+  for (const locale of ['zh-CN', 'en-US']) {
+    const messages = JSON.parse(readFileSync(new URL(`../../shared/locales/${locale}.json`, import.meta.url)));
+    assert.equal(typeof messages.screenshot.invite, 'string', `${locale} 缺少 screenshot.invite`);
+  }
+});
+
 test('快捷键帮助面板随 F1 切换并列出全部快捷键', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('import { helpEntries, isHelpShortcut } from \'./helpModel.js\';'));

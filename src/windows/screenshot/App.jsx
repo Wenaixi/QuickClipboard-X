@@ -29,6 +29,7 @@ import { canResetSelection } from './resetModel.js';
 import { fullScreenSelection } from './fullScreenModel.js';
 import { completeShortcutForEvent } from './completeShortcutModel.js';
 import { idleHint } from './idleModel.js';
+import { includeInvite } from './inviteModel.js';
 import {
   createRafWriter,
   hitSelectionEdge,
@@ -620,6 +621,7 @@ function App() {
       {selection && <Ruler bounds={bootstrap.bounds} />}
       {selection && <SelectionHandles selection={selection} />}
       {!selecting && !selection && !showHelp && <div className="screenshot-idle-hint" data-screenshot-idle="true">{idleHint(t)}</div>}
+      {selection && !busyAction && !showHelp && <div className="screenshot-invite" data-screenshot-invite="true">{includeInvite(t)}</div>}
       {modeHint(modeForState({ selecting, moving, resizing }), t) && <div className="screenshot-mode-hint" data-screenshot-mode="true">{modeHint(modeForState({ selecting, moving, resizing }), t)}</div>}
       {showHelp && (
         <div className="screenshot-help" data-screenshot-help="true" role="dialog" aria-label={t('screenshot.help.title')}>
