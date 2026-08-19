@@ -20,5 +20,7 @@ export function normalizeBootstrap(payload = {}, viewport = {}) {
     initialAction: typeof payload.initialAction === 'string' ? payload.initialAction : '',
     screenshotAiEnabled: payload.screenshotAiEnabled !== false,
     screenshotAiConfigured: payload.screenshotAiConfigured === true,
+    screenshotMagnifierEnabled: payload.screenshotMagnifierEnabled !== false,
+    magnifierBackground: typeof payload.magnifierBackground === 'string' ? payload.magnifierBackground : null,
   };
 }

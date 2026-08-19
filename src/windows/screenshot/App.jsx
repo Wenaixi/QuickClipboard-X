@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { normalizeBootstrap } from './screenshotModel.js';
+import { magnifierGeometry } from './magnifierModel.js';
 import {
   createRafWriter,
   hitSelectionEdge,
@@ -54,6 +55,16 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
+function magnifierCanvasStyle(point, bounds) {
+  const geometry = magnifierGeometry(point, bounds);
+  return {
+    left: `${geometry.panel.left}px`,
+    top: `${geometry.panel.top}px`,
+    width: `${geometry.panel.width}px`,
+    height: `${geometry.panel.height}px`,
+  };
+}
+
 function applySelectionStyle(element, selection) {
   if (!element) return;
   if (!selection) {
@@ -84,6 +95,7 @@ function isPrimaryPointer(event) {
 function App() {
   const { t } = useTranslation();
   const rootRef = useRef(null);
+  const magnifierCanvasRef = useRef(null);
   const rafWriterRef = useRef(null);
   const draftRef = useRef(null);
   const selectionRef = useRef(null);
@@ -98,6 +110,7 @@ function App() {
   }));
   const [selection, setSelection] = useState(null);
   const [selecting, setSelecting] = useState(false);
+  const [magnifierPoint, setMagnifierPoint] = useState(null);
   const [busyAction, setBusyAction] = useState('');
   const [actionError, setActionError] = useState('');
   const initialActionRef = useRef('');
@@ -123,6 +136,33 @@ function App() {
       rafWriterRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const canvas = magnifierCanvasRef.current;
+    if (!canvas || !magnifierPoint || !bootstrap.magnifierBackground) return;
+    const image = new Image();
+    image.onload = () => {
+      const geometry = magnifierGeometry(magnifierPoint, bootstrap.bounds);
+      canvas.width = geometry.panel.width;
+      canvas.height = geometry.panel.height;
+      const context = canvas.getContext('2d');
+      if (!context) return;
+      context.imageSmoothingEnabled = false;
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(
+        image,
+        geometry.source.left,
+        geometry.source.top,
+        geometry.source.cols,
+        geometry.source.rows,
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      );
+    };
+    image.src = bootstrap.magnifierBackground;
+  }, [bootstrap.magnifierBackground, bootstrap.bounds, magnifierPoint]);
 
   useEffect(() => {
     let active = true;
@@ -172,6 +212,7 @@ function App() {
     gestureIdRef.current += 1;
     draftRef.current = null;
     selectionRef.current = null;
+    setMagnifierPoint(null);
     rafWriterRef.current?.cancel();
     applySelectionStyle(rootRef.current, null);
     setSelection(null);
@@ -238,6 +279,7 @@ function App() {
     const resizing = resizeRef.current;
     if (resizing && root && event.pointerId === resizing.pointerId) {
       const current = pointFromPointerEvent(event, root);
+      setMagnifierPoint(current);
       const next = resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds);
       selectionRef.current = next;
       rafWriterRef.current?.schedule(next);
@@ -246,6 +288,7 @@ function App() {
     const moving = moveRef.current;
     if (moving && root && event.pointerId === moving.pointerId) {
       const current = pointFromPointerEvent(event, root);
+      setMagnifierPoint(current);
       const next = nudgeSelection(moving.selectionStart, current.x - moving.start.x, current.y - moving.start.y, bootstrap.bounds);
       selectionRef.current = next;
       rafWriterRef.current?.schedule(next);
@@ -254,6 +297,7 @@ function App() {
     const draft = draftRef.current;
     if (!draft || !root || event.pointerId !== pointerIdRef.current) return;
     draft.end = pointFromPointerEvent(event, root);
+    setMagnifierPoint(draft.end);
     rafWriterRef.current?.schedule(normalizeSelection(draft.start, draft.end, bootstrap.bounds));
   };
 
@@ -266,6 +310,7 @@ function App() {
       const finalSelection = resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds);
       resizeRef.current = null;
       pointerIdRef.current = null;
+      setMagnifierPoint(null);
       rafWriterRef.current?.cancel();
       root.releasePointerCapture?.(event.pointerId);
       applySelectionStyle(root, finalSelection);
@@ -280,6 +325,7 @@ function App() {
       const finalSelection = nudgeSelection(moving.selectionStart, current.x - moving.start.x, current.y - moving.start.y, bootstrap.bounds);
       moveRef.current = null;
       pointerIdRef.current = null;
+      setMagnifierPoint(null);
       rafWriterRef.current?.cancel();
       root.releasePointerCapture?.(event.pointerId);
       applySelectionStyle(root, finalSelection);
@@ -362,6 +408,9 @@ function App() {
       <div className="screenshot-mask screenshot-mask-bottom" aria-hidden="true" />
       <div className="screenshot-selection" aria-hidden="true"><span className="screenshot-selection-size">{selection ? `${Math.round(selection.width)} × ${Math.round(selection.height)}` : ''}</span></div>
       {selection && <div className="screenshot-toolbar" style={toolbarStyle} data-screenshot-control onPointerDown={(event) => event.stopPropagation()}>{ACTIONS.map((action) => { const label = actionLabel(action.id, t); return <button key={action.id} type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction) || !actionIsEnabled(action.id, bootstrap)} onClick={() => void completeScreenshot(action.id)} title={action.shortcut ? t('screenshot.shortcutHint', { label, shortcut: action.shortcut }) : label}>{busyAction === action.id ? t('screenshot.processing') : label}</button>; })}{!bootstrap.screenshotAiConfigured && <button type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction)} onClick={() => void openAiSettings()}>{t('screenshot.actions.configureAi')}</button>}</div>}
+      {bootstrap.screenshotMagnifierEnabled && bootstrap.magnifierBackground && magnifierPoint && (draftRef.current || moveRef.current || resizeRef.current) && (
+        <canvas className="screenshot-magnifier" data-screenshot-magnifier="true" style={magnifierCanvasStyle(magnifierPoint, bootstrap.bounds)} ref={magnifierCanvasRef} />
+      )}
       {actionError && <div className="screenshot-error" role="alert" data-screenshot-control>{actionError}</div>}
       <button type="button" className="screenshot-cancel" data-screenshot-control onPointerDown={(event) => event.stopPropagation()} onClick={() => void cancelScreenshot()} aria-label={t('screenshot.cancelLabel')} title={t('screenshot.shortcutHint', { label: t('screenshot.cancelLabel'), shortcut: 'Esc' })}>{t('screenshot.cancel')}</button>
     </main>
