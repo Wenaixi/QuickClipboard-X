@@ -11,6 +11,7 @@ import {
   selectionForPointerGesture,
   selectionFromPhysical,
   selectionToPhysical,
+  squareSelection,
 } from './selectionModel.js';
 
 const bounds = { width: 800, height: 600 };
@@ -87,6 +88,59 @@ test('normalizeSelection 拒绝无效显示器尺寸', () => {
 test('isCurrentGesture 拒绝已被后续操作取代的异步结果', () => {
   assert.equal(isCurrentGesture(7, 7), true);
   assert.equal(isCurrentGesture(7, 8), false);
+});
+
+test('squareSelection 正向拖拽时以较长边为边长生成正方形', () => {
+  const selection = squareSelection({ x: 100, y: 100 }, { x: 300, y: 180 }, bounds);
+  assert.deepEqual(selectionValues(selection), {
+    left: 100,
+    top: 100,
+    right: 300,
+    bottom: 300,
+    width: 200,
+    height: 200,
+  });
+});
+
+test('squareSelection 反向拖拽时沿反方向扩展正方形', () => {
+  const selection = squareSelection({ x: 300, y: 240 }, { x: 100, y: 180 }, bounds);
+  assert.deepEqual(selectionValues(selection), {
+    left: 100,
+    top: 40,
+    right: 300,
+    bottom: 240,
+    width: 200,
+    height: 200,
+  });
+});
+
+test('squareSelection 起点贴近右下边界时边长被可达范围夹紧', () => {
+  const selection = squareSelection({ x: 5, y: 5 }, { x: 1000, y: 1000 }, bounds);
+  assert.deepEqual(selectionValues(selection), {
+    left: 5,
+    top: 5,
+    right: 600,
+    bottom: 600,
+    width: 595,
+    height: 595,
+  });
+});
+
+test('squareSelection 位移为零时保持最小 1px 正方形', () => {
+  const selection = squareSelection({ x: 400, y: 300 }, { x: 400, y: 300 }, bounds);
+  assert.deepEqual(selectionValues(selection), {
+    left: 400,
+    top: 300,
+    right: 401,
+    bottom: 301,
+    width: 1,
+    height: 1,
+  });
+});
+
+test('squareSelection 拒绝无效输入', () => {
+  assert.throws(() => squareSelection({ x: Number.NaN, y: 1 }, { x: 2, y: 2 }, bounds), /起点 x 必须是有限数字/);
+  assert.throws(() => squareSelection({ x: 1, y: 1 }, { x: 2, y: 2 }, { width: 0, height: 10 }), /边界尺寸必须为正数/);
 });
 
 test('selectionForPointerGesture 单击时选择鼠标下最上层窗口', () => {

@@ -69,6 +69,29 @@ export function isCurrentGesture(expectedId, currentId) {
   return expectedId === currentId;
 }
 
+// ShareX 公开契约：初次拖拽框选时按住 Shift 锁定 1:1 正方形选区。
+// 以起点为锚点，边长取横向/纵向位移的较大者（最小 1px），
+// 沿拖动方向扩展并整体夹紧到显示器边界；反向拖拽同样成立。
+export function squareSelection(start, end, bounds) {
+  if (!bounds || !Number.isFinite(bounds.width) || !Number.isFinite(bounds.height) || bounds.width <= 0 || bounds.height <= 0) {
+    throw new RangeError('边界尺寸必须为正数');
+  }
+  assertFiniteNumber(start?.x, '起点 x');
+  assertFiniteNumber(start?.y, '起点 y');
+  assertFiniteNumber(end?.x, '终点 x');
+  assertFiniteNumber(end?.y, '终点 y');
+
+  // 边长取两轴位移较大者，但受起点向两侧可达范围约束，保证整体不越界；
+  // 零位移视为向右下 1px（与 normalizeSelection 最小选区语义一致）。
+  const rawSide = Math.max(Math.abs(end.x - start.x), Math.abs(end.y - start.y));
+  const rightExtent = start.x <= end.x ? bounds.width - start.x : start.x;
+  const downExtent = start.y <= end.y ? bounds.height - start.y : start.y;
+  const side = Math.max(1, Math.min(rawSide, rightExtent, downExtent));
+  const left = start.x <= end.x ? start.x : start.x - side;
+  const top = start.y <= end.y ? start.y : start.y - side;
+  return { left, top, right: left + side, bottom: top + side, width: side, height: side };
+}
+
 export function selectionForPointerGesture(start, end, bounds, windowSelections = []) {
   if (isClickGesture(start, end)) {
     const selectedWindow = windowSelections.find((selection) => (

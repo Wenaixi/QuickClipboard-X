@@ -85,6 +85,17 @@ test('选区内部按下进入整体平移模式', () => {
   assert.ok(source.includes('moveRef.current = { pointerId: event.pointerId, start, selectionStart: selectionRef.current };'));
 });
 
+test('初次拖拽按住 Shift 时实时走正方形框选', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('? squareSelection(draft.start, draft.end, bootstrap.bounds)'));
+});
+
+test('松开时按住 Shift 生成正方形且跳过选窗逻辑', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('const square = event.shiftKey && !clicked ? squareSelection(draft.start, end, bootstrap.bounds) : null;'));
+  assert.ok(source.includes('if (!square && clicked && bootstrap.sessionId) {'));
+});
+
 test('选区边缘按下进入调整大小模式', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('const edge = hitSelectionEdge(start, selectionRef.current, RESIZE_TOLERANCE);'));
