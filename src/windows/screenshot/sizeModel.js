@@ -26,6 +26,19 @@ export function formatMegapixels(size) {
   return `${megapixels.toFixed(1)} MP`;
 }
 
+// 将逻辑像素尺寸按 DPR 换算为物理像素尺寸（ShareX 公开行为：尺寸标签显示实际截取的物理像素）。
+// 先乘后四舍五入到整数像素，宽高分别独立取整。
+export function physicalSize(size, dpr) {
+  assertSize(size, '物理像素尺寸');
+  if (!Number.isFinite(dpr) || dpr <= 0) {
+    throw new RangeError('dpr 必须是正数');
+  }
+  return {
+    width: Math.round(size.width * dpr),
+    height: Math.round(size.height * dpr),
+  };
+}
+
 function greatestCommonDivisor(a, b) {
   let x = a;
   let y = b;
