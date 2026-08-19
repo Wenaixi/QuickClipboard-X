@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { pushSelectionHistory, undoSelectionHistory, canUndoSelection } from './historyModel.js';
 
 test('pushSelectionHistory 追加新状态且不修改原数组', () => {
@@ -33,6 +34,29 @@ test('canUndoSelection 空历史为 false 否则为 true', () => {
   assert.equal(canUndoSelection([]), false);
   assert.equal(canUndoSelection([{ left: 0 }]), true);
   assert.equal(canUndoSelection(null), false);
+});
+
+test('历史模型默认上限 10 且 push 不可变 undo 不修改原数组', () => {
+  const source = readFileSync(new URL('./historyModel.js', import.meta.url), 'utf8');
+  const pushStart = source.indexOf('export function pushSelectionHistory');
+  const pushBody = source.slice(pushStart, pushStart + 400);
+  // 源码护栏：默认上限必须为 10（连按方向键最多可撤销 10 步）；追加必须不可变（[...history] 展开）。
+  assert.ok(pushBody.includes('limit = 10'), '默认上限必须为 10');
+  assert.ok(pushBody.includes('const next = [...history, selection];'), '追加必须不可变展开');
+  assert.ok(pushBody.includes('next.slice(next.length - limit)'), '超限必须丢弃最旧条目');
+  // 行为属性：默认上限 10 截断、undo 不修改原数组、undo 后可继续 push。
+  let history = [];
+  for (let i = 0; i < 12; i += 1) history = pushSelectionHistory(history, { i });
+  assert.equal(history.length, 10, '默认上限必须截断到 10');
+  assert.deepEqual(history[0], { i: 2 }, '最旧两条必须被丢弃');
+  const original = [{ left: 0 }, { left: 10 }];
+  const undone = undoSelectionHistory(original);
+  assert.deepEqual(original, [{ left: 0 }, { left: 10 }], 'undo 不得修改原数组');
+  assert.deepEqual(undone.selection, { left: 10 });
+  assert.deepEqual(undone.history, [{ left: 0 }]);
+  const afterUndo = pushSelectionHistory(undone.history, { left: 20 });
+  assert.deepEqual(afterUndo, [{ left: 0 }, { left: 20 }], 'undo 后可继续追加');
+  assert.equal(canUndoSelection(undone.history), true, 'undo 后仍有可撤销记录');
 });
 
 test('pushSelectionHistory 拒绝非法输入', () => {
