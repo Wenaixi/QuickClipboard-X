@@ -12,6 +12,7 @@ import { selectionLabelPlacement } from './labelModel.js';
 import { cursorForSelectionHover } from './cursorModel.js';
 import { lineStyle } from './annotationModel.js';
 import { readCenterPixel, formatRgb, hexFromRgb } from './colorModel.js';
+import { magnifierScaleForWheel } from './magnifierZoomModel.js';
 import {
   createRafWriter,
   hitSelectionEdge,
@@ -99,8 +100,8 @@ function CrosshairGuides({ point, bounds }) {
   );
 }
 
-function magnifierCanvasStyle(point, bounds) {
-  const geometry = magnifierGeometry(point, bounds);
+function magnifierCanvasStyle(point, bounds, scale = 6) {
+  const geometry = magnifierGeometry(point, bounds, { scale });
   return {
     left: `${geometry.panel.left}px`,
     top: `${geometry.panel.top}px`,
@@ -156,6 +157,7 @@ function App() {
   const [selecting, setSelecting] = useState(false);
   const [magnifierPoint, setMagnifierPoint] = useState(null);
   const [magnifierColor, setMagnifierColor] = useState(null);
+  const [magnifierScale, setMagnifierScale] = useState(6);
   const [busyAction, setBusyAction] = useState('');
   const [actionError, setActionError] = useState('');
   const initialActionRef = useRef('');
@@ -190,7 +192,7 @@ function App() {
     }
     const image = new Image();
     image.onload = () => {
-      const geometry = magnifierGeometry(magnifierPoint, bootstrap.bounds);
+      const geometry = magnifierGeometry(magnifierPoint, bootstrap.bounds, { scale: magnifierScale });
       canvas.width = geometry.panel.width;
       canvas.height = geometry.panel.height;
       const context = canvas.getContext('2d');
@@ -212,7 +214,7 @@ function App() {
       setMagnifierColor(pixel);
     };
     image.src = bootstrap.magnifierBackground;
-  }, [bootstrap.magnifierBackground, bootstrap.bounds, magnifierPoint]);
+  }, [bootstrap.magnifierBackground, bootstrap.bounds, magnifierPoint, magnifierScale]);
 
   useEffect(() => {
     let active = true;
@@ -363,6 +365,14 @@ function App() {
     rafWriterRef.current?.schedule(next);
   };
 
+  const handleWheel = (event) => {
+    if (!magnifierPoint) return;
+    const target = event.target;
+    if (target instanceof Element && target.closest('[data-screenshot-control]')) return;
+    event.preventDefault();
+    setMagnifierScale((current) => magnifierScaleForWheel(current, event.deltaY));
+  };
+
   const handleDoubleClick = (event) => {
     if (!selectionRef.current || busyAction) return;
     const target = event.target;
@@ -479,7 +489,7 @@ function App() {
   }, [bootstrap.sessionId, busyAction]);
 
   return (
-    <main ref={rootRef} className="screenshot-root" data-selection-active="false" data-selecting={selecting ? 'true' : 'false'} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={cancelScreenshot} onDoubleClick={handleDoubleClick} onContextMenu={(event) => { event.preventDefault(); void cancelScreenshot(); }} aria-label={t('screenshot.selectionLabel')}>
+    <main ref={rootRef} className="screenshot-root" data-selection-active="false" data-selecting={selecting ? 'true' : 'false'} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={cancelScreenshot} onDoubleClick={handleDoubleClick} onWheel={handleWheel} onContextMenu={(event) => { event.preventDefault(); void cancelScreenshot(); }} aria-label={t('screenshot.selectionLabel')}>
       <div className="screenshot-mask screenshot-mask-top" aria-hidden="true" />
       <div className="screenshot-mask screenshot-mask-left" aria-hidden="true" />
       <div className="screenshot-mask screenshot-mask-right" aria-hidden="true" />
@@ -488,8 +498,8 @@ function App() {
       {selection && <div className="screenshot-toolbar" style={toolbarStyle} data-screenshot-control onPointerDown={(event) => event.stopPropagation()}>{ACTIONS.map((action) => { const label = actionLabel(action.id, t); return <button key={action.id} type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction) || !actionIsEnabled(action.id, bootstrap)} onClick={() => void completeScreenshot(action.id)} title={[action.shortcut && t('screenshot.shortcutHint', { label, shortcut: action.shortcut }), hotkeyForAction(action.id) && t('screenshot.shortcutHint', { label, shortcut: hotkeyForAction(action.id) })].filter(Boolean).join(' · ') || label}>{busyAction === action.id ? t('screenshot.processing') : label}</button>; })}{!bootstrap.screenshotAiConfigured && <button type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction)} onClick={() => void openAiSettings()}>{t('screenshot.actions.configureAi')}</button>}</div>}
       {bootstrap.screenshotMagnifierEnabled && bootstrap.magnifierBackground && magnifierPoint && (draftRef.current || moveRef.current || resizeRef.current) && (
         <>
-          <canvas className="screenshot-magnifier" data-screenshot-magnifier="true" style={magnifierCanvasStyle(magnifierPoint, bootstrap.bounds)} ref={magnifierCanvasRef} />
-          {magnifierColor && <div className="screenshot-color" data-screenshot-color="true" style={{ left: `${magnifierCanvasStyle(magnifierPoint, bootstrap.bounds).left}`, top: `${magnifierCanvasStyle(magnifierPoint, bootstrap.bounds).top}`, backgroundColor: hexFromRgb(magnifierColor) }}>{formatRgb(magnifierColor)}</div>}
+          <canvas className="screenshot-magnifier" data-screenshot-magnifier="true" style={magnifierCanvasStyle(magnifierPoint, bootstrap.bounds, magnifierScale)} ref={magnifierCanvasRef} />
+          {magnifierColor && <div className="screenshot-color" data-screenshot-color="true" style={{ left: `${magnifierCanvasStyle(magnifierPoint, bootstrap.bounds, magnifierScale).left}`, top: `${magnifierCanvasStyle(magnifierPoint, bootstrap.bounds, magnifierScale).top}`, backgroundColor: hexFromRgb(magnifierColor) }}>{formatRgb(magnifierColor)}</div>}
         </>
       )}
       {magnifierPoint && (draftRef.current || moveRef.current || resizeRef.current) && (
