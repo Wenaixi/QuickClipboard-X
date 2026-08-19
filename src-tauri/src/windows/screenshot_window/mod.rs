@@ -434,6 +434,20 @@ mod source_guards {
     }
 
     #[test]
+    fn copy_action_commits_before_clipboard_write_and_notifies_history() {
+        let source = source_file("windows/screenshot_window/mod.rs");
+        let copy_start = source.find("\"copy\" => {").expect("缺少复制截图动作");
+        let save_start = source.find("\"save\" => {").expect("缺少保存截图动作");
+        let copy_body = &source[copy_start..save_start];
+        // 与 AI 分支同款：必须先 begin_commit 锁定会话再写剪贴板，避免幽灵文本。
+        let commit = copy_body.find("begin_screenshot_commit(session_id)?;").expect("缺少会话提交");
+        let copy = copy_body.find("copy_screenshot(&stored)").expect("缺少剪贴板写入");
+        assert!(commit < copy, "必须先提交会话再写剪贴板");
+        // 成功路径必须通知主窗口历史刷新。
+        assert!(copy_body.contains("emit_screenshot_history_update(app, clipboard_id)"), "复制成功必须通知历史刷新");
+    }
+
+    #[test]
     fn ai_success_path_commits_session_before_writing_clipboard() {
         let source = source_file("windows/screenshot_window/mod.rs");
         let ai_start = source.find("\"ai\" => {").expect("缺少 AI 截图动作");
