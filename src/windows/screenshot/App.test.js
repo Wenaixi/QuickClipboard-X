@@ -173,6 +173,18 @@ test('平移结束后保留选区且不触发选窗或清空', () => {
   assert.ok(source.includes('setSelection(finalSelection);'));
 });
 
+test('焦点落在工具栏按钮时全局快捷键不抢原生激活', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const keydownIndex = source.indexOf('const handleKeyDown = (event) => {');
+  const body = source.slice(keydownIndex);
+  const escapeIndex = body.indexOf("event.key === 'Escape'");
+  // 锚定完整守卫行，避免 `false &&` 前缀短路仍残留 closest 子串绕过护栏。
+  const controlGuardLine = "if (event.target instanceof Element && event.target.closest('[data-screenshot-control]')) return;";
+  const controlReturnIndex = body.indexOf(controlGuardLine);
+  assert.ok(controlReturnIndex !== -1, 'keydown 必须排除控件区焦点');
+  assert.ok(controlReturnIndex > escapeIndex, '控件排除必须位于 Esc 之后');
+});
+
 test('选区建立后数字键快捷执行动作且快捷键提示展示', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('const hotkeyAction = actionForHotkey(event.key);'));
