@@ -7,6 +7,7 @@ import { normalizeBootstrap } from './screenshotModel.js';
 import { magnifierGeometry } from './magnifierModel.js';
 import { coordinatePanelPosition, formatCursorCoordinate } from './coordinateModel.js';
 import { guideLines } from './guideModel.js';
+import { actionForHotkey, hotkeyForAction } from './actionModel.js';
 import {
   createRafWriter,
   hitSelectionEdge,
@@ -424,6 +425,8 @@ function App() {
         applySelectionStyle(rootRef.current, next);
         return;
       }
+      const hotkeyAction = actionForHotkey(event.key);
+      if (hotkeyAction) { event.preventDefault(); void completeScreenshot(hotkeyAction); return; }
       if (event.key === 'Enter') { event.preventDefault(); void completeScreenshot('copy'); }
       else if (event.ctrlKey && event.key.toLowerCase() === 's') { event.preventDefault(); void completeScreenshot('save'); }
       else if (event.ctrlKey && event.key.toLowerCase() === 'p') { event.preventDefault(); void completeScreenshot('pin'); }
@@ -444,7 +447,7 @@ function App() {
       <div className="screenshot-mask screenshot-mask-right" aria-hidden="true" />
       <div className="screenshot-mask screenshot-mask-bottom" aria-hidden="true" />
       <div className="screenshot-selection" aria-hidden="true"><span className="screenshot-selection-size">{selection ? `${Math.round(selection.width)} × ${Math.round(selection.height)}` : ''}</span></div>
-      {selection && <div className="screenshot-toolbar" style={toolbarStyle} data-screenshot-control onPointerDown={(event) => event.stopPropagation()}>{ACTIONS.map((action) => { const label = actionLabel(action.id, t); return <button key={action.id} type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction) || !actionIsEnabled(action.id, bootstrap)} onClick={() => void completeScreenshot(action.id)} title={action.shortcut ? t('screenshot.shortcutHint', { label, shortcut: action.shortcut }) : label}>{busyAction === action.id ? t('screenshot.processing') : label}</button>; })}{!bootstrap.screenshotAiConfigured && <button type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction)} onClick={() => void openAiSettings()}>{t('screenshot.actions.configureAi')}</button>}</div>}
+      {selection && <div className="screenshot-toolbar" style={toolbarStyle} data-screenshot-control onPointerDown={(event) => event.stopPropagation()}>{ACTIONS.map((action) => { const label = actionLabel(action.id, t); return <button key={action.id} type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction) || !actionIsEnabled(action.id, bootstrap)} onClick={() => void completeScreenshot(action.id)} title={[action.shortcut && t('screenshot.shortcutHint', { label, shortcut: action.shortcut }), hotkeyForAction(action.id) && t('screenshot.shortcutHint', { label, shortcut: hotkeyForAction(action.id) })].filter(Boolean).join(' · ') || label}>{busyAction === action.id ? t('screenshot.processing') : label}</button>; })}{!bootstrap.screenshotAiConfigured && <button type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction)} onClick={() => void openAiSettings()}>{t('screenshot.actions.configureAi')}</button>}</div>}
       {bootstrap.screenshotMagnifierEnabled && bootstrap.magnifierBackground && magnifierPoint && (draftRef.current || moveRef.current || resizeRef.current) && (
         <canvas className="screenshot-magnifier" data-screenshot-magnifier="true" style={magnifierCanvasStyle(magnifierPoint, bootstrap.bounds)} ref={magnifierCanvasRef} />
       )}
