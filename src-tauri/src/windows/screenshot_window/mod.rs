@@ -527,6 +527,26 @@ mod source_guards {
     }
 
     #[test]
+    fn ready_handshake_replays_pending_bootstrap_and_clears_it() {
+        let source = source_file("windows/screenshot_window/mod.rs");
+        // 测试模块自身含 "pub fn screenshot_window_ready" 字面量（§10.4 自指陷阱），
+        // 用 rfind 取文件中最后出现的真实函数签名。
+        let start = source
+            .rfind("pub fn screenshot_window_ready")
+            .expect("缺少 ready 握手函数");
+        let end = source[start..]
+            .find("pub fn cancel_screenshot")
+            .map(|offset| start + offset)
+            .expect("缺少函数结束锚点");
+        let body = &source[start..end];
+        // 窗口先启动、会话后开始：ready 时若有 pending_bootstrap 必须补发并清除。
+        assert!(body.contains("state.pending_bootstrap.take()"), "ready 必须取走缓存的启动配置");
+        assert!(body.contains("state.window_ready = true;"), "ready 必须记录窗口已就绪");
+        assert!(body.contains("window.emit(SCREENSHOT_CONFIGURE_EVENT, &bootstrap)"), "ready 必须补发会话配置");
+        assert!(body.contains("finish_failed_screenshot(app, &bootstrap.session_id)"), "补发失败必须走统一清理");
+    }
+
+    #[test]
     fn start_screenshot_restores_main_window_when_hide_accounting_fails() {
         let source = source_file("windows/screenshot_window/mod.rs");
         let start = source.rfind("pub fn start_screenshot").expect("缺少截图启动函数");
