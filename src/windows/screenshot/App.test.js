@@ -224,6 +224,21 @@ test('平移结束后保留选区且不触发选窗或清空', () => {
   assert.ok(source.includes('setSelection(finalSelection);'));
 });
 
+test('选区调整前记录历史且 Ctrl+Z 撤销恢复', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const keydownIndex = source.indexOf('const handleKeyDown = (event) => {');
+  const body = source.slice(keydownIndex);
+  const zIndex = body.indexOf("if (event.ctrlKey && event.key.toLowerCase() === 'z') {");
+  assert.ok(zIndex !== -1, 'keydown 必须包含 Ctrl+Z 撤销分支');
+  const nudgeIndex = body.indexOf('const next = nudgeSelection(selectionRef.current, nudgeX * step, nudgeY * step, bootstrap.bounds);');
+  assert.ok(zIndex > nudgeIndex, '撤销分支必须位于微调分支之后');
+  assert.ok(source.includes('selectionHistoryRef.current = pushSelectionHistory(selectionHistoryRef.current, selectionRef.current);'));
+  assert.ok(source.includes('const undone = undoSelectionHistory(selectionHistoryRef.current);'));
+  assert.ok(source.includes('selectionHistoryRef.current = undone.history;'));
+  assert.ok(source.includes('selectionRef.current = undone.selection;'));
+  assert.ok(source.includes('selectionHistoryRef.current = [];'));
+});
+
 test('焦点落在工具栏按钮时全局快捷键不抢原生激活', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   const keydownIndex = source.indexOf('const handleKeyDown = (event) => {');
