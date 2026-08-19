@@ -85,15 +85,22 @@ test('选区边缘按下进入调整大小模式', () => {
   assert.ok(source.includes('resizeRef.current = { pointerId: event.pointerId, edge };'));
 });
 
+test('调整大小拖拽按住 Shift 保持宽高比', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  // 分别锚定实时移动与收尾两条调用，防止任一路径丢失 Shift 传参。
+  assert.ok(source.includes('const next = resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds, { keepAspectRatio: event.shiftKey });'));
+  assert.ok(source.includes('const finalSelection = resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds, { keepAspectRatio: event.shiftKey });'));
+});
+
 test('调整大小拖拽调用 resizeSelection 并实时同步选区', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
-  assert.ok(source.includes('const next = resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds);'));
+  assert.ok(source.includes('const next = resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds, { keepAspectRatio: event.shiftKey });'));
   assert.ok(source.includes('selectionRef.current = next;'));
 });
 
 test('调整大小结束后保留选区且清理调整状态', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
-  assert.ok(source.includes('const finalSelection = resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds);'));
+  assert.ok(source.includes('const finalSelection = resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds, { keepAspectRatio: event.shiftKey });'));
   assert.ok(source.includes('resizeRef.current = null;'));
   assert.ok(source.includes('selectionRef.current = finalSelection;'));
 });

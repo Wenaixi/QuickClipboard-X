@@ -299,6 +299,96 @@ test('resizeSelection 越过对边时夹到最小 1px 且边界夹紧', () => {
   });
 });
 
+test('resizeSelection 保持比例时拖动右边界按宽高比调整高度', () => {
+  const resized = resizeSelection(
+    { left: 100, top: 80, right: 300, bottom: 240, width: 200, height: 160 },
+    'e',
+    { x: 400, y: 160 },
+    bounds,
+    { keepAspectRatio: true }
+  );
+  assert.deepEqual(selectionValues(resized), {
+    left: 100,
+    top: 80,
+    right: 400,
+    bottom: 320,
+    width: 300,
+    height: 240,
+  });
+});
+
+test('resizeSelection 保持比例时拖动下边界按比例调整宽度', () => {
+  const resized = resizeSelection(
+    { left: 100, top: 80, right: 300, bottom: 240, width: 200, height: 160 },
+    's',
+    { x: 200, y: 400 },
+    bounds,
+    { keepAspectRatio: true }
+  );
+  assert.deepEqual(selectionValues(resized), {
+    left: 100,
+    top: 80,
+    right: 500,
+    bottom: 400,
+    width: 400,
+    height: 320,
+  });
+});
+
+test('resizeSelection 保持比例时拖动角点取长轴驱动另一维', () => {
+  const resized = resizeSelection(
+    { left: 100, top: 80, right: 300, bottom: 240, width: 200, height: 160 },
+    'se',
+    { x: 600, y: 340 },
+    bounds,
+    { keepAspectRatio: true }
+  );
+  assert.deepEqual(selectionValues(resized), {
+    left: 100,
+    top: 80,
+    right: 600,
+    bottom: 480,
+    width: 500,
+    height: 400,
+  });
+});
+
+test('resizeSelection 保持比例时整体夹紧到显示器边界', () => {
+  const localBounds = { width: 2200, height: 1120 };
+  const resized = resizeSelection(
+    { left: 1700, top: 1000, right: 1900, bottom: 1100, width: 200, height: 100 },
+    'e',
+    { x: 2000, y: 1050 },
+    localBounds,
+    { keepAspectRatio: true }
+  );
+  assert.deepEqual(selectionValues(resized), {
+    left: 1700,
+    top: 970,
+    right: 2000,
+    bottom: 1120,
+    width: 300,
+    height: 150,
+  });
+});
+
+test('resizeSelection 不开启比例时保持原有自由调整行为', () => {
+  const resized = resizeSelection(
+    { left: 100, top: 80, right: 300, bottom: 240, width: 200, height: 160 },
+    'e',
+    { x: 400, y: 160 },
+    bounds
+  );
+  assert.deepEqual(selectionValues(resized), {
+    left: 100,
+    top: 80,
+    right: 400,
+    bottom: 240,
+    width: 300,
+    height: 160,
+  });
+});
+
 test('resizeSelection 拒绝非法边缘或无效输入', () => {
   assert.throws(() => resizeSelection({ left: 0, top: 0, right: 1, bottom: 1 }, 'x', { x: 1, y: 1 }, bounds), /edge 必须是 n\/s\/e\/w 组合/);
   assert.throws(() => resizeSelection({ left: 0, top: 0, right: 1, bottom: 1 }, '', { x: 1, y: 1 }, bounds), /edge 必须是 n\/s\/e\/w 组合/);
