@@ -314,6 +314,18 @@ function App() {
     rafWriterRef.current?.schedule(next);
   };
 
+  const handleDoubleClick = (event) => {
+    if (!selectionRef.current || busyAction) return;
+    const target = event.target;
+    if (target instanceof Element && target.closest('[data-screenshot-control]')) return;
+    const root = rootRef.current;
+    if (!root) return;
+    const point = pointFromPointerEvent(event, root);
+    if (!hitSelectionInterior(point, selectionRef.current, 0)) return;
+    event.preventDefault();
+    void completeScreenshot('copy');
+  };
+
   const handlePointerUp = async (event) => {
     const root = rootRef.current;
     const resizing = resizeRef.current;
@@ -415,7 +427,7 @@ function App() {
   }, [bootstrap.sessionId, busyAction]);
 
   return (
-    <main ref={rootRef} className="screenshot-root" data-selection-active="false" data-selecting={selecting ? 'true' : 'false'} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={cancelScreenshot} onContextMenu={(event) => { event.preventDefault(); void cancelScreenshot(); }} aria-label={t('screenshot.selectionLabel')}>
+    <main ref={rootRef} className="screenshot-root" data-selection-active="false" data-selecting={selecting ? 'true' : 'false'} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={cancelScreenshot} onDoubleClick={handleDoubleClick} onContextMenu={(event) => { event.preventDefault(); void cancelScreenshot(); }} aria-label={t('screenshot.selectionLabel')}>
       <div className="screenshot-mask screenshot-mask-top" aria-hidden="true" />
       <div className="screenshot-mask screenshot-mask-left" aria-hidden="true" />
       <div className="screenshot-mask screenshot-mask-right" aria-hidden="true" />

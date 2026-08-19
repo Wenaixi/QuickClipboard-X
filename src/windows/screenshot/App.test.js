@@ -85,6 +85,15 @@ test('选区内部按下进入整体平移模式', () => {
   assert.ok(source.includes('moveRef.current = { pointerId: event.pointerId, start, selectionStart: selectionRef.current };'));
 });
 
+test('双击选区内部时完成截图且忽略控件区', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('onDoubleClick={handleDoubleClick}'));
+  assert.ok(source.includes('if (!hitSelectionInterior(point, selectionRef.current, 0)) return;'));
+  // 锚定 handleDoubleClick 函数体结尾的多行模式，避免被 Enter 快捷键分支误命中。
+  assert.ok(source.includes("    event.preventDefault();\n    void completeScreenshot('copy');\n  };"));
+  assert.ok(source.includes('target.closest(\'[data-screenshot-control]\')'));
+});
+
 test('初次拖拽按住 Shift 时实时走正方形框选', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('? squareSelection(draft.start, draft.end, bootstrap.bounds)'));
