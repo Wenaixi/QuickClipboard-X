@@ -433,6 +433,24 @@ test('双击选区内部时触发复制完成动作且防重入', () => {
   assert.ok(doubleBody.includes("void completeScreenshot('copy');"), '双击必须触发复制完成动作');
 });
 
+test('双击不因第二击进入移动调整状态而失效且成功后统一清空引用', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const doubleStart = source.indexOf('const handleDoubleClick = (event) => {');
+  const doubleBody = source.slice(doubleStart, doubleStart + 500);
+  // 双击完成不因第二击（pointerdown 已把选区当内部命中并进入移动/调整模式）而失效：
+  // 处理器只检查选区存在、busyAction、控件区、命中内部，绝不检查 moveRef/resizeRef/draftRef 状态。
+  // 负向断言先剥行注释，规避注释含被测字面的误命中。
+  const codeLines = doubleBody.split('\n').filter((line) => !line.trimStart().startsWith('//'));
+  const stripped = codeLines.join('\n');
+  assert.ok(!stripped.includes('moveRef.current'), '双击处理器不得因第二击移动状态失效');
+  assert.ok(!stripped.includes('resizeRef.current'), '双击处理器不得因第二击调整状态失效');
+  assert.ok(!stripped.includes('draftRef.current'), '双击处理器不得因第二击拖拽状态失效');
+  // 双击成功完成复制后，第二击留下的移动/调整引用必须由成功路径统一清空（不残留孤儿状态）。
+  const completeIdx = source.indexOf('const completeScreenshot = async (action) => {');
+  const completeBody = source.slice(completeIdx, source.indexOf('const handlePointerDown', completeIdx));
+  assert.ok(completeBody.includes('resetInteractionState({ draftRef, selectionRef, moveRef, resizeRef, setSelection, setSelecting, setMoving, setResizing });'), '成功路径必须清空第二击留下的引用');
+});
+
 test('双击选区内部时完成截图且忽略控件区', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('onDoubleClick={handleDoubleClick}'));
