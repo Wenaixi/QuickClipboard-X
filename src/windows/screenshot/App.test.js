@@ -229,6 +229,29 @@ test('拖拽草稿走统一选区生成且取消/配置统一重置交互状态'
   assert.ok(resets && resets.length >= 2, '取消与配置重置必须都走统一交互重置');
 });
 
+test('遮罩与描边先于三分线标尺手柄渲染且手柄来自模型', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const renderStart = source.indexOf('<main ref={rootRef}');
+  const render = source.slice(renderStart);
+  // 叠层顺序不变量：四方向遮罩（顶部/左/右/底部）必须先于选区描边，
+  // 选区描边必须先于三分线/标尺/手柄，保证视觉层级正确（遮罩在底层、手柄在最上层）。
+  const maskTop = render.indexOf('screenshot-mask-top');
+  const maskLeft = render.indexOf('screenshot-mask-left');
+  const maskRight = render.indexOf('screenshot-mask-right');
+  const maskBottom = render.indexOf('screenshot-mask-bottom');
+  const selectionLine = render.indexOf('screenshot-selection-line');
+  const thirds = render.indexOf('<ThirdsGrid bounds={bootstrap.bounds} />');
+  const ruler = render.indexOf('<Ruler bounds={bootstrap.bounds} />');
+  const handles = render.indexOf('{selection && <SelectionHandles selection={selection} />}');
+  assert.ok([maskTop, maskLeft, maskRight, maskBottom, selectionLine, thirds, ruler, handles].every((i) => i >= 0), '遮罩/描边/三分线/标尺/手柄渲染必须全部存在');
+  assert.ok(Math.max(maskTop, maskLeft, maskRight, maskBottom) < selectionLine, '四方向遮罩必须先于选区描边');
+  assert.ok(selectionLine < thirds && thirds < ruler && ruler < handles, '描边必须先于三分线/标尺/手柄');
+  // 手柄必须来自 selectionHandles 模型（8 个手柄小圆点由数据驱动渲染）。
+  const selectionHandlesIdx = source.indexOf('selectionHandles(selection).map((handle) =>');
+  assert.ok(selectionHandlesIdx >= 0, '手柄必须由 selectionHandles 数据驱动');
+  assert.ok(selectionHandlesIdx < renderStart, 'SelectionHandles 组件必须定义在渲染结构之前');
+});
+
 test('选区建立后渲染八个调整手柄', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('import { selectionHandles } from \'./handleModel.js\';'));
