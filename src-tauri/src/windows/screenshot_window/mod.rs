@@ -133,6 +133,9 @@ fn confirm_screenshot_ai_cloud_access(app: &AppHandle) -> Result<bool, String> {
     } else {
         "AI recognition sends the current screenshot selection to your configured AI service. It will not silently fall back to local OCR.\n\nContinue?"
     };
+    // tauri-plugin-dialog 的 MessageDialogBuilder 只有回调式 show() 与阻塞式 blocking_show()，
+    // 没有 async 形态；调用方（complete_screenshot）把整个确认放进 spawn_blocking 执行，
+    // 避免阻塞 tokio worker 线程。
     if !app
         .dialog()
         .message(message)
@@ -318,7 +321,7 @@ mod source_guards {
             .find("validate_ai_screenshot_action(&settings)")
             .expect("AI 动作缺少可用性校验");
         let confirmation = ai_body
-            .find("confirm_screenshot_ai_cloud_access(app)?")
+            .find("spawn_blocking({")
             .expect("AI 动作缺少云端发送确认");
         let request = ai_body
             .find("recognize_image(")
@@ -818,7 +821,13 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
             let settings = get_settings();
             if let Err(error) = validate_ai_screenshot_action(&settings) {
                 Err(error)
-            } else if !confirm_screenshot_ai_cloud_access(app)? {
+            } else if !tokio::task::spawn_blocking({
+                let app_clone = app.clone();
+                move || confirm_screenshot_ai_cloud_access(&app_clone)
+            })
+            .await
+            .map_err(|error| format!("AI 确认对话框线程失败: {error}"))??
+            {
                 Err("已取消云端 AI 识别".to_string())
             } else {
                 if !is_current_processing_session(session_id) {
