@@ -33,6 +33,12 @@ button { font: inherit; }
 .screenshot-coordinates { position: absolute; z-index: 3; min-width: 96px; padding: 4px 8px; border: 1px solid rgba(255, 255, 255, 0.5); border-radius: 4px; color: #fff; background: rgba(0, 0, 0, 0.78); font-size: 12px; line-height: 1.4; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
 .screenshot-guide { position: absolute; z-index: 3; pointer-events: none; background: rgba(255, 255, 255, 0.55); box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.5); }
 .screenshot-thirds { position: absolute; z-index: 2; pointer-events: none; background: rgba(255, 255, 255, 0.22); }
+.screenshot-ruler { position: absolute; z-index: 2; pointer-events: none; color: rgba(255, 255, 255, 0.9); background: rgba(0, 0, 0, 0.5); font-size: 10px; font-variant-numeric: tabular-nums; }
+.screenshot-ruler-h { top: 0; left: 0; right: 0; height: 20px; }
+.screenshot-ruler-v { top: 20px; left: 0; bottom: 0; width: 20px; }
+.screenshot-ruler-tick { position: absolute; display: block; white-space: nowrap; }
+.screenshot-ruler-h .screenshot-ruler-tick { top: 0; height: 20px; padding-left: 3px; border-left: 1px solid rgba(255, 255, 255, 0.4); line-height: 20px; }
+.screenshot-ruler-v .screenshot-ruler-tick { left: 0; width: 20px; padding-top: 3px; border-top: 1px solid rgba(255, 255, 255, 0.4); }
 .screenshot-root[data-selection-active="false"] .screenshot-mask { inset: 0; width: auto; height: auto; }
 
 .screenshot-selection { position: absolute; z-index: 2; top: var(--selection-top); left: var(--selection-left); width: var(--selection-width); height: var(--selection-height); border: 1px solid rgba(255, 255, 255, 0.96); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.42); pointer-events: none; opacity: 0; }
