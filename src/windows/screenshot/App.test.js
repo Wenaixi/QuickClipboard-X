@@ -102,6 +102,12 @@ test('悬停选区时切换调整/移动光标并在取消时重置', () => {
   assert.ok(source.includes("rootRef.current.style.cursor = 'crosshair';"));
 });
 
+test('选区边框样式接线调用 lineStyle 生成描边', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('const { borderWidth, borderColor } = lineStyle(1, \'rgba(255, 255, 255, 0.96)\', 1);'));
+  assert.ok(source.includes('screenshot-selection-line'));
+});
+
 test('选区内部按下进入整体平移模式', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('if (hitSelectionInterior(start, selectionRef.current, MOVE_INSET)) {'));
