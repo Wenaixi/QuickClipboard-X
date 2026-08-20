@@ -57,6 +57,24 @@ test('cursorForEdge 八方向映射完整且悬停优先边缘后内部', () => 
   assert.equal(cursorForSelectionHover({ x: 100, y: 100 }, selection, bounds), null, '选区外返回 null');
 });
 
+test('cursorForSelectionHover 源码边缘判定必须先于内部判定', () => {
+  const source = readFileSync(new URL('./cursorModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function cursorForSelectionHover');
+  const body = source.slice(start, start + 600);
+  // 顺序类不变量：边缘/角点判定必须先于内部判定（否则边缘点会被内部点逻辑截获返回 move）。
+  // 只 contains 区分不了先后，必须比较 find 下标。
+  const edgeIdx = body.indexOf('const edge = hitSelectionEdge(point, selection);');
+  const edgeReturnIdx = body.indexOf('if (edge) return cursorForEdge(edge);');
+  const interiorIdx = body.indexOf('if (hitSelectionInterior(point, selection, 0)) return \'move\';');
+  assert.ok(edgeIdx >= 0 && edgeReturnIdx >= 0 && interiorIdx >= 0, '边缘/内部判定必须都存在');
+  assert.ok(edgeIdx < interiorIdx, '边缘判定必须先于内部判定');
+  assert.ok(edgeReturnIdx < interiorIdx, '边缘返回值必须先于内部返回值');
+  // 行为属性：悬停边缘点时边缘判定先执行，绝不返回 move（即使点同时满足内部条件）。
+  const selection = { left: 500, top: 300, right: 700, bottom: 500, width: 200, height: 200 };
+  // x=699 同时满足内部条件（500 <= 699 < 700）与右边缘条件（>= 700 - 4），必须返回 ew-resize。
+  assert.equal(cursorForSelectionHover({ x: 699, y: 400 }, selection, bounds), 'ew-resize', '同时满足内部与边缘时边缘必须优先');
+});
+
 test('cursorForSelectionHover 拒绝无效坐标或边界', () => {
   const selection = { left: 400, top: 300, right: 700, bottom: 500, width: 300, height: 200 };
   assert.throws(() => cursorForSelectionHover({ x: Number.NaN, y: 1 }, selection, bounds), /点 x 必须是有限数字/);
