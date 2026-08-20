@@ -126,6 +126,24 @@ test('physicalSize 带边界分支源码显式 ceil 右缘 floor 左缘且不可
   assert.notDeepEqual(fallback, { width: 126, height: 88 }, '回退分支不得与边缘分支结果相同（证明不可替代）');
 });
 
+test('physicalSize 源码回退分支（无边信息时）必须用 Math.round 而非 floor/ceil', () => {
+  const source = readFileSync(new URL('./sizeModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function physicalSize');
+  const body = source.slice(start, start + 700);
+  // 源码护栏一：回退分支（无边信息时）必须用 Math.round 换算物理像素
+  // （若改用 floor 会丢失、ceil 会多算，四舍五入是逻辑到物理像素的标准换算）。
+  assert.ok(body.includes('Math.round(size.width * dpr)'), '回退分支宽度必须用 Math.round');
+  assert.ok(body.includes('Math.round(size.height * dpr)'), '回退分支高度必须用 Math.round');
+  // 行为验证：相同 DPR 下回退分支与边缘分支结果不同（证明不可替代）。
+  const edges = { left: 100.4, top: 50.6, right: 200.2, bottom: 120.8, width: 99.8, height: 70.2 };
+  const edgeResult = physicalSize(edges, 1.25);
+  const fallbackResult = physicalSize({ width: 99.8, height: 70.2 }, 1.25);
+  assert.notDeepEqual(fallbackResult, edgeResult, '回退分支不得与边缘分支结果相同');
+  // 回退分支下 0.4 四舍五入为 0、0.5 四舍五入为 1（标准 round 行为）。
+  assert.deepEqual(physicalSize({ width: 0.4, height: 0.5 }, 1), { width: 0, height: 1 });
+  assert.deepEqual(physicalSize({ width: 0.5, height: 0.4 }, 1), { width: 1, height: 0 });
+});
+
 test('formatAspectRatio 源码 GCD 欧几里得实现且先取整后化简保证最简比', () => {
   const source = readFileSync(new URL('./sizeModel.js', import.meta.url), 'utf8');
   const gcdStart = source.indexOf('function greatestCommonDivisor');
