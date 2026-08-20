@@ -59,6 +59,31 @@ test('selectionHandles 源码八手柄数据驱动且顺序固定', () => {
   assert.equal(handles.find((h) => h.edge === 'w').top, 300);
 });
 
+test('selectionHandles 八手柄边缘集与 resizeSelection 支持的四边完全对齐', () => {
+  const handleSource = readFileSync(new URL('./handleModel.js', import.meta.url), 'utf8');
+  const resizeSource = readFileSync(new URL('./selectionModel.js', import.meta.url), 'utf8');
+  // 源码护栏一：resizeSelection 必须分别处理 w/e/n/s 四条边（手柄拖动调整的语义基础）。
+  const resizeStart = resizeSource.indexOf('export function resizeSelection');
+  const resizeBody = resizeSource.slice(resizeStart, resizeStart + 1500);
+  for (const edge of ['w', 'e', 'n', 's']) {
+    assert.ok(resizeBody.includes(`edge.includes('${edge}')`), `resizeSelection 必须处理 ${edge} 边`);
+  }
+  // 源码护栏二：手柄必须来自数据数组且每个 edge 都只能由 n/s/e/w 组成（角点为组合边）。
+  const handleStart = handleSource.indexOf('export function selectionHandles');
+  const handleBody = handleSource.slice(handleStart, handleStart + 700);
+  assert.ok(/edge: '[nsew]+'/.test(handleBody), '手柄 edge 必须由 n/s/e/w 组成');
+  // 行为属性：8 个手柄恰好覆盖 4 个角点组合 + 4 条边中点，且全部被 resizeSelection 支持。
+  const edges = selectionHandles({ left: 0, top: 0, right: 100, bottom: 100 }).map((h) => h.edge);
+  assert.equal(edges.length, 8);
+  const expected = new Set(['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']);
+  assert.deepEqual(new Set(edges), expected, '手柄边缘集必须完整覆盖四边组合');
+  for (const edge of edges) {
+    for (const ch of edge) {
+      assert.ok('nsew'.includes(ch), `手柄 edge ${edge} 含非法边 ${ch}`);
+    }
+  }
+});
+
 test('selectionHandles 拒绝无效输入', () => {
   assert.throws(() => selectionHandles(null), /选区/);
   assert.throws(() => selectionHandles({ left: 0, top: 0, right: 1, bottom: Number.NaN }), /bottom 必须是有限数字/);
