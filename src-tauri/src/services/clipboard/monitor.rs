@@ -4,7 +4,7 @@ use super::storage::store_clipboard_item;
 use crate::commands::window::{emit_clipboard_updated_event, ClipboardUpdatedEventPayload};
 use clipboard_rs::{
     ClipboardContent as RsClipboardContent, ClipboardHandler, ClipboardWatcher,
-    ClipboardWatcherContext,
+    ClipboardWatcherContext, WatcherShutdown,
 };
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
@@ -19,12 +19,14 @@ static GENERATION: AtomicU64 = AtomicU64::new(0);
 // 监听器状态
 struct MonitorState {
     watcher_handle: Option<thread::JoinHandle<()>>,
+    watcher_shutdown: Option<WatcherShutdown>,
     current_generation: u64,
 }
 
 static MONITOR_STATE: Lazy<Arc<Mutex<MonitorState>>> = Lazy::new(|| {
     Arc::new(Mutex::new(MonitorState {
         watcher_handle: None,
+        watcher_shutdown: None,
         current_generation: 0,
     }))
 });
@@ -195,14 +197,26 @@ pub fn start_clipboard_monitor() -> Result<(), String> {
 
     let new_generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
 
+    // 在主线程创建 watcher 并拿到关闭通道。创建失败时回滚运行标志与来源监控，
+    // 避免留下 IS_RUNNING=true 但无监听线程的撕裂状态。
+    let mut watcher = match ClipboardWatcherContext::new() {
+        Ok(watcher) => watcher,
+        Err(error) => {
+            IS_RUNNING.store(false, Ordering::SeqCst);
+            #[cfg(target_os = "windows")]
+            crate::services::system::stop_clipboard_source_monitor();
+            return Err(format!("创建剪贴板监听器失败: {error}"));
+        }
+    };
+    let watcher_shutdown = watcher.get_shutdown_channel();
+    watcher.add_handler(ClipboardMonitorManager::new(new_generation)?);
+
     let mut state = MONITOR_STATE.lock();
     state.current_generation = new_generation;
-    state.watcher_handle = None;
+    state.watcher_shutdown = Some(watcher_shutdown);
 
     let handle = thread::spawn(move || {
-        if let Err(e) = run_clipboard_monitor(new_generation) {
-            eprintln!("剪贴板监听错误: {}", e);
-        }
+        watcher.start_watch();
         IS_RUNNING.store(false, Ordering::SeqCst);
     });
 
@@ -211,29 +225,30 @@ pub fn start_clipboard_monitor() -> Result<(), String> {
 }
 
 pub fn stop_clipboard_monitor() -> Result<(), String> {
-    if IS_RUNNING.swap(false, Ordering::SeqCst) {
+    let was_running = IS_RUNNING.swap(false, Ordering::SeqCst);
+    if was_running {
         // 停止剪贴板来源监控
         #[cfg(target_os = "windows")]
         crate::services::system::stop_clipboard_source_monitor();
 
         let _ = CAPTURE_PENDING.swap(false, Ordering::SeqCst);
+    }
 
+    // 先丢关闭通道让 start_watch 返回，再 join 回收线程，避免僵尸线程泄漏。
+    let (watcher_shutdown, watcher_handle) = {
         let mut state = MONITOR_STATE.lock();
-        state.watcher_handle = None;
+        (state.watcher_shutdown.take(), state.watcher_handle.take())
+    };
+
+    drop(watcher_shutdown);
+    if let Some(handle) = watcher_handle {
+        let _ = handle.join();
     }
     Ok(())
 }
 
 pub fn is_monitor_running() -> bool {
     IS_RUNNING.load(Ordering::Relaxed)
-}
-
-fn run_clipboard_monitor(generation: u64) -> Result<(), String> {
-    let manager = ClipboardMonitorManager::new(generation)?;
-    let mut watcher =
-        ClipboardWatcherContext::new().map_err(|e| format!("创建剪贴板监听器失败: {}", e))?;
-    let _ = watcher.add_handler(manager).start_watch();
-    Ok(())
 }
 
 fn spawn_capture_worker_loop() {
@@ -523,6 +538,62 @@ mod tests {
         assert!(
             !schedule_line.contains("take_capture_pending()"),
             "take_capture_pending 不得作为 should_schedule 实参先求值"
+        );
+    }
+
+    // §10.3 源码护栏：停止监听必须先丢关闭通道再 join，否则 start_watch
+    // 收不到停止信号、join 永久阻塞，watcher 线程变成僵尸线程（后台资源泄漏）。
+    #[test]
+    fn stop_monitor_shuts_down_watcher_before_joining() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/clipboard/monitor.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 monitor.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let start_pos = stripped
+            .find("pub fn start_clipboard_monitor")
+            .expect("缺 start_clipboard_monitor");
+        let start_end = stripped[start_pos + 1..]
+            .find("\npub fn ")
+            .map(|i| start_pos + 1 + i)
+            .unwrap_or(stripped.len());
+        let start_body = &stripped[start_pos..start_end];
+        assert!(
+            start_body.contains("get_shutdown_channel()"),
+            "启动监听必须拿到关闭通道，否则无法主动停止 watcher"
+        );
+        assert!(
+            start_body.contains("watcher_shutdown"),
+            "启动监听必须把关闭通道存进 MonitorState 供停止时取用"
+        );
+
+        let stop_pos = stripped
+            .find("pub fn stop_clipboard_monitor")
+            .expect("缺 stop_clipboard_monitor");
+        let stop_end = stripped[stop_pos + 1..]
+            .find("\npub fn ")
+            .map(|i| stop_pos + 1 + i)
+            .unwrap_or(stripped.len());
+        let stop_body = &stripped[stop_pos..stop_end];
+        let drop_pos = stop_body
+            .find("drop(watcher_shutdown)")
+            .expect("停止监听必须先丢关闭通道");
+        let join_pos = stop_body
+            .find("handle.join()")
+            .expect("停止监听必须 join watcher 线程");
+        assert!(
+            drop_pos < join_pos,
+            "必须先丢关闭通道让 start_watch 返回，再 join；顺序颠倒 join 永久阻塞"
+        );
+        assert!(
+            stop_body.contains("watcher_shutdown.take()"),
+            "停止监听必须从 MonitorState 取出关闭通道"
         );
     }
 }
