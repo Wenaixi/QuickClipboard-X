@@ -25,12 +25,27 @@ impl MonitorRect {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScreenshotArtifact {
+    pub absolute_path: PathBuf,
+    pub relative_path: String,
+    pub image_id: String,
+    pub width: u32,
+    pub height: u32,
+    pub png_bytes: usize,
+    pub selection_left: u32,
+    pub selection_top: u32,
+    pub selection_width: u32,
+    pub selection_height: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScreenshotSession {
     session_id: String,
     monitor: MonitorRect,
     quick_action: bool,
     phase: SessionPhase,
     temp_files: Vec<PathBuf>,
+    artifact: Option<ScreenshotArtifact>,
     main_window_hidden_revision: Option<MainWindowVisibilityRevision>,
 }
 
@@ -94,6 +109,7 @@ impl ScreenshotSessionManager {
             quick_action,
             phase: SessionPhase::Selecting,
             temp_files: Vec::new(),
+            artifact: None,
             main_window_hidden_revision: None,
         };
         self.current = Some(session.clone());
@@ -106,6 +122,30 @@ impl ScreenshotSessionManager {
 
     pub fn current(&self) -> Option<&ScreenshotSession> {
         self.current.as_ref()
+    }
+
+    pub fn artifact(&self, session_id: &str) -> Result<Option<ScreenshotArtifact>, SessionError> {
+        let session = self.current.as_ref().ok_or(SessionError::NoActiveSession)?;
+        ensure_current_session(&session.session_id, session_id)?;
+        Ok(session.artifact.clone())
+    }
+
+    pub fn register_artifact(
+        &mut self,
+        session_id: &str,
+        artifact: ScreenshotArtifact,
+    ) -> Result<(), SessionError> {
+        let session = self.current.as_mut().ok_or(SessionError::NoActiveSession)?;
+        ensure_current_session(&session.session_id, session_id)?;
+        if session.phase != SessionPhase::Processing {
+            return Err(SessionError::InvalidTransition {
+                session_id: session.session_id.clone(),
+                from: session.phase,
+                to: SessionPhase::Processing,
+            });
+        }
+        session.artifact = Some(artifact);
+        Ok(())
     }
 
     pub fn is_current_phase(&self, session_id: &str, phase: SessionPhase) -> bool {
@@ -126,6 +166,43 @@ impl ScreenshotSessionManager {
         }
         session.phase = SessionPhase::Processing;
         Ok(())
+    }
+
+    /// Starts a new processing pass, or reuses an image retained after an AI failure.
+    pub fn begin_processing_or_reuse(
+        &mut self,
+        session_id: &str,
+        selection: (u32, u32, u32, u32),
+    ) -> Result<Option<ScreenshotArtifact>, SessionError> {
+        let session = self.current.as_mut().ok_or(SessionError::NoActiveSession)?;
+        ensure_current_session(&session.session_id, session_id)?;
+        match session.phase {
+            SessionPhase::Selecting => {
+                session.phase = SessionPhase::Processing;
+                Ok(None)
+            }
+            SessionPhase::Processing => {
+                let reusable = session.artifact.as_ref().is_some_and(|artifact| {
+                    (
+                        artifact.selection_left,
+                        artifact.selection_top,
+                        artifact.selection_width,
+                        artifact.selection_height,
+                    ) == selection
+                });
+                if reusable {
+                    Ok(session.artifact.clone())
+                } else {
+                    // Keep the previous path in temp_files so cancellation still
+                    // removes it, but force a fresh capture for the new selection.
+                    session.artifact = None;
+                    Ok(None)
+                }
+            },
+            SessionPhase::Committing => Err(SessionError::CommitInProgress {
+                session_id: session.session_id.clone(),
+            }),
+        }
     }
 
     pub fn register_temp_file(&mut self, session_id: &str, path: PathBuf) -> Result<(), SessionError> {
@@ -411,6 +488,32 @@ mod tests {
         ));
         assert_eq!(manager.phase(), Some(SessionPhase::Selecting));
         assert_eq!(manager.current().unwrap().session_id(), new_session_id);
+    }
+
+    #[test]
+    fn processing_session_reuses_retained_artifact_after_ai_failure() {
+        let mut manager = ScreenshotSessionManager::default();
+        let monitor = MonitorRect::new(0, 0, 1920, 1080).unwrap();
+        let session_id = match manager.start(monitor, false) {
+            StartSessionResult::Started(session) => session.session_id().to_string(),
+            other => panic!("首次启动应创建会话，实际为 {other:?}"),
+        };
+        assert_eq!(manager.begin_processing_or_reuse(&session_id, (1, 2, 100, 50)).unwrap(), None);
+        let artifact = ScreenshotArtifact {
+            absolute_path: PathBuf::from("temporary/encoded.png"),
+            relative_path: "clipboard_images/image.png".to_string(),
+            image_id: "image".to_string(),
+            width: 100,
+            height: 50,
+            png_bytes: 123,
+            selection_left: 1,
+            selection_top: 2,
+            selection_width: 100,
+            selection_height: 50,
+        };
+        manager.register_artifact(&session_id, artifact.clone()).unwrap();
+        assert_eq!(manager.begin_processing_or_reuse(&session_id, (1, 2, 100, 50)).unwrap(), Some(artifact));
+        assert_eq!(manager.phase(), Some(SessionPhase::Processing));
     }
 
     #[test]
