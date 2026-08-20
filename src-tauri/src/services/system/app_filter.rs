@@ -50,16 +50,19 @@ mod windows_impl {
     use super::*;
     use once_cell::sync::Lazy;
     use parking_lot::Mutex;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
     static CLIPBOARD_SOURCE_CACHE: Lazy<Mutex<Option<ClipboardSourceInfo>>> =
         Lazy::new(|| Mutex::new(None));
 
     static SOURCE_MONITOR_RUNNING: AtomicBool = AtomicBool::new(false);
+    static SOURCE_MONITOR_THREAD_ID: AtomicU32 = AtomicU32::new(0);
 
     // 启动剪贴板来源监控
     pub fn start_clipboard_source_monitor() {
         use std::thread;
-        use windows::Win32::Foundation::{HWND, LPARAM, WPARAM, LRESULT};
+        use windows::Win32::Foundation::{
+            GetLastError, ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, WPARAM,
+        };
         use windows::Win32::UI::WindowsAndMessaging::{
             CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
             GetMessageW, RegisterClassW, TranslateMessage, MSG, WNDCLASSW,
@@ -79,6 +82,10 @@ mod windows_impl {
 
         thread::spawn(move || {
             unsafe {
+                SOURCE_MONITOR_THREAD_ID.store(
+                    windows::Win32::System::Threading::GetCurrentThreadId(),
+                    Ordering::SeqCst,
+                );
                 unsafe extern "system" fn wnd_proc(
                     hwnd: HWND,
                     msg: u32,
@@ -100,8 +107,9 @@ mod windows_impl {
                     ..Default::default()
                 };
 
-                if RegisterClassW(&wc) == 0 {
+                if RegisterClassW(&wc) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS {
                     SOURCE_MONITOR_RUNNING.store(false, Ordering::SeqCst);
+                    SOURCE_MONITOR_THREAD_ID.store(0, Ordering::SeqCst);
                     return;
                 }
 
@@ -116,17 +124,20 @@ mod windows_impl {
 
                 let Ok(hwnd) = hwnd else {
                     SOURCE_MONITOR_RUNNING.store(false, Ordering::SeqCst);
+                    SOURCE_MONITOR_THREAD_ID.store(0, Ordering::SeqCst);
                     return;
                 };
 
                 if AddClipboardFormatListener(hwnd).is_err() {
                     SOURCE_MONITOR_RUNNING.store(false, Ordering::SeqCst);
+                    SOURCE_MONITOR_THREAD_ID.store(0, Ordering::SeqCst);
+                    let _ = DestroyWindow(hwnd);
                     return;
                 }
 
                 let mut msg = MSG::default();
                 while SOURCE_MONITOR_RUNNING.load(Ordering::Relaxed) {
-                    if GetMessageW(&mut msg, Some(hwnd), 0, 0).as_bool() {
+                    if GetMessageW(&mut msg, None, 0, 0).as_bool() {
                         let _ = TranslateMessage(&msg);
                         DispatchMessageW(&msg);
                     } else {
@@ -136,13 +147,28 @@ mod windows_impl {
 
                 let _ = RemoveClipboardFormatListener(hwnd);
                 let _ = DestroyWindow(hwnd);
+                SOURCE_MONITOR_THREAD_ID.store(0, Ordering::SeqCst);
             }
         });
     }
 
     // 停止剪贴板来源监控
     pub fn stop_clipboard_source_monitor() {
+        use windows::Win32::Foundation::{LPARAM, WPARAM};
+        use windows::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT};
+
         SOURCE_MONITOR_RUNNING.store(false, Ordering::SeqCst);
+        let thread_id = SOURCE_MONITOR_THREAD_ID.load(Ordering::SeqCst);
+        if thread_id != 0 {
+            unsafe {
+                let _ = PostThreadMessageW(
+                    thread_id,
+                    WM_QUIT,
+                    WPARAM(0),
+                    LPARAM(0),
+                );
+            }
+        }
     }
 
     // 获取剪贴板来源
@@ -520,5 +546,59 @@ mod tests {
             "C:\\Users\\test\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
             "*code.exe",
         ));
+    }
+
+    // §10.3 源码护栏：停止来源监控必须向消息循环线程投递 WM_QUIT，否则线程
+    // 阻塞在 GetMessageW 无法退出，成为泄漏线程；且 GetMessageW 必须用 None
+    // 窗口句柄，WM_QUIT 是线程级消息，传窗口句柄时收不到。
+    #[test]
+    fn source_monitor_quits_message_loop_on_stop() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/system/app_filter.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 app_filter.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let stop_pos = stripped
+            .find("pub fn stop_clipboard_source_monitor")
+            .expect("缺 stop_clipboard_source_monitor");
+        let stop_end = stripped[stop_pos + 1..]
+            .find("\n    pub fn ")
+            .map(|i| stop_pos + 1 + i)
+            .unwrap_or(stripped.len());
+        let stop_body = &stripped[stop_pos..stop_end];
+        assert!(
+            stop_body.contains("PostThreadMessageW"),
+            "停止来源监控必须投递 WM_QUIT 唤醒消息循环线程"
+        );
+        assert!(
+            stop_body.contains("WM_QUIT"),
+            "停止来源监控必须投递 WM_QUIT 消息"
+        );
+        assert!(
+            stop_body.contains("SOURCE_MONITOR_THREAD_ID"),
+            "停止来源监控必须读取记录的线程 ID 以投递 WM_QUIT"
+        );
+        let start_pos = stripped
+            .find("pub fn start_clipboard_source_monitor")
+            .expect("缺 start_clipboard_source_monitor");
+        let start_end = stripped[start_pos + 1..]
+            .find("\n    pub fn ")
+            .map(|i| start_pos + 1 + i)
+            .unwrap_or(stripped.len());
+        let start_body = &stripped[start_pos..start_end];
+        assert!(
+            start_body.contains("GetMessageW(&mut msg, None, 0, 0)"),
+            "GetMessageW 必须用 None 窗口句柄，否则 WM_QUIT 无法送达线程消息队列"
+        );
+        assert!(
+            !start_body.contains("GetMessageW(&mut msg, Some(hwnd), 0, 0)"),
+            "GetMessageW 不得用窗口句柄，窗口消息循环收不到 WM_QUIT"
+        );
     }
 }
