@@ -27,7 +27,7 @@ test('thirdsGrid 任意合法边界下两条三分线不重合且贯穿画布', 
     { width: 800, height: 600 },
     { width: 1920, height: 1080 },
     { width: 1366, height: 768 },
-    { width: 1, height: 1 },
+    { width: 3, height: 3 },
   ];
   for (const bounds of cases) {
     const grid = thirdsGrid(bounds);
@@ -63,6 +63,22 @@ test('thirdsGrid 源码按 1/3 与 2/3 四舍五入且双线贯穿对称', () =>
     // 对称性：第二线到右缘的距离与第一线到左缘的距离差不超过 1px（四舍五入误差）。
     assert.ok(Math.abs((bounds.width - v2.left) - v1.left) <= 1, '垂直线必须左右对称');
     assert.ok(Math.abs((bounds.height - h2.top) - h1.top) <= 1, '水平线必须上下对称');
+  }
+});
+
+test('thirdsGrid 任意合法边界下四条线整体在画布内可见', () => {
+  // 不变量：三分线是 1px 宽的绘制元素，其 left/top 必须严格小于画布宽/高
+  // （否则整条线画到画布外不可见）。极端退化 1x1 画布也必须满足。
+  for (const bounds of [{ width: 1, height: 1 }, { width: 1, height: 100 }, { width: 100, height: 1 }, { width: 2, height: 2 }, { width: 800, height: 600 }, { width: 1920, height: 1080 }]) {
+    const grid = thirdsGrid(bounds);
+    for (const line of grid.vertical) {
+      assert.ok(line.left < bounds.width, `${bounds.width}x${bounds.height} 垂直线 left=${line.left} 必须小于宽度`);
+      assert.equal(line.height, bounds.height, '垂直线必须贯穿画布');
+    }
+    for (const line of grid.horizontal) {
+      assert.ok(line.top < bounds.height, `${bounds.width}x${bounds.height} 水平线 top=${line.top} 必须小于高度`);
+      assert.equal(line.width, bounds.width, '水平线必须贯穿画布');
+    }
   }
 });
 
