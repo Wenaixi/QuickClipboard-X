@@ -92,6 +92,25 @@ test('isHelpShortcut 源码整体拒绝修饰键且白名单仅 F1 与问号', (
   assert.equal(isHelpShortcut({ key: '/', ctrlKey: false, metaKey: false, altKey: false }), false);
 });
 
+
+test('helpEntries 源码 label 必须使用翻译函数结果而非原始 key', () => {
+  const source = readFileSync(new URL('./helpModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function helpEntries');
+  const body = source.slice(start, start + 400);
+  // 源码护栏：label 必须取翻译函数的返回结果（若直接写 item.labelKey 会在 UI 显示原始 key）。
+  assert.ok(body.includes('label: t(item.labelKey)'), 'label 必须调用翻译函数');
+  // 行为验证：翻译函数返回标记值时 label 必须等于标记（证明用了翻译结果而非原始 key）。
+  const markerT = (key) => `marker:${key}`;
+  const entries = helpEntries(markerT);
+  assert.equal(entries.length, 10, '必须返回全部条目');
+  for (const entry of entries) {
+    assert.ok(entry.label.startsWith('marker:'), `${entry.id} 的 label 必须是翻译结果而非原始 key`);
+    assert.ok(entry.label.includes('screenshot.help.'), `${entry.id} 的 label 必须包含翻译 key`);
+  }
+  // 具体验证第一条：complete 条目的 label 必须是对应 key 的翻译结果。
+  const complete = entries.find((entry) => entry.id === 'complete');
+  assert.equal(complete.label, 'marker:screenshot.help.complete', 'complete 条目 label 必须是翻译的完成提示');
+});
 test('帮助条目 labelKey 必须在双语言包中存在', () => {
   const source = readFileSync(new URL('./helpModel.js', import.meta.url), 'utf8');
   const labelKeys = [...source.matchAll(/labelKey: '([^']+)'/g)].map((match) => match[1]);
