@@ -253,8 +253,11 @@ mod source_guards {
     use super::{validate_ai_screenshot_action, validate_initial_screenshot_action};
 
     fn source_file(relative: &str) -> String {
+        // 工作区 core.autocrlf=true 让 .rs 源文件 checkout 后呈 CRLF 行尾。
+        // 源码字面护栏的字面假设 LF,此处归一化 CRLF → LF 让字面匹配跨平台保持确定。
         std::fs::read_to_string(format!("{}/src/{relative}", env!("CARGO_MANIFEST_DIR")))
             .expect("读取截图源码失败")
+            .replace("\r\n", "\n")
     }
 
     #[test]
