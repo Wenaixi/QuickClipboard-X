@@ -21,6 +21,11 @@ test('normalizeBootstrap 提示与 AI 开关默认开启且配置必须严格布
   assert.equal(defaults.screenshotAiEnabled, true, 'AI 功能默认开启');
   assert.equal(defaults.screenshotAiConfigured, false, 'AI 配置默认 false');
   assert.equal(defaults.screenshotMagnifierEnabled, true, '放大镜默认开启');
+  assert.equal(defaults.screenshotElementDetection, 'all', '元素检测默认覆盖窗口和控件');
+  assert.equal(defaults.screenshotColorIncludeFormat, true, '颜色格式默认开启');
+  assert.equal(normalizeBootstrap({ screenshotElementDetection: 'none' }).screenshotElementDetection, 'none');
+  assert.equal(normalizeBootstrap({ screenshotElementDetection: 'invalid' }).screenshotElementDetection, 'all');
+  assert.equal(normalizeBootstrap({ screenshotColorIncludeFormat: false }).screenshotColorIncludeFormat, false);
   // 显式关闭生效。
   assert.equal(normalizeBootstrap({ screenshotHintsEnabled: false }).screenshotHintsEnabled, false);
   assert.equal(normalizeBootstrap({ screenshotAiEnabled: false }).screenshotAiEnabled, false);
