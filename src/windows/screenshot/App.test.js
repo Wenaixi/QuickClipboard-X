@@ -720,6 +720,30 @@ test('空闲与模式提示渲染受截图提示开关守卫', () => {
   assert.ok(model.includes('screenshotHintsEnabled: payload.screenshotHintsEnabled !== false'), 'bootstrap 解析必须携带提示开关');
 });
 
+test('动作工具栏 id 与热键映射一致且处理中互斥显示 processing', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const actionsStart = source.indexOf('const ACTIONS = [');
+  const actionsBody = source.slice(actionsStart, actionsStart + 300);
+  // 源码护栏一：ACTIONS 必须包含 copy/save/pin/ai 四个 id，且与 actionModel 热键映射值完全一致
+  // （工具栏动作集合与数字键映射不得漂移）。
+  const actionModel = readFileSync(new URL('./actionModel.js', import.meta.url), 'utf8');
+  const expected = ['copy', 'save', 'pin', 'ai'];
+  for (const id of expected) {
+    assert.ok(actionModel.includes(`'${id}'`), `热键映射必须包含动作 ${id}`);
+    assert.ok(actionsBody.includes(`id: '${id}'`), `ACTIONS 必须包含动作 ${id}`);
+  }
+  // 源码护栏二：处理中互斥——busyAction 非空时所有动作按钮禁用。
+  const toolbarStart = source.indexOf('className="screenshot-toolbar"');
+  const toolbarBody = source.slice(toolbarStart, toolbarStart + 1200);
+  assert.ok(toolbarBody.includes('disabled={Boolean(busyAction) || !actionIsEnabled(action.id, bootstrap)}'), '处理中必须禁用全部动作按钮');
+  // 源码护栏三：处理中的当前动作按钮必须显示 processing 文案而非普通标签。
+  assert.ok(toolbarBody.includes("busyAction === action.id ? t('screenshot.processing') : label"), '处理中的当前动作必须显示 processing 文案');
+  // 源码护栏四：完成入口必须二次校验可用性（按钮禁用只是第一道防线）。
+  const completeStart = source.indexOf('const completeScreenshot = async');
+  const completeBody = source.slice(completeStart, completeStart + 900);
+  assert.ok(completeBody.includes('if (!actionIsEnabled(action, bootstrap)) {'), '完成入口必须二次校验动作可用性');
+});
+
 test('AI 未配置时工具栏禁用 AI 动作且数字键 4 引导进入设置', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   // 工具栏按钮：disabled 判定必须与可用性函数一致。
