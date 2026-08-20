@@ -30,6 +30,14 @@ function selectionValues(selection) {
   };
 }
 
+
+// 见 CLAUDE.md 10.3 兼容性:工作区 core.autocrlf=true 让 .js/.jsx 文件 checkout 后呈 CRLF 行尾。
+// 源码字面护栏的字面假设 LF,readSource 自动归一化 CRLF → LF 让字面匹配保持确定性。
+function readSource(path) {
+  return readFileSync(new URL(path, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+}
+
+
 test('normalizeSelection 支持反向拖拽并返回统一矩形', () => {
   const selection = normalizeSelection(
     { x: 300, y: 240 },
@@ -82,7 +90,7 @@ test('normalizeSelection 在右下边缘仍保证最小 1x1', () => {
 });
 
 test('normalizeSelection 反选统一且起止点夹紧并最小 1x1', () => {
-  const source = readFileSync(new URL('./selectionModel.js', import.meta.url), 'utf8');
+  const source = readSource('./selectionModel.js');
   // 源码护栏：单轴归一化必须把起止两端都夹到 [0, limit] 再取 min/max（越界拖拽不产生负坐标或越界矩形），
   // 且退化点（high == low）必须扩成最小 1x1：右/下边缘向内侧扩（低端减一），非边缘向高端扩一。
   const axisStart = source.indexOf('function normalizeAxis(start, end, limit) {');
@@ -178,7 +186,7 @@ test('squareSelection 位移为零时保持最小 1px 正方形', () => {
 });
 
 test('squareSelection 源码 side 必须同时受双向可达范围约束且贴边塌缩不越界', () => {
-  const source = readFileSync(new URL('./selectionModel.js', import.meta.url), 'utf8');
+  const source = readSource('./selectionModel.js');
   const start = source.indexOf('export function squareSelection');
   const body = source.slice(start, start + 1100);
   // 源码护栏一：side 必须同时受 rawSide / rightExtent / downExtent 三重约束
@@ -249,7 +257,7 @@ test('selectionForPointerGesture 拖动超过阈值时保持用户自由选区',
 });
 
 test('selectionForPointerGesture 源码单击选窗口先于自由选区且命中用半开区间', () => {
-  const source = readFileSync(new URL('./selectionModel.js', import.meta.url), 'utf8');
+  const source = readSource('./selectionModel.js');
   const start = source.indexOf('export function selectionForPointerGesture');
   const body = source.slice(start, start + 800);
   // 源码护栏一：单击判定必须先于自由选区回退（只有单击才尝试选窗口）。
@@ -280,7 +288,7 @@ test('selectionForPointerGesture 源码单击选窗口先于自由选区且命�
 });
 
 test('selectionForPointerGesture 窗口列表混入空项必须跳过且越界窗口被夹紧', () => {
-  const source = readFileSync(new URL('./selectionModel.js', import.meta.url), 'utf8');
+  const source = readSource('./selectionModel.js');
   const start = source.indexOf('export function selectionForPointerGesture');
   const body = source.slice(start, start + 800);
   // 源码护栏一：窗口命中判定必须带 selection 真值守卫（windowSelections 来自原生窗口枚举，
@@ -346,7 +354,7 @@ test('selectionToPhysical 使用 floor 起点和 ceil 终点覆盖完整像素�
 });
 
 test('selectionToPhysical 源码护栏：floor 起点 ceil 终点且最小 1px 与 physicalSize 一致', () => {
-  const source = readFileSync(new URL('./selectionModel.js', import.meta.url), 'utf8');
+  const source = readSource('./selectionModel.js');
   const start = source.indexOf('export function selectionToPhysical');
   const body = source.slice(start, start + 900);
   // 源码护栏：物理取整必须是 floor 起点 + ceil 终点（选区覆盖 [left, right) 的物理像素，
@@ -429,7 +437,7 @@ test('hitSelectionEdge 命中边缘并返回方向, 内部点返回 null', () =>
 });
 
 test('hitSelectionEdge 默认容差 4 且角点按 n/s 在前 e/w 在后并排除严格内部点', () => {
-  const source = readFileSync(new URL('./selectionModel.js', import.meta.url), 'utf8');
+  const source = readSource('./selectionModel.js');
   const start = source.indexOf('export function hitSelectionEdge');
   const body = source.slice(start, start + 1300);
   // 源码护栏：默认边缘容差必须为 4（ShareX 贴近的边缘探测阈值）。
@@ -449,7 +457,7 @@ test('hitSelectionEdge 默认容差 4 且角点按 n/s 在前 e/w 在后并排�
 });
 
 test('isClickGesture 默认阈值 4 且欧氏距离判定拒绝负阈值', () => {
-  const source = readFileSync(new URL('./selectionModel.js', import.meta.url), 'utf8');
+  const source = readSource('./selectionModel.js');
   const start = source.indexOf('export function isClickGesture');
   const body = source.slice(start, start + 500);
   // 源码护栏一：默认单击阈值必须为 4（与手柄边缘容差一致的微小位移容差）。
@@ -706,7 +714,7 @@ test('resizeSelection 拒绝非法边缘或无效输入', () => {
 });
 
 test('resizeSelection 普通路径不翻转且被拖边按对边夹紧到最小 1px 源码护栏', () => {
-  const source = readFileSync(new URL('./selectionModel.js', import.meta.url), 'utf8');
+  const source = readSource('./selectionModel.js');
   const start = source.indexOf('export function resizeSelection');
   const body = source.slice(start, start + 4000);
   // 源码护栏一：被拖动的边必须按对边夹紧到最小 1px（right 不小于 left+1，left 不大于 right-1），
@@ -730,7 +738,7 @@ test('resizeSelection 普通路径不翻转且被拖边按对边夹紧到最小 
 });
 
 test('resizeSelection 保持比例分支必须先于纯从中心分支且组合时比例守恒', () => {
-  const source = readFileSync(new URL('./selectionModel.js', import.meta.url), 'utf8');
+  const source = readSource('./selectionModel.js');
   const start = source.indexOf('export function resizeSelection');
   const body = source.slice(start, start + 4000);
   // 源码护栏一：保持比例分支入口必须存在（keepAspectRatio === true 独立分支）。
@@ -812,7 +820,7 @@ test('nudgeSelection 支持 10px 快速步长并夹在右下方边界', () => {
 });
 
 test('nudgeSelection 尺寸守恒且边界按尺寸推导并先归一化', () => {
-  const source = readFileSync(new URL('./selectionModel.js', import.meta.url), 'utf8');
+  const source = readSource('./selectionModel.js');
   const start = source.indexOf('export function nudgeSelection');
   const body = source.slice(start, start + 1000);
   // 源码护栏：必须先归一化当前选区（脏输入如 left>right 也能得到合法矩形），
@@ -846,7 +854,7 @@ test('nudgeSelection 拒绝无效边界或非有限位移', () => {
 });
 
 test('全部选区变换函数必须夹紧到显示器边界内', () => {
-  const source = readFileSync(new URL('./selectionModel.js', import.meta.url), 'utf8');
+  const source = readSource('./selectionModel.js');
   // 拖拽/调整/移动/方形四种变换都必须以边界为约束，禁止裸输出越界矩形。
   const sections = [
     ['normalizeSelection', 'normalizeAxis(start.x, end.x, bounds.width)'],
@@ -865,9 +873,11 @@ test('全部选区变换函数必须夹紧到显示器边界内', () => {
 });
 
 test('createRafWriter 源码代数递增且 cancel 复位调度标志并丢弃过期帧', () => {
-  const source = readFileSync(new URL('./selectionModel.js', import.meta.url), 'utf8');
+  const source = readSource('./selectionModel.js');
   const start = source.indexOf('export function createRafWriter');
-  const body = source.slice(start, start + 900);
+  // slice 范围 2000 字符覆盖到 createRafWriter 函数末尾(cancel 在 export 后 32 行),
+  // 原 900 在 createRafWriter 测试上不够,见 CLAUDE.md 10.4 slice 边界陷阱。
+  const body = source.slice(start, start + 2000);
   // 源码护栏一：cancel 必须递增代数（generation += 1），过期帧通过代数比较丢弃。
   assert.ok(body.includes('generation += 1;'), 'cancel 必须递增代数');
   // 源码护栏二：帧回调必须比较代数，不匹配时丢弃且不触碰共享 pendingValue。
@@ -897,7 +907,7 @@ test('createRafWriter 源码代数递增且 cancel 复位调度标志并丢弃�
 
 
 test('hitSelectionInterior 源码 inset 必须向内收缩（left/top + inset、right/bottom - inset）', () => {
-  const source = readFileSync(new URL('./selectionModel.js', import.meta.url), 'utf8');
+  const source = readSource('./selectionModel.js');
   const start = source.indexOf('export function hitSelectionInterior');
   const body = source.slice(start, start + 600);
   // 源码护栏：inset 必须向内收缩能动（left/top + inset 提高上界、right/bottom - inset 降低下界），
