@@ -343,6 +343,26 @@ test('hitSelectionEdge 命中边缘并返回方向, 内部点返回 null', () =>
   assert.equal(hitSelectionEdge({ x: 50, y: 160 }, selection), null);
 });
 
+test('hitSelectionEdge 默认容差 4 且角点按 n/s 在前 e/w 在后并排除严格内部点', () => {
+  const source = readFileSync(new URL('./selectionModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function hitSelectionEdge');
+  const body = source.slice(start, start + 1300);
+  // 源码护栏：默认边缘容差必须为 4（ShareX 贴近的边缘探测阈值）。
+  assert.ok(body.includes('tolerance = 4'), '默认边缘容差必须为 4');
+  // 角点方向命名约定：n/s 在前 e/w 在后（nw/ne/sw/se），禁止 w 在前产生 wn/we 混淆。
+  assert.ok(body.includes("edges.sort((a, b) => 'nsew'.indexOf(a) - 'nsew'.indexOf(b))"), '角点必须按 n/s 在前 e/w 在后排序');
+  // 严格内部点必须排除（距四边都超过容差时留作平移，不进入调整模式）。
+  assert.ok(body.includes('point.x > selection.left + tolerance'), '必须排除严格内部点');
+  // 行为属性：默认容差 4 下边缘/角点命中、内部与外部返回 null、角点顺序固定。
+  const selection = { left: 100, top: 80, right: 300, bottom: 240 };
+  assert.equal(hitSelectionEdge({ x: 104, y: 160 }, selection), 'w', '容差内左缘必须命中');
+  assert.equal(hitSelectionEdge({ x: 105, y: 160 }, selection), null, '容差外左缘不得命中');
+  assert.equal(hitSelectionEdge({ x: 104, y: 84 }, selection), 'nw', '左上角必须为 nw');
+  assert.equal(hitSelectionEdge({ x: 296, y: 236 }, selection), 'se', '右下角必须为 se');
+  assert.equal(hitSelectionEdge({ x: 200, y: 160 }, selection), null, '严格内部点必须返回 null');
+  assert.equal(hitSelectionEdge({ x: 95, y: 160 }, selection), null, '容差外外部点必须返回 null');
+});
+
 test('hitSelectionEdge 自定义容差并拒绝负容差', () => {
   const selection = { left: 100, top: 80, right: 300, bottom: 240 };
   assert.equal(hitSelectionEdge({ x: 108, y: 160 }, selection, 8), 'w');
