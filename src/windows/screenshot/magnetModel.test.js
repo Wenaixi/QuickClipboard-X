@@ -166,6 +166,27 @@ test('magnetSelection 最佳吸附候选单一来源且 edge 值域校验完整'
   assert.equal(se.bottom, 1080, 'se 调整下缘必须吸附');
 });
 
+test('magnetSelection 等距离候选平局时取先出现候选且源码严格小于', () => {
+  const source = readFileSync(new URL('./magnetModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('function bestSnapDelta');
+  const body = source.slice(start, start + 400);
+  // 源码护栏：候选替换必须用严格小于（distance < bestDistance）而非 <=，
+  // 保证等距离候选平局时保留先出现的候选（右缘候选先于中心候选），确定性无歧义。
+  assert.ok(body.includes('if (distance <= tolerance && distance < bestDistance)'), '候选必须同时满足容差与严格小于');
+  assert.ok(!body.includes('distance <= bestDistance'), '禁止宽松小于等于替换（平局歧义）');
+  // 行为边界：构造 W=24 容差 6，e 边 right=18=3W/4 时右缘候选（W-right=6）与中心候选
+  // （W/2-right=-6）距离相等且同落容差内，必须吸附到右缘 24（先出现候选）；
+  // 若实现改为 <= 会替换为后候选错误吸附到中心 12。
+  const small = { width: 24, height: 24 };
+  const atThreeQuarter = magnetSelection({ left: 1, top: 1, right: 18, bottom: 4 }, small, { edge: 'e', tolerance: 6 });
+  assert.equal(atThreeQuarter.right, 24, '等距离平局必须吸附到右缘（先出现候选）');
+  assert.notEqual(atThreeQuarter.right, 12, '不得错误吸附到中心');
+  // s 边同理：bottom=18=3H/4 时吸附到底缘 24。
+  const sQuarter = magnetSelection({ left: 1, top: 1, right: 4, bottom: 18 }, small, { edge: 's', tolerance: 6 });
+  assert.equal(sQuarter.bottom, 24, 's 边等距离平局必须吸附到底缘');
+  assert.notEqual(sQuarter.bottom, 12, 's 边不得错误吸附到中心');
+});
+
 test('magnetSelection 拒绝无效输入', () => {
   assert.throws(() => magnetSelection({ left: 0, top: 0, right: 1, bottom: 1 }, { width: 0, height: 10 }), /边界尺寸必须为正数/);
   assert.throws(() => magnetSelection({ left: 0, top: 0, right: 1, bottom: 1 }, bounds, { tolerance: -1 }), /吸附容差不能为负数/);
