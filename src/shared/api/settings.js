@@ -60,11 +60,6 @@ export async function getShortcutStatuses() {
   return await invoke('get_shortcut_statuses')
 }
 
-// 获取单个快捷键状态
-export async function getShortcutStatus(id) {
-  return await invoke('get_shortcut_status', { id })
-}
-
 // 保存窗口位置
 export async function saveWindowPosition(x, y) {
   return await invoke('save_window_position', { x, y })
