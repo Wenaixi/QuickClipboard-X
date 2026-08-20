@@ -78,6 +78,21 @@ test('hexFromRgb 源码补零大写语义且小通道值必须两位十六进制
   assert.equal(hexFromRgb({ r: 255, g: 0, b: 128 }), '#FF0080');
 });
 
+test('formatRgb 与 hexFromRgb 共用通道夹紧单一来源且四舍五入边界锁定', () => {
+  const source = readFileSync(new URL('./colorModel.js', import.meta.url), 'utf8');
+  // 源码护栏一：clampChannel 必须为 0-255 夹紧 + Math.round 四舍五入（单一夹紧函数）。
+  assert.ok(source.includes('return Math.min(255, Math.max(0, Math.round(value)));'), '夹紧必须为 0-255 且四舍五入');
+  // 源码护栏二：formatRgb 的 RGB 模板必须三通道全部走 clampChannel（禁止内联 Math.min/max 分叉）。
+  assert.ok(source.includes('return `RGB(${clampChannel(rgb.r)}, ${clampChannel(rgb.g)}, ${clampChannel(rgb.b)})`;'), 'RGB 模板必须三通道共用 clampChannel');
+  // 源码护栏三：hexFromRgb 的 toHex 也必须走 clampChannel（与 RGB 文本同一夹紧语义）。
+  assert.ok(source.includes('clampChannel(value).toString(16).padStart(2, \'0\').toUpperCase()'), '十六进制必须共用 clampChannel');
+  // 行为验证：负值夹 0、超 255 夹 255、小数四舍五入（255.4→255、255.5→255 半进位后夹紧、-0.4→0）。
+  assert.equal(formatRgb({ r: -5, g: 300, b: 128 }), 'RGB(0, 255, 128)', '负值与超值必须夹紧');
+  assert.equal(formatRgb({ r: 255.4, g: 10.6, b: 0 }), 'RGB(255, 11, 0)', '小数必须四舍五入');
+  assert.equal(formatRgb({ r: 255.5, g: -0.5, b: 1 }), 'RGB(255, 0, 1)', '半进位后夹紧边界');
+  assert.equal(hexFromRgb({ r: 255.5, g: 10.6, b: 0 }), '#FF0B00', '十六进制与 RGB 文本共用同一夹紧');
+});
+
 test('hexFromRgb 输出大写十六进制', () => {
   assert.equal(hexFromRgb({ r: 255, g: 0, b: 128 }), '#FF0080');
   assert.equal(hexFromRgb({ r: 0, g: 0, b: 0 }), '#000000');
