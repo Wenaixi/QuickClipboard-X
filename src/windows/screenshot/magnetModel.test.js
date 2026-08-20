@@ -5,6 +5,14 @@ import { magnetSelection } from './magnetModel.js';
 
 const bounds = { width: 1920, height: 1080 };
 
+
+// 见 CLAUDE.md 10.3 兼容性:工作区 core.autocrlf=true 让 .js/.jsx 文件 checkout 后呈 CRLF 行尾。
+// 源码字面护栏的字面假设 LF,readSource 自动归一化 CRLF → LF 让字面匹配保持确定性。
+function readSource(path) {
+  return readFileSync(new URL(path, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+}
+
+
 test('magnetSelection 平移靠近屏幕左缘时吸附到 0 且保持尺寸', () => {
   const result = magnetSelection({ left: 3, top: 100, right: 403, bottom: 400 }, bounds);
   assert.deepEqual(result, { left: 0, top: 100, right: 400, bottom: 400, width: 400, height: 300 });
@@ -69,7 +77,7 @@ test('magnetSelection 越界选区不产生负宽或零宽', () => {
 });
 
 test('magnetSelection 任何输入都返回边界内最小 1px 合法选区', () => {
-  const source = readFileSync(new URL('./magnetModel.js', import.meta.url), 'utf8');
+  const source = readSource('./magnetModel.js');
   const start = source.indexOf('export function magnetSelection');
   const body = source.slice(start);
   // 平移与调整两条路径都必须以夹紧收尾，返回的选区不得越界或产生负尺寸。
@@ -87,11 +95,11 @@ test('magnetSelection 任何输入都返回边界内最小 1px 合法选区', ()
 test('magnetSelection 平移只改位置不改尺寸且吸附点精确落线', () => {
   // 属性测试：平移路径（edge=''）必须保持选区尺寸不变，仅允许位移；
   // 若发生吸附，吸附后的左缘/右缘/垂直中心必须精确落在 0 / 宽度 / 半宽之一。
-  const source = readFileSync(new URL('./magnetModel.js', import.meta.url), 'utf8');
+  const source = readSource('./magnetModel.js');
   const start = source.indexOf('export function magnetSelection');
   const body = source.slice(start);
   // 源码护栏：平移候选线必须完整——左缘 0 / 右缘 bounds.width / 垂直中心 bounds.width/2 三条缺一不可。
-  // 用完整多行块锚定平移路径（调整分支 edge='e' 也有单行右缘候选，contains 会被稀释，§10.4）。
+  // 用完整多行块锚定平移路径（调整分支 edge='e' 也有单行右缘候选，contains 会被稀释，见 CLAUDE.md 10.4）。
   const dxBlock = 'const dx = bestSnapDelta([\n      { delta: 0 - left },\n      { delta: bounds.width - right },\n      { delta: bounds.width / 2 - (left + right) / 2 },\n    ], tolerance);';
   const dyBlock = 'const dy = bestSnapDelta([\n      { delta: 0 - top },\n      { delta: bounds.height - bottom },\n      { delta: bounds.height / 2 - (top + bottom) / 2 },\n    ], tolerance);';
   assert.ok(body.includes(dxBlock), '平移 dx 候选必须完整（左缘/右缘/垂直中心）');
@@ -123,7 +131,7 @@ test('magnetSelection 平移只改位置不改尺寸且吸附点精确落线', (
 });
 
 test('magnetSelection 源码 e/s 边夹紧下限 left+1/top+1 且极端越界输入保持最小 1px', () => {
-  const source = readFileSync(new URL('./magnetModel.js', import.meta.url), 'utf8');
+  const source = readSource('./magnetModel.js');
   const start = source.indexOf('export function magnetSelection');
   const body = source.slice(start);
   // 源码护栏一：e 边调整的夹紧下限必须为 left + 1（拖 e 时 right 不得小于 left+1，
@@ -148,7 +156,7 @@ test('magnetSelection 源码 e/s 边夹紧下限 left+1/top+1 且极端越界输
 });
 
 test('magnetSelection 默认容差 6px 且边界行为一致', () => {
-  const source = readFileSync(new URL('./magnetModel.js', import.meta.url), 'utf8');
+  const source = readSource('./magnetModel.js');
   // 源码护栏：默认吸附容差必须明确为 6（ShareX 公开行为的合理贴近阈值）。
   assert.ok(source.includes('const tolerance = options.tolerance ?? 6;'), '默认容差必须为 6');
   // 行为边界：距左缘 6px 内吸附到 0，7px 外不吸附（同一侧比较保证语义一致）。
@@ -166,7 +174,7 @@ test('magnetSelection 默认容差 6px 且边界行为一致', () => {
 });
 
 test('magnetSelection 最佳吸附候选单一来源且 edge 值域校验完整', () => {
-  const source = readFileSync(new URL('./magnetModel.js', import.meta.url), 'utf8');
+  const source = readSource('./magnetModel.js');
   const start = source.indexOf('export function magnetSelection');
   const body = source.slice(start);
   // 源码护栏一：平移与调整两条路径都必须经 bestSnapDelta 取最小位移（不允许内联 if 拼差异）。
@@ -192,7 +200,7 @@ test('magnetSelection 最佳吸附候选单一来源且 edge 值域校验完整'
 });
 
 test('magnetSelection 等距离候选平局时取先出现候选且源码严格小于', () => {
-  const source = readFileSync(new URL('./magnetModel.js', import.meta.url), 'utf8');
+  const source = readSource('./magnetModel.js');
   const start = source.indexOf('function bestSnapDelta');
   const body = source.slice(start, start + 400);
   // 源码护栏：候选替换必须用严格小于（distance < bestDistance）而非 <=，
@@ -213,11 +221,11 @@ test('magnetSelection 等距离候选平局时取先出现候选且源码严格�
 });
 
 test('magnetSelection 调整路径四条边候选线完整（边缘加中心线）', () => {
-  const source = readFileSync(new URL('./magnetModel.js', import.meta.url), 'utf8');
+  const source = readSource('./magnetModel.js');
   const start = source.indexOf('export function magnetSelection');
   const body = source.slice(start);
   // 源码护栏：四条被拖边的候选块必须各自包含屏幕边缘 + 屏幕中心线两个候选
-  //（与平移路径 dxBlock/dyBlock 的完整块锚定一致，§10.4：单行 contains 会被其他分支稀释）。
+  //（与平移路径 dxBlock/dyBlock 的完整块锚定一致，见 CLAUDE.md 10.4：单行 contains 会被其他分支稀释）。
   // 只留边缘候选会让靠近中心线时失去磁吸，只留中心线候选会让靠近屏幕边缘时失去磁吸。
   const eBlock = 'right += bestSnapDelta([\n        { delta: bounds.width - right },\n        { delta: bounds.width / 2 - right },\n      ], tolerance);';
   const wBlock = 'left += bestSnapDelta([\n        { delta: 0 - left },\n        { delta: bounds.width / 2 - left },\n      ], tolerance);';

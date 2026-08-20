@@ -3,6 +3,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { normalizeBootstrap } from './screenshotModel.js';
 
+
+// 见 CLAUDE.md 10.3 兼容性:工作区 core.autocrlf=true 让 .js/.jsx 文件 checkout 后呈 CRLF 行尾。
+// 源码字面护栏的字面假设 LF,readSource 自动归一化 CRLF → LF 让字面匹配保持确定性。
+function readSource(path) {
+  return readFileSync(new URL(path, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+}
+
+
 test('截图浮窗中英文语言包完整提供动作和状态文案', () => {
   for (const locale of ['zh-CN', 'en-US']) {
     const messages = JSON.parse(readFileSync(new URL(`../../shared/locales/${locale}.json`, import.meta.url)));
@@ -46,13 +54,13 @@ test('normalizeBootstrap 使用显式显示器物理尺寸与逻辑尺寸', () =
 });
 
 test('工具栏放置与定位统一走自适应模块', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('const placement = toolbarPlacement(selection, bootstrap.bounds);'));
   assert.ok(source.includes('return toolbarStyleModel(selection, bootstrap.bounds, placement);'));
 });
 
 test('取消截图必须完整清理交互状态且清理先于后端请求', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   const cancelStart = source.indexOf('const cancelScreenshot = async () => {');
   const cancelBody = source.slice(cancelStart, cancelStart + 700);
   // 清理完整性：取消必须清空手势、撤销历史、交互状态、放大镜、RAF、样式、光标。
@@ -70,7 +78,7 @@ test('取消截图必须完整清理交互状态且清理先于后端请求', ()
 });
 
 test('Esc 与右键仅在无选区或小选区时取消截图', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('import { canResetSelection } from \'./resetModel.js\';'));
   assert.ok(source.includes("if (event.key === 'Escape' && (!selectionRef.current || canResetSelection(selectionRef.current))) { event.preventDefault(); void cancelScreenshot(); return; }"));
   assert.ok(source.includes("if (!selectionRef.current || canResetSelection(selectionRef.current)) void cancelScreenshot();"));
@@ -80,7 +88,7 @@ test('Esc 与右键仅在无选区或小选区时取消截图', () => {
 });
 
 test('放大镜绘制网格线与中心十字辅助像素对齐', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('import { magnifierGridLines, magnifierCrosshair } from \'./magnifierGridModel.js\';'));
   assert.ok(source.includes('const grid = magnifierGridLines(geometry);'));
   assert.ok(source.includes('const cross = magnifierCrosshair(geometry);'));
@@ -90,7 +98,7 @@ test('放大镜绘制网格线与中心十字辅助像素对齐', () => {
 });
 
 test('Ctrl+A 一键选中整个屏幕并保留撤销历史', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('import { fullScreenSelection } from \'./fullScreenModel.js\';'));
   assert.ok(source.includes("if (event.ctrlKey && event.key.toLowerCase() === 'a') {"));
   assert.ok(source.includes('const next = fullScreenSelection(bootstrap.bounds);'));
@@ -101,14 +109,14 @@ test('Ctrl+A 一键选中整个屏幕并保留撤销历史', () => {
 });
 
 test('完成快捷键统一走模型且支持 Ctrl+C 复制', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('import { completeShortcutForEvent } from \'./completeShortcutModel.js\';'));
   assert.ok(source.includes('const completeAction = completeShortcutForEvent(event);'));
   assert.ok(source.includes('if (completeAction) { event.preventDefault(); void completeScreenshot(completeAction); }'));
 });
 
 test('选区建立前显示初始引导提示且不遮挡拖拽', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('import { idleHint } from \'./idleModel.js\';'));
   assert.ok(source.includes('!selecting && !selection && !showHelp && <div className="screenshot-idle-hint" aria-live="polite" data-screenshot-idle="true">{idleHint(t)}</div>'));
   for (const locale of ['zh-CN', 'en-US']) {
@@ -118,7 +126,7 @@ test('选区建立前显示初始引导提示且不遮挡拖拽', () => {
 });
 
 test('选区建立后显示完成动作邀请提示且不遮挡操作', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('import { includeInvite } from \'./inviteModel.js\';'));
   assert.ok(source.includes('selection && !selecting && !moving && !resizing && !busyAction && !showHelp && <div className="screenshot-invite" data-screenshot-invite="true">{includeInvite(t)}</div>'));
   for (const locale of ['zh-CN', 'en-US']) {
@@ -128,7 +136,7 @@ test('选区建立后显示完成动作邀请提示且不遮挡操作', () => {
 });
 
 test('放大镜背景采样按 DPR 换算物理像素且色块不遮挡面板', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('geometry.source.cols * dpr'));
   assert.ok(source.includes('const magnifierLayout = useMemo(() => ('));
   // 颜色板必须跟随放大镜翻转，贴底时放到放大镜上方避免溢出被裁。
@@ -137,7 +145,7 @@ test('放大镜背景采样按 DPR 换算物理像素且色块不遮挡面板', 
 });
 
 test('截图成功后主动关闭窗口避免残留选区状态闪现', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   const start = source.indexOf('const completeScreenshot = async (action) => {');
   const body = source.slice(start);
   // 成功路径必须销毁窗口：后端 cleanup_plan 只 hide 不销毁，React 实例会保留
@@ -153,20 +161,20 @@ test('截图成功后主动关闭窗口避免残留选区状态闪现', () => {
 });
 
 test('完成动作成功后清理占用且 AI 未配置回落配置入口', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('} finally {'));
   assert.ok(source.includes('setBusyAction(\'\');'));
   assert.ok(source.includes("if (action === 'ai') void openAiSettings();"));
 });
 
 test('帮助面板打开时按 Esc 关闭且失焦不打断处理', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes("if (event.key === 'Escape' && showHelp) { event.preventDefault(); setShowHelp(false); return; }"));
   assert.ok(source.includes('const handleBlur = () => { if (busyAction) return;'));
 });
 
 test('Ctrl+A 与调整中守卫必须先于动作与完成快捷键', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   // 顺序不变量：
   // 1) 选区调整进行中（draft/move/resize）必须提前 return，使 Enter/数字键/Ctrl+S 等
   //    完成快捷键不会在拖拽中途误触发完成（防误触核心）。
@@ -183,13 +191,13 @@ test('Ctrl+A 与调整中守卫必须先于动作与完成快捷键', () => {
 });
 
 test('选区调整进行中键盘不触发完成与快速微调', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('busyAction || draftRef.current || moveRef.current || resizeRef.current) return;'));
   assert.ok(source.includes('if (nudgeX !== undefined && !event.altKey && !event.metaKey) {'));
 });
 
 test('帮助面板可交互且点击不穿透底层拖拽', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   const css = readFileSync(new URL('./screenshot.css', import.meta.url), 'utf8');
   // 锚定 .screenshot-help 完整规则，避免被 toolbar/cancel 的 pointer-events: auto 误命中。
   const helpRule = css.split('\n').find((line) => line.includes('.screenshot-help {'));
@@ -202,7 +210,7 @@ test('帮助面板可交互且点击不穿透底层拖拽', () => {
 });
 
 test('截图界面无障碍标注完整且高频面板不产生朗读噪音', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('role="toolbar" aria-label={t(\'screenshot.toolbarLabel\')}'), '工具栏必须有 role 与可访问名称');
   assert.ok(source.includes('className="screenshot-coordinates" aria-hidden="true"'), '坐标面板必须对屏幕阅读器隐藏');
   assert.ok(source.includes('className="screenshot-color" aria-hidden="true"'), '颜色面板必须对屏幕阅读器隐藏');
@@ -218,7 +226,7 @@ test('截图界面无障碍标注完整且高频面板不产生朗读噪音', ()
 });
 
 test('快捷键帮助面板随 F1 切换并列出全部快捷键', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('import { helpEntries, isHelpShortcut } from \'./helpModel.js\';'));
   assert.ok(source.includes('if (isHelpShortcut(event)) { event.preventDefault(); setShowHelp((current) => !current); return; }'));
   assert.ok(source.includes('data-screenshot-help="true"'));
@@ -232,7 +240,7 @@ test('快捷键帮助面板随 F1 切换并列出全部快捷键', () => {
 });
 
 test('configure 复用窗口时复位帮助面板与处理中占用', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   const start = source.indexOf('const configurePromise = listen(CONFIGURE_EVENT');
   const body = source.slice(start, source.indexOf('configurePromise\n      .then'));
   assert.ok(body.includes('setShowHelp(false);'), '复用窗口必须关闭上次的帮助面板');
@@ -240,7 +248,7 @@ test('configure 复用窗口时复位帮助面板与处理中占用', () => {
 });
 
 test('拖拽草稿走统一选区生成且取消/配置统一重置交互状态', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('import { selectionFromDraft, resetInteractionState } from \'./draftModel.js\';'));
   assert.ok(source.includes('const next = selectionFromDraft(draft, event, bootstrap.bounds);'));
   const resets = source.match(/resetInteractionState\(\{ draftRef, selectionRef, moveRef, resizeRef, setSelection, setSelecting, setMoving, setResizing \}\);/g);
@@ -248,7 +256,7 @@ test('拖拽草稿走统一选区生成且取消/配置统一重置交互状态'
 });
 
 test('遮罩与描边先于三分线标尺手柄渲染且手柄来自模型', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   const renderStart = source.indexOf('<main ref={rootRef}');
   const render = source.slice(renderStart);
   // 叠层顺序不变量：四方向遮罩（顶部/左/右/底部）必须先于选区描边，
@@ -271,7 +279,7 @@ test('遮罩与描边先于三分线标尺手柄渲染且手柄来自模型', ()
 });
 
 test('选区建立后渲染八个调整手柄', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('import { selectionHandles } from \'./handleModel.js\';'));
   assert.ok(source.includes('selectionHandles(selection).map((handle) =>'));
   assert.ok(source.includes('{selection && <SelectionHandles selection={selection} />}'));
@@ -280,7 +288,7 @@ test('选区建立后渲染八个调整手柄', () => {
 });
 
 test('交互模式提示随拖拽/移动/调整状态渲染', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('modeHint(modeForState({ selecting, moving, resizing }), t)'));
   assert.ok(source.includes('data-screenshot-mode="true"'));
   assert.ok(source.includes('setResizing(true);'));
@@ -296,7 +304,7 @@ test('交互模式提示随拖拽/移动/调整状态渲染', () => {
 });
 
 test('选区建立后渲染像素标尺并输出自适应刻度', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('const horizontalTicks = rulerTicks(bounds.width);'));
   assert.ok(source.includes('const verticalTicks = rulerTicks(bounds.height);'));
   assert.ok(source.includes('{selection && <Ruler bounds={bootstrap.bounds} />}'));
@@ -304,14 +312,14 @@ test('选区建立后渲染像素标尺并输出自适应刻度', () => {
 });
 
 test('选区建立后渲染三分法构图辅助网格', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('{selection && <ThirdsGrid bounds={bootstrap.bounds} />}'));
   assert.ok(source.includes('const grid = thirdsGrid(bounds);'));
   assert.ok(source.includes('data-screenshot-thirds="true"'));
 });
 
 test('十字参考线仅在拖拽中渲染且结束时清理指针点', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   // 源码护栏一：参考线渲染条件必须同时要求 magnifierPoint 且处于拖拽/移动/调整中，
   // 无选区未拖拽时参考线必须隐藏（禁止无条件渲染贯穿线干扰画面）。
   const guidesRender = '<CrosshairGuides point={magnifierPoint} bounds={bootstrap.bounds} />';
@@ -333,34 +341,34 @@ test('十字参考线仅在拖拽中渲染且结束时清理指针点', () => {
 });
 
 test('十字参考线在拖拽时渲染并贯穿画布', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('<CrosshairGuides point={magnifierPoint} bounds={bootstrap.bounds} />'));
   assert.ok(source.includes('const lines = guideLines(point, bounds);'));
   assert.ok(source.includes('data-screenshot-guide="true"'));
 });
 
 test('坐标指示面板在拖拽时渲染并显示光标坐标', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('<div className="screenshot-coordinates" aria-hidden="true" data-screenshot-coordinates="true" style={coordinatePanelStyle(magnifierPoint, bootstrap.bounds)}>{formatCursorCoordinate(magnifierPoint)}</div>'));
   assert.ok(source.includes('coordinatePanelPosition(point, bounds)'));
 });
 
 test('放大镜渲染条件包含开关、背景快照与指针点', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   // 以 JSX 表达式开头锚定，避免前置 false 短路绕过该条件。
   assert.ok(source.includes('{bootstrap.screenshotMagnifierEnabled && bootstrap.magnifierBackground && magnifierPoint && (draftRef.current || moveRef.current || resizeRef.current) && ('));
   assert.ok(source.includes('<canvas className="screenshot-magnifier"'));
 });
 
 test('放大镜拖拽时更新指针点并在结束/取消时清空', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('setMagnifierPoint(current);'));
   assert.ok(source.includes('setMagnifierPoint(draft.end);'));
   assert.ok(source.includes('setMagnifierPoint(null);'));
 });
 
 test('滚轮调整放大镜缩放倍率并随缩放重绘', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('onWheel={handleWheel}'));
   assert.ok(source.includes('setMagnifierScale((current) => magnifierScaleForWheel(current, event.deltaY));'));
   assert.ok(source.includes('magnifierCanvasStyle(magnifierPoint, bootstrap.bounds, magnifierScale)'));
@@ -368,9 +376,9 @@ test('滚轮调整放大镜缩放倍率并随缩放重绘', () => {
 });
 
 test('放大镜绘制后读取中心像素颜色并渲染读数标签', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   // 中心像素必须在十字线叠加之前读取，否则颜色板显示红色污染后的伪色。
-  // 顺序类不变量必须比较下标（§10.3 铁律 3）：只 contains 区分不了读取在绘制前还是后。
+  // 顺序类不变量必须比较下标（见 CLAUDE.md 10.3 铁律 3）：只 contains 区分不了读取在绘制前还是后。
   const readIndex = source.indexOf('const centerPixel = readCenterPixel(context.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height);');
   assert.ok(readIndex !== -1, '放大镜必须读取中心像素');
   const crossIndex = source.indexOf("context.strokeStyle = 'rgba(255, 80, 80, 0.85)'");
@@ -390,7 +398,7 @@ test('放大镜绘制后读取中心像素颜色并渲染读数标签', () => {
 });
 
 test('放大镜 canvas 用几何绘制背景快照且关闭平滑', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('context.imageSmoothingEnabled = false;'));
   assert.ok(source.includes('magnifierGeometry(magnifierPoint, bootstrap.bounds, { scale: magnifierScale })'));
   assert.ok(source.includes('context.drawImage('));
@@ -406,7 +414,7 @@ test('normalizeBootstrap 透传放大镜开关与背景快照', () => {
 });
 
 test('尺寸标签统一走格式化模块并含位置与百万像素', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('selectionSizeLabelText(selection, bootstrap)'));
   assert.ok(source.includes('const physical = physicalSize(selection, bootstrap.dpr);'));
   assert.ok(source.includes('const pixels = formatPixelSize(physical);'));
@@ -416,7 +424,7 @@ test('尺寸标签统一走格式化模块并含位置与百万像素', () => {
 });
 
 test('尺寸标签四要素以分隔符相连且渲染取实时选区', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   // 文本模型：四个要素（像素/比例/百万像素/位置）必须全部用 ` · ` 分隔符连接，
   // 缺一个分隔符就会渲染成粘连文本；且分隔符必须来自常量拼接，保证渲染一致性。
   assert.ok(source.includes("return `${pixels} · ${ratio} · ${megapixels} · ${position}`;"), '四要素必须以三个分隔符相连');
@@ -429,7 +437,7 @@ test('尺寸标签四要素以分隔符相连且渲染取实时选区', () => {
 });
 
 test('尺寸标签随选区贴近边缘翻转防溢出', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   // 类名与内联样式两个辅助函数都必须调用放置函数，任何一处绕过都应被捕获。
   const placements = (source.match(/selectionLabelPlacement\(selection, bounds\)/g) || []).length;
   assert.ok(placements >= 2, `期望至少 2 处放置调用，实际 ${placements}`);
@@ -438,7 +446,7 @@ test('尺寸标签随选区贴近边缘翻转防溢出', () => {
 });
 
 test('尺寸标签类名由放置结果映射且样式右缘对齐夹紧复用单一来源', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   // 类名映射：below 类必须由 above=false 翻转驱动，left 类必须由 alignLeft 驱动，
   // 禁止在 App 内重新推导放置结果（否则与 labelModel 的翻转语义漂移）。
   const classStart = source.indexOf('function selectionSizeLabelClass');
@@ -454,32 +462,32 @@ test('尺寸标签类名由放置结果映射且样式右缘对齐夹紧复用�
 });
 
 test('悬停选区时切换调整/移动光标并在取消时重置', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('const hover = cursorForSelectionHover(pointFromPointerEvent(event, root), selectionRef.current, bootstrap.bounds);'));
   assert.ok(source.includes("root.style.cursor = hover || 'crosshair';"));
   assert.ok(source.includes("rootRef.current.style.cursor = 'crosshair';"));
 });
 
 test('选区边框样式接线调用 lineStyle 生成描边', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('const { borderWidth, borderColor } = lineStyle(1, \'rgba(255, 255, 255, 0.96)\', 1);'));
   assert.ok(source.includes('screenshot-selection-line'));
 });
 
 test('调整大小按住 Ctrl 从中心缩放并保持比例可叠加', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   const calls = (source.match(/resizeSelection\(selectionRef\.current, resizing\.edge, current, bootstrap\.bounds, \{ keepAspectRatio: event\.shiftKey, fromCenter: event\.ctrlKey \}\)/g) || []).length;
   assert.ok(calls >= 2, `期望移动与抬起两处都传 fromCenter，实际 ${calls}`);
 });
 
 test('选区内部按下进入整体平移模式', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('if (hitSelectionInterior(start, selectionRef.current, MOVE_INSET)) {'));
   assert.ok(source.includes('moveRef.current = { pointerId: event.pointerId, start, selectionStart: selectionRef.current };'));
 });
 
 test('双击选区内部时触发复制完成动作且防重入', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   // 双击是选区完成的快捷入口：无选区/控件区/选区外必须直接返回。
   const doubleStart = source.indexOf('const handleDoubleClick = (event) => {');
   const doubleBody = source.slice(doubleStart, doubleStart + 500);
@@ -490,7 +498,7 @@ test('双击选区内部时触发复制完成动作且防重入', () => {
 });
 
 test('双击不因第二击进入移动调整状态而失效且成功后统一清空引用', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   const doubleStart = source.indexOf('const handleDoubleClick = (event) => {');
   const doubleBody = source.slice(doubleStart, doubleStart + 500);
   // 双击完成不因第二击（pointerdown 已把选区当内部命中并进入移动/调整模式）而失效：
@@ -508,7 +516,7 @@ test('双击不因第二击进入移动调整状态而失效且成功后统一�
 });
 
 test('双击选区内部时完成截图且忽略控件区', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('onDoubleClick={handleDoubleClick}'));
   assert.ok(source.includes('if (!hitSelectionInterior(point, selectionRef.current, 0)) return;'));
   // 锚定 handleDoubleClick 函数体结尾的多行模式，避免被 Enter 快捷键分支误命中。
@@ -519,12 +527,12 @@ test('双击选区内部时完成截图且忽略控件区', () => {
 test('初次拖拽按住 Shift 时实时走正方形框选', () => {
   // 实时框选统一走 selectionFromDraft（内部按 Shift 分流 squareSelection/normalizeSelection），
   // 此处锚定统一调用，避免单点绕过。
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('const next = selectionFromDraft(draft, event, bootstrap.bounds);'));
 });
 
 test('生命周期模式决定成功路径是否销毁截图窗口', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   // 成功路径必须按 dispose 条件关闭窗口；quick/auto 隐藏复用。
   assert.ok(source.includes("if (bootstrap.lifecycleMode === 'dispose') {"), 'dispose 模式才销毁窗口');
   const model = readFileSync(new URL('./screenshotModel.js', import.meta.url), 'utf8');
@@ -532,7 +540,7 @@ test('生命周期模式决定成功路径是否销毁截图窗口', () => {
 });
 
 test('拖拽框选/移动/调整时实时显示尺寸标签且收尾清空', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   // 尺寸标签渲染必须同时接受 liveSelection 与 selection（拖拽中无正式选区）。
   assert.ok(source.includes('{(liveSelection || selection) &&'), '尺寸标签必须支持拖拽中实时选区');
   assert.ok(source.includes('selectionSizeLabelText(liveSelection || selection, bootstrap)'), '尺寸文本必须取实时选区');
@@ -547,20 +555,20 @@ test('拖拽框选/移动/调整时实时显示尺寸标签且收尾清空', () 
 });
 
 test('拖动收尾时非单击选区吸附到屏幕引导线且单击选窗不吸附', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('if (!clicked) finalSelection = magnetSelection(finalSelection, bootstrap.bounds);'));
   assert.ok(source.includes('magnetSelection(resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds, { keepAspectRatio: event.shiftKey, fromCenter: event.ctrlKey }), bootstrap.bounds, { edge: resizing.edge })'));
   assert.ok(source.includes('magnetSelection(nudgeSelection(moving.selectionStart, current.x - moving.start.x, current.y - moving.start.y, bootstrap.bounds), bootstrap.bounds)'));
 });
 
 test('松开时按住 Shift 生成正方形且跳过选窗逻辑', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('const square = event.shiftKey && !clicked ? squareSelection(draft.start, end, bootstrap.bounds) : null;'));
   assert.ok(source.includes('if (!square && clicked && bootstrap.sessionId) {'));
 });
 
 test('选区边缘命中优先于内部平移且记录历史进入调整', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   const downIndex = source.indexOf('const handlePointerDown = (event) => {');
   const body = source.slice(downIndex);
   // 顺序不变量：边缘命中检查必须先于内部平移检查。边缘点若落到平移分支，
@@ -580,46 +588,46 @@ test('选区边缘命中优先于内部平移且记录历史进入调整', () =>
 });
 
 test('选区边缘按下进入调整大小模式', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('const edge = hitSelectionEdge(start, selectionRef.current, RESIZE_TOLERANCE);'));
   assert.ok(source.includes('resizeRef.current = { pointerId: event.pointerId, edge };'));
 });
 
 test('调整大小拖拽按住 Shift 保持宽高比', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   // 分别锚定实时移动与收尾两条调用，防止任一路径丢失 Shift 传参或磁吸接线。
   assert.ok(source.includes('const next = magnetSelection(resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds, { keepAspectRatio: event.shiftKey, fromCenter: event.ctrlKey }), bootstrap.bounds, { edge: resizing.edge });'));
   assert.ok(source.includes('const finalSelection = magnetSelection(resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds, { keepAspectRatio: event.shiftKey, fromCenter: event.ctrlKey }), bootstrap.bounds, { edge: resizing.edge });'));
 });
 
 test('调整大小拖拽调用 resizeSelection 并实时同步选区', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('const next = magnetSelection(resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds, { keepAspectRatio: event.shiftKey, fromCenter: event.ctrlKey }), bootstrap.bounds, { edge: resizing.edge });'));
   assert.ok(source.includes('selectionRef.current = next;'));
 });
 
 test('调整大小结束后保留选区且清理调整状态', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('const finalSelection = magnetSelection(resizeSelection(selectionRef.current, resizing.edge, current, bootstrap.bounds, { keepAspectRatio: event.shiftKey, fromCenter: event.ctrlKey }), bootstrap.bounds, { edge: resizing.edge });'));
   assert.ok(source.includes('resizeRef.current = null;'));
   assert.ok(source.includes('selectionRef.current = finalSelection;'));
 });
 
 test('平移拖拽调用 nudgeSelection 并实时同步选区', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('const next = magnetSelection(nudgeSelection(moving.selectionStart, current.x - moving.start.x, current.y - moving.start.y, bootstrap.bounds), bootstrap.bounds);'));
   assert.ok(source.includes('selectionRef.current = next;'));
 });
 
 test('平移结束后保留选区且不触发选窗或清空', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('moveRef.current = null;'));
   assert.ok(source.includes('selectionRef.current = finalSelection;'));
   assert.ok(source.includes('setSelection(finalSelection);'));
 });
 
 test('选区调整前记录历史且 Ctrl+Z 撤销恢复', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   const keydownIndex = source.indexOf('const handleKeyDown = (event) => {');
   const body = source.slice(keydownIndex);
   const zIndex = body.indexOf("if (event.ctrlKey && event.key.toLowerCase() === 'z') {");
@@ -634,7 +642,7 @@ test('选区调整前记录历史且 Ctrl+Z 撤销恢复', () => {
 });
 
 test('Ctrl+Z 撤销在调整守卫后且空历史保护当前选区并双写同步', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   const keydownIndex = source.indexOf('const handleKeyDown = (event) => {');
   const body = source.slice(keydownIndex);
   // 顺序不变量：撤销分支必须位于调整中守卫之后，拖拽/调整进行中 Ctrl+Z 不触发撤销（防误触）。
@@ -654,7 +662,7 @@ test('Ctrl+Z 撤销在调整守卫后且空历史保护当前选区并双写同�
 });
 
 test('焦点落在工具栏按钮时全局快捷键不抢原生激活', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   const keydownIndex = source.indexOf('const handleKeyDown = (event) => {');
   const body = source.slice(keydownIndex);
   const escapeIndex = body.indexOf("event.key === 'Escape'");
@@ -666,14 +674,14 @@ test('焦点落在工具栏按钮时全局快捷键不抢原生激活', () => {
 });
 
 test('选区建立后数字键快捷执行动作且快捷键提示展示', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('const hotkeyAction = actionForHotkey(event.key);'));
   assert.ok(source.includes('if (hotkeyAction && !event.ctrlKey && !event.metaKey && !event.altKey) { event.preventDefault(); void completeScreenshot(hotkeyAction); return; }'));
   assert.ok(source.includes('hotkeyForAction(action.id)'));
 });
 
 test('动作工具栏快捷键提示完整且点击走单一完成入口', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   // ACTIONS 定义：四个动作的快捷键映射必须完整正确（ai 无快捷键）。
   const actionsStart = source.indexOf('const ACTIONS = [');
   const actionsBody = source.slice(actionsStart, actionsStart + 200);
@@ -690,7 +698,7 @@ test('动作工具栏快捷键提示完整且点击走单一完成入口', () =>
 });
 
 test('工具栏动作按钮使用原生 button 且不被禁用时保持键盘可达', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   // 动作按钮必须用原生 button（天然 Tab 聚焦 + Enter/Space 触发），
   // 不能用 div role=button 代替，否则键盘导航与辅助技术支持断裂。
   const toolbarStart = source.indexOf('className="screenshot-toolbar"');
@@ -704,7 +712,7 @@ test('工具栏动作按钮使用原生 button 且不被禁用时保持键盘可
 });
 
 test('新拖拽开始时先递增手势并清空选区历史', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   // 新拖拽（草稿选区）必须递增手势代号并清空历史：
   // 若只清空历史不递增手势，撤销会把旧会话的调整记录误应用到新选区。
   assert.ok(source.includes('gestureIdRef.current += 1;'), '新拖拽必须递增手势代号');
@@ -715,7 +723,7 @@ test('新拖拽开始时先递增手势并清空选区历史', () => {
 });
 
 test('尺寸标注文案必须聚合像素/比例/百万像素/位置四要素', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   // 尺寸标签是选区最直观的信息载体：像素尺寸、宽高比、百万像素与屏幕位置缺一不可。
   assert.ok(source.includes('const pixels = formatPixelSize(physical);'), '尺寸文案必须包含像素尺寸');
   assert.ok(source.includes('const ratio = formatAspectRatio(physical);'), '尺寸文案必须包含宽高比');
@@ -727,7 +735,7 @@ test('尺寸标注文案必须聚合像素/比例/百万像素/位置四要素',
 });
 
 test('空闲与模式提示渲染受截图提示开关守卫', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   // 提示开关关闭时不得渲染空闲引导与模式提示；帮助面板（F1）是用户主动请求，不受此开关控制。
   assert.ok(source.includes('bootstrap.screenshotHintsEnabled && !selecting && !selection && !showHelp'), '空闲提示必须受提示开关守卫');
   assert.ok(source.includes('bootstrap.screenshotHintsEnabled && modeHint(modeForState'), '模式提示必须受提示开关守卫');
@@ -737,7 +745,7 @@ test('空闲与模式提示渲染受截图提示开关守卫', () => {
 });
 
 test('completeScreenshot 成功失败均解除占用且成功路径清理交互状态', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   const start = source.indexOf('const completeScreenshot = async');
   const body = source.slice(start, start + 2200);
   // 源码护栏一：成功与失败路径都必须解除动作占用（finally 语义），防止成功路径永久卡在处理中。
@@ -761,7 +769,7 @@ test('completeScreenshot 成功失败均解除占用且成功路径清理交互�
 });
 
 test('数字键完成动作必须排除修饰键且走完成入口', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   const hotkeyIdx = source.indexOf('const hotkeyAction = actionForHotkey(event.key);');
   assert.ok(hotkeyIdx >= 0, '数字键热键分支必须存在');
   // 源码护栏：数字键完成必须只响应无修饰键（Ctrl+1/Alt+2/Meta+3 是系统或应用级快捷键，
@@ -774,7 +782,7 @@ test('数字键完成动作必须排除修饰键且走完成入口', () => {
 });
 
 test('动作工具栏 id 与热键映射一致且处理中互斥显示 processing', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   const actionsStart = source.indexOf('const ACTIONS = [');
   const actionsBody = source.slice(actionsStart, actionsStart + 300);
   // 源码护栏一：ACTIONS 必须包含 copy/save/pin/ai 四个 id，且与 actionModel 热键映射值完全一致
@@ -798,7 +806,7 @@ test('动作工具栏 id 与热键映射一致且处理中互斥显示 processin
 });
 
 test('AI 未配置时工具栏禁用 AI 动作且数字键 4 引导进入设置', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   // 工具栏按钮：disabled 判定必须与可用性函数一致。
   assert.ok(source.includes('disabled={Boolean(busyAction) || !actionIsEnabled(action.id, bootstrap)}'), '按钮禁用必须跟随可用性');
   // completeScreenshot 内二次守卫：AI 未配置时按数字键 4 引导进入设置（与按钮点击一致）。
@@ -807,7 +815,7 @@ test('AI 未配置时工具栏禁用 AI 动作且数字键 4 引导进入设置'
 });
 
 test('方向键微调排除修饰键且每次保留撤销历史', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   // 方向键微调只响应纯方向键；alt/meta 组合留给其它语义（窗口切换等）。
   const nudgeStart = source.indexOf("if (nudgeX !== undefined && !event.altKey && !event.metaKey) {", 620);
   const nudgeBlock = source.slice(nudgeStart, nudgeStart + 400);
@@ -819,14 +827,14 @@ test('方向键微调排除修饰键且每次保留撤销历史', () => {
 });
 
 test('截图键盘微调接线调用 nudgeSelection 并同步选区状态', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('const next = nudgeSelection(selectionRef.current, nudgeX * step, nudgeY * step, bootstrap.bounds);'));
   assert.ok(source.includes('setSelection(next);'));
   assert.ok(source.includes('applySelectionStyle(rootRef.current, next);'));
 });
 
 test('completeScreenshot 失败分支设置可见错误且不卡处理中', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   // 失败处理不变量：
   // 1) 无 sessionId 时必须设置 sessionNotReady 错误（用户可见）。
   // 2) invoke 抛错时 catch 必须设置 actionFailed 错误（用户可见），不能静默吞掉。
@@ -841,7 +849,7 @@ test('completeScreenshot 失败分支设置可见错误且不卡处理中', () =
 });
 
 test('completeScreenshot 防重入且 finally 必解除占用并 dispose 条件关闭', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   // 防重入核心：动作处理中禁止二次触发（工具栏/快捷键/双击都走此入口）。
   assert.ok(source.includes('const completeScreenshot = async (action) => {\n    const currentSelection = selectionRef.current;\n    if (!currentSelection || busyAction) return;'), '动作入口必须防重入');
   assert.ok(source.includes('setBusyAction(action);'), '执行前必须标记占用');
@@ -854,7 +862,7 @@ test('completeScreenshot 防重入且 finally 必解除占用并 dispose 条件�
 });
 
 test('交互状态机修复护栏：ref 同步与 busyAction 守卫与放大镜复位', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   // F1：新草稿起点同步清 selectionRef，避免与 React state 撕裂。
   assert.ok(source.includes('setSelecting(true);\n    selectionRef.current = null;\n    setSelection(null);'));
   // F4：处理中禁止 pointermove 改写选区。
@@ -870,7 +878,7 @@ test('交互状态机修复护栏：ref 同步与 busyAction 守卫与放大镜�
 });
 
 test('截图键盘微调默认 1px 且 Ctrl 加速 10px', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   assert.ok(source.includes('const NUDGE_STEP = 1;'));
   assert.ok(source.includes('const NUDGE_FAST_STEP = 10;'));
   assert.ok(source.includes('const step = event.ctrlKey ? NUDGE_FAST_STEP : NUDGE_STEP;'));
@@ -908,7 +916,7 @@ test('normalizeBootstrap 缺失尺寸时以视口和 DPR 推导安全默认值',
 });
 
 test('快速动作 initialAction 从配置事件接收并在指针释放后一次性消费', () => {
-  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const source = readSource('./App.jsx');
   // 配置事件必须把后端初始动作写入 ref。
   assert.ok(source.includes('initialActionRef.current = nextBootstrap.initialAction;'), 'configure 必须写入快速动作');
   // 指针释放后读取并立即清空，确保同一会话内只触发一次。
