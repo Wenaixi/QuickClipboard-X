@@ -6,6 +6,7 @@ import {
   createRafWriter,
   hitSelectionEdge,
   hitSelectionInterior,
+  isClickGesture,
   isCurrentGesture,
   normalizeSelection,
   nudgeSelection,
@@ -361,6 +362,25 @@ test('hitSelectionEdge 默认容差 4 且角点按 n/s 在前 e/w 在后并排�
   assert.equal(hitSelectionEdge({ x: 296, y: 236 }, selection), 'se', '右下角必须为 se');
   assert.equal(hitSelectionEdge({ x: 200, y: 160 }, selection), null, '严格内部点必须返回 null');
   assert.equal(hitSelectionEdge({ x: 95, y: 160 }, selection), null, '容差外外部点必须返回 null');
+});
+
+test('isClickGesture 默认阈值 4 且欧氏距离判定拒绝负阈值', () => {
+  const source = readFileSync(new URL('./selectionModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function isClickGesture');
+  const body = source.slice(start, start + 500);
+  // 源码护栏一：默认单击阈值必须为 4（与手柄边缘容差一致的微小位移容差）。
+  assert.ok(body.includes('threshold = 4'), '默认单击阈值必须为 4');
+  // 源码护栏二：判定必须用欧氏距离（Math.hypot），不能只用单轴差值，否则斜向拖动误判单击。
+  assert.ok(body.includes('Math.hypot(end.x - start.x, end.y - start.y) <= threshold'), '必须用欧氏距离判定');
+  // 源码护栏三：负阈值必须拒绝。
+  assert.ok(body.includes("throw new RangeError('单击阈值不能为负数');"), '负阈值必须拒绝');
+  // 行为属性：阈值边界命中、阈值外不命中、自定义阈值、斜向位移正确区分、负阈值抛出。
+  const a = { x: 0, y: 0 };
+  assert.equal(isClickGesture(a, { x: 4, y: 0 }), true, '恰好等于阈值必须算单击');
+  assert.equal(isClickGesture(a, { x: 5, y: 0 }), false, '超过阈值必须不算单击');
+  assert.equal(isClickGesture(a, { x: 3, y: 3 }, 8), true, '自定义阈值必须生效');
+  assert.equal(isClickGesture(a, { x: 3, y: 3 }), false, '斜向位移必须按欧氏距离判定');
+  assert.throws(() => isClickGesture(a, a, -1), /单击阈值不能为负数/);
 });
 
 test('hitSelectionEdge 自定义容差并拒绝负容差', () => {
