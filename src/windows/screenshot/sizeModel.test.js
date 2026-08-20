@@ -126,6 +126,27 @@ test('physicalSize 带边界分支源码显式 ceil 右缘 floor 左缘且不可
   assert.notDeepEqual(fallback, { width: 126, height: 88 }, '回退分支不得与边缘分支结果相同（证明不可替代）');
 });
 
+test('formatAspectRatio 源码 GCD 欧几里得实现且先取整后化简保证最简比', () => {
+  const source = readFileSync(new URL('./sizeModel.js', import.meta.url), 'utf8');
+  const gcdStart = source.indexOf('function greatestCommonDivisor');
+  const gcdBody = source.slice(gcdStart, gcdStart + 400);
+  // 源码护栏一：GCD 必须用标准欧几里得辗转相除（while 余数循环），
+  // 禁止暴力递减（性能退化到 O(min(a,b))）或提前返回错误 divisor。
+  assert.ok(gcdBody.includes('while (y !== 0) {'), 'GCD 必须用 while 余数循环');
+  assert.ok(gcdBody.includes('const remainder = x % y;'), 'GCD 必须用取余计算');
+  assert.ok(gcdBody.includes('x = y;'), 'GCD 必须交换被除数');
+  assert.ok(gcdBody.includes('y = remainder;'), 'GCD 必须用余数继续');
+  assert.ok(gcdBody.includes('return x;'), 'GCD 必须返回最后非零除数');
+  // 行为属性：常见比例最简、互质保持、大数快速化简、极端 1 像素比例不退化。
+  assert.equal(formatAspectRatio({ width: 1920, height: 1080 }), '16:9');
+  assert.equal(formatAspectRatio({ width: 3840, height: 2160 }), '16:9');
+  assert.equal(formatAspectRatio({ width: 1366, height: 768 }), '683:384');
+  assert.equal(formatAspectRatio({ width: 7, height: 11 }), '7:11');
+  assert.equal(formatAspectRatio({ width: 1000, height: 1 }), '1000:1');
+  assert.equal(formatAspectRatio({ width: 3840, height: 1 }), '3840:1', '极端大宽高比不得退化');
+  assert.equal(formatAspectRatio({ width: 1920, height: 1 }), '1920:1');
+});
+
 test('formatAspectRatio 拒绝零或非法输入', () => {
   assert.throws(() => formatAspectRatio({ width: 0, height: 100 }), /宽度与高度必须为正数/);
   assert.throws(() => formatAspectRatio(null), /尺寸对象/);
