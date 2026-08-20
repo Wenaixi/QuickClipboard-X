@@ -84,6 +84,26 @@ test('undo 顺序先查空再查类型且非法数组输入抛错与 limit=1 边
   assert.equal(undoSelectionHistory([]), null);
 });
 
+test('undo 源码返回剩余数组切片且 push 超限截断保留最近 N 条', () => {
+  const source = readFileSync(new URL('./historyModel.js', import.meta.url), 'utf8');
+  // 源码护栏一：undo 必须返回剩余数组的切片（history.slice(0, -1)）——
+  // 返回不可变副本而非引用，调用方修改返回数组不得污染原历史。
+  assert.ok(source.includes('history: history.slice(0, -1)'), 'undo 必须返回剩余数组切片');
+  assert.ok(source.includes('selection: history[history.length - 1]'), 'undo 必须弹出最近一条');
+  // 源码护栏二：push 超限必须切片保留最近 N 条（next.slice(next.length - limit)）。
+  assert.ok(source.includes('next.slice(next.length - limit)'), '超限必须切片保留最近 N 条');
+  // 行为属性：undo 返回副本（修改不影响原历史）、弹出顺序 LIFO、超限截断保留最新。
+  const original = [{ left: 0 }, { left: 10 }];
+  const undone = undoSelectionHistory(original);
+  undone.history.push({ left: 999 });
+  assert.deepEqual(original, [{ left: 0 }, { left: 10 }], '修改返回副本不得污染原历史');
+  let history = [];
+  for (let i = 0; i < 12; i += 1) history = pushSelectionHistory(history, { i }, 5);
+  assert.equal(history.length, 5, 'limit 5 必须截断到 5');
+  assert.deepEqual(history[0], { i: 7 }, '必须保留最近 5 条（丢弃 0-6）');
+  assert.deepEqual(history[4], { i: 11 }, '最新一条必须在末尾');
+});
+
 test('pushSelectionHistory 拒绝非法输入', () => {
   assert.throws(() => pushSelectionHistory(null, { left: 0 }), /历史必须是数组/);
   assert.throws(() => pushSelectionHistory([], { left: 0 }, 0), /上限必须是正整数/);
