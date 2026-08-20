@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { selectionHandles } from './handleModel.js';
 
 test('selectionHandles 输出八个角点与边中点手柄', () => {
@@ -27,6 +28,35 @@ test('selectionHandles 单像素选区仍输出全部手柄', () => {
   assert.equal(handles.find((h) => h.edge === 'nw').left, 100);
   assert.equal(handles.find((h) => h.edge === 'se').left, 101);
   assert.equal(handles.find((h) => h.edge === 'e').top, 100.5);
+});
+
+test('selectionHandles 源码八手柄数据驱动且顺序固定', () => {
+  const source = readFileSync(new URL('./handleModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function selectionHandles');
+  const body = source.slice(start, start + 800);
+  // 源码护栏：八个手柄必须由数据数组驱动（禁止手工逐行渲染），角点与边中点公式必须存在。
+  assert.ok(body.includes("const centerX = (left + right) / 2;"), '中心 x 必须为两角均值');
+  assert.ok(body.includes("const centerY = (top + bottom) / 2;"), '中心 y 必须为两角均值');
+  assert.ok(body.includes("{ edge: 'nw', left, top }"), 'nw 角点必须落在左上角');
+  assert.ok(body.includes("{ edge: 'n', left: centerX, top }"), 'n 边中点必须水平居中');
+  assert.ok(body.includes("{ edge: 'ne', left: right, top }"), 'ne 角点必须落在右上角');
+  assert.ok(body.includes("{ edge: 'e', left: right, top: centerY }"), 'e 边中点必须垂直居中');
+  assert.ok(body.includes("{ edge: 'se', left: right, top: bottom }"), 'se 角点必须落在右下角');
+  assert.ok(body.includes("{ edge: 's', left: centerX, top: bottom }"), 's 边中点必须水平居中');
+  assert.ok(body.includes("{ edge: 'sw', left, top: bottom }"), 'sw 角点必须落在左下角');
+  assert.ok(body.includes("{ edge: 'w', left, top: centerY }"), 'w 边中点必须垂直居中');
+  // 行为属性：任意合法选区输出 8 个手柄、顺序固定 nw→w、角点精确落点、边中点精确居中。
+  const selection = { left: 100, top: 200, right: 500, bottom: 400 };
+  const handles = selectionHandles(selection);
+  assert.deepEqual(handles.map((h) => h.edge), ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']);
+  assert.equal(handles.find((h) => h.edge === 'nw').left, 100);
+  assert.equal(handles.find((h) => h.edge === 'nw').top, 200);
+  assert.equal(handles.find((h) => h.edge === 'se').left, 500);
+  assert.equal(handles.find((h) => h.edge === 'se').top, 400);
+  assert.equal(handles.find((h) => h.edge === 'e').left, 500);
+  assert.equal(handles.find((h) => h.edge === 'e').top, 300);
+  assert.equal(handles.find((h) => h.edge === 'w').left, 100);
+  assert.equal(handles.find((h) => h.edge === 'w').top, 300);
 });
 
 test('selectionHandles 拒绝无效输入', () => {
