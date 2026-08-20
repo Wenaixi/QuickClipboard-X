@@ -44,7 +44,9 @@ export function useSortableList({ items, onDragEnd }) {
   const sensors = useSensors(
     useSensor(CustomMouseSensor, {
       activationConstraint: {
-        distance: 3,
+        // 8px 阈值:日常点击时手抖 3-5px 不会误判拖拽吞掉 item 点击;
+        // 排序拖拽仍保留足够灵敏度(移动超过 8px 才激活)。
+        distance: 8,
       },
     }),
     useSensor(KeyboardSensor, {
