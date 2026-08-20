@@ -101,6 +101,7 @@ pub fn get_last_focus_hwnd() -> Option<isize> {
 pub fn get_foreground_app_info() -> Option<ForegroundAppInfo> {
     #[cfg(windows)]
     {
+        use windows::Win32::Foundation::CloseHandle;
         use windows::Win32::System::ProcessStatus::GetModuleFileNameExW;
         use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ};
         use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId};
@@ -146,6 +147,7 @@ pub fn get_foreground_app_info() -> Option<ForegroundAppInfo> {
                         .unwrap_or(&process_path)
                         .to_string();
                 }
+                let _ = CloseHandle(handle);
             }
 
             if process_name.is_empty() {
@@ -160,6 +162,7 @@ pub fn get_foreground_app_info() -> Option<ForegroundAppInfo> {
                             .unwrap_or(&process_path)
                             .to_string();
                     }
+                    let _ = CloseHandle(handle);
                 }
             }
 
@@ -274,4 +277,30 @@ unsafe extern "system" fn focus_callback(
     *LAST_FOCUS_HWND.lock() = Some(hwnd_val);
 
     crate::services::system::hotkey::sync_hotkeys_for_foreground();
+}
+
+#[cfg(test)]
+mod tests {
+    // §10.3 源码护栏：前台应用信息查询里的 OpenProcess 必须配对 CloseHandle。
+    #[test]
+    fn foreground_app_info_closes_process_handles() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/system/focus.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 focus.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let impl_src = &stripped[..stripped.find("#[cfg(test)]").unwrap_or(stripped.len())];
+        let open_count = impl_src.matches("OpenProcess(").count();
+        let close_count = impl_src.matches("CloseHandle(").count();
+        assert!(open_count > 0, "护栏必须能发现 OpenProcess 调用");
+        assert!(
+            close_count >= open_count,
+            "OpenProcess 调用必须配对 CloseHandle，当前 open={open_count} close={close_count}"
+        );
+    }
 }

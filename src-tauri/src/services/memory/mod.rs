@@ -4,6 +4,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 #[cfg(windows)]
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(windows)]
+use windows::Win32::Foundation::CloseHandle;
 
 const HIDE_CLEANUP_DELAY_MS: u64 = 350;
 
@@ -61,6 +63,7 @@ fn collect_descendant_process_ids(root_pid: u32) -> Vec<u32> {
 
         has_entry = unsafe { Process32NextW(snapshot, &mut entry) }.is_ok();
     }
+    let _ = unsafe { CloseHandle(snapshot) };
 
     let mut descendants = Vec::new();
     let mut visited = HashSet::new();
@@ -96,6 +99,7 @@ fn cleanup_descendant_processes(root_pid: u32) {
 
         if let Ok(process) = handle {
             trim_process_working_set(process);
+            let _ = unsafe { CloseHandle(process) };
         }
     }
 }
@@ -172,4 +176,33 @@ pub fn init() {
         std::thread::sleep(std::time::Duration::from_secs(3));
         cleanup_memory_respecting_settings();
     });
+}
+
+#[cfg(test)]
+mod tests {
+    // §10.3 源码护栏：快照句柄与进程句柄都必须 CloseHandle，否则句柄泄漏。
+    #[test]
+    fn snapshot_and_process_handles_are_closed() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/memory/mod.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 memory/mod.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let impl_src = &stripped[..stripped.find("#[cfg(test)]").unwrap_or(stripped.len())];
+        assert!(
+            impl_src.contains("CloseHandle(snapshot)"),
+            "CreateToolhelp32Snapshot 返回的快照句柄必须关闭"
+        );
+        let open_count = impl_src.matches("OpenProcess(").count();
+        let close_count = impl_src.matches("CloseHandle(").count();
+        assert!(
+            close_count >= open_count,
+            "OpenProcess 调用必须配对 CloseHandle，当前 open={open_count} close={close_count}"
+        );
+    }
 }
