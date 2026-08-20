@@ -98,6 +98,35 @@ test('rulerMajorStep 三档常量且次刻度为主刻度 1/5 标签索引 5 的
   assert.equal(ticks.find((t) => t.position === 290).label, null, '次刻度必须无标签');
 });
 
+test('rulerTicks 源码 total 向下取整保证端点含而整倍数越界且最后刻度不越界', () => {
+  const source = readFileSync(new URL('./rulerModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function rulerTicks');
+  const body = source.slice(start, start + 500);
+  // 源码护栏：刻度总数必须向下取整（Math.floor(length / minorStep)）——向上取整会让
+  // 最后刻度越过长度（如 305 长度下最后一个刻度变成 310）。循环必须含端点（index <= total）。
+  assert.ok(body.includes('const total = Math.floor(length / minorStep);'), 'total 必须向下取整');
+  assert.ok(body.includes('for (let index = 0; index <= total; index += 1)'), '循环必须含端点');
+  // 行为属性一：长度恰为次刻度整数倍时最后刻度必须恰好等于长度（端点含）。
+  const exact300 = rulerTicks(300);
+  assert.equal(exact300[exact300.length - 1].position, 300, '300 长度最后刻度必须恰好 300');
+  const exact1080 = rulerTicks(1080);
+  assert.equal(exact1080[exact1080.length - 1].position, 1080, '1080 长度最后刻度必须恰好 1080');
+  // 行为属性二：长度非次刻度整数倍时最后刻度停在最后一个完整刻度（小于长度且是次刻度整数倍）。
+  const partial = rulerTicks(305);
+  assert.equal(partial[partial.length - 1].position, 300, '305 长度最后刻度必须停在 300');
+  const partialFloat = rulerTicks(1365.33);
+  assert.equal(partialFloat[partialFloat.length - 1].position, 1360, '1365.33 长度最后刻度必须停在 1360');
+  // 行为属性三：任意长度下首刻度恒为 0，末刻度不越界且是次刻度整数倍。
+  for (const length of [5, 50, 300, 305, 800, 1080, 1365.33, 1920, 3840]) {
+    const ticks = rulerTicks(length);
+    assert.equal(ticks[0].position, 0, '首刻度必须为 0');
+    const last = ticks[ticks.length - 1];
+    assert.ok(last.position <= length, '末刻度不得越界');
+    const minorStep = rulerMajorStep(length) / 5;
+    assert.equal(last.position % minorStep, 0, '末刻度必须是次刻度整数倍');
+  }
+});
+
 test('rulerTicks 拒绝非正或非法长度', () => {
   assert.throws(() => rulerTicks(0), /标尺长度必须为正数/);
   assert.throws(() => rulerTicks(Number.NaN), /标尺长度 必须是有限数字/);
