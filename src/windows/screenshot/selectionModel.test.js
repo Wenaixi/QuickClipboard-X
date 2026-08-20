@@ -221,6 +221,37 @@ test('selectionForPointerGesture 拖动超过阈值时保持用户自由选区',
   });
 });
 
+test('selectionForPointerGesture 源码单击选窗口先于自由选区且命中用半开区间', () => {
+  const source = readFileSync(new URL('./selectionModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function selectionForPointerGesture');
+  const body = source.slice(start, start + 800);
+  // 源码护栏一：单击判定必须先于自由选区回退（只有单击才尝试选窗口）。
+  assert.ok(body.includes('if (isClickGesture(start, end)) {'), '单击判定必须先于自由选区');
+  const clickIdx = body.indexOf('if (isClickGesture(start, end)) {');
+  const fallbackIdx = body.indexOf('return normalizeSelection(start, end, bounds);');
+  assert.ok(clickIdx >= 0 && fallbackIdx >= 0 && clickIdx < fallbackIdx, '选窗口分支必须先于自由选区回退');
+  // 源码护栏二：窗口命中判定必须用半开区间 [left, right) x [top, bottom)。
+  assert.ok(body.includes('start.x >= selection.left'), '命中必须检查左边界');
+  assert.ok(body.includes('start.x < selection.right'), '命中必须排除右边界（半开区间）');
+  assert.ok(body.includes('start.y >= selection.top'), '命中必须检查上边界');
+  assert.ok(body.includes('start.y < selection.bottom'), '命中必须排除下边界（半开区间）');
+  // 源码护栏三：选中窗口后必须经 normalizeSelection 夹紧（窗口可能超出边界）。
+  assert.ok(body.includes('return normalizeSelection('), '选中的窗口必须归一化夹紧');
+  // 行为属性：单击选窗口、右边界缝隙不选中、拖动不选窗口、无窗口列表回退自由选区。
+  const windows = [{ left: 100, top: 100, right: 500, bottom: 400 }];
+  const clicked = selectionForPointerGesture({ x: 180, y: 160 }, { x: 181, y: 159 }, bounds, windows);
+  assert.deepEqual(selectionValues(clicked), { left: 100, top: 100, right: 500, bottom: 400, width: 400, height: 300 });
+  // x=500 恰好等于窗口右边界：半开区间不命中，回退自由选区。
+  const onEdge = selectionForPointerGesture({ x: 500, y: 200 }, { x: 501, y: 199 }, bounds, windows);
+  assert.deepEqual(selectionValues(onEdge), { left: 500, top: 199, right: 501, bottom: 200, width: 1, height: 1 });
+  // 拖动起点落在窗口上：超过单击阈值必须保持自由选区。
+  const dragged = selectionForPointerGesture({ x: 180, y: 160 }, { x: 310, y: 260 }, bounds, windows);
+  assert.deepEqual(selectionValues(dragged), { left: 180, top: 160, right: 310, bottom: 260, width: 130, height: 100 });
+  // 无窗口列表：单击回退自由选区。
+  const noWindows = selectionForPointerGesture({ x: 180, y: 160 }, { x: 181, y: 159 }, bounds, []);
+  assert.deepEqual(selectionValues(noWindows), { left: 180, top: 159, right: 181, bottom: 160, width: 1, height: 1 });
+});
+
 test('selectionFromPhysical 将原生窗口矩形还原为高 DPI 逻辑选区', () => {
   const selection = selectionFromPhysical(
     { left: 250, top: 125, right: 1000, bottom: 625 },
