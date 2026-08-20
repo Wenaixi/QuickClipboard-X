@@ -107,6 +107,25 @@ test('尺寸格式化源码语义完整（像素取整与百万像素单位）',
   assert.equal(formatMegapixels({ width: 0, height: 100 }), '0.0 MP');
 });
 
+test('physicalSize 带边界分支源码显式 ceil 右缘 floor 左缘且不可被回退替代', () => {
+  const source = readFileSync(new URL('./sizeModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function physicalSize');
+  const body = source.slice(start, start + 500);
+  // 源码护栏一：带边界分支必须显式右/下 ceil 减左/上 floor——保证标签像素数与
+  // selectionToPhysical 实际截图完全一致（floor 起点 ceil 终点覆盖完整像素范围）。
+  assert.ok(body.includes('Math.ceil(size.right * dpr) - Math.floor(size.left * dpr)'), '宽度必须右缘 ceil 减左缘 floor');
+  assert.ok(body.includes('Math.ceil(size.bottom * dpr) - Math.floor(size.top * dpr)'), '高度必须下缘 ceil 减上缘 floor');
+  // 源码护栏二：hasEdges 必须要求四边全部有限（缺任一边界不得走边缘分支，避免与截图像素不一致）。
+  assert.ok(body.includes('Number.isFinite(size.left) && Number.isFinite(size.top)'), 'hasEdges 必须同时要求 left/top 有限');
+  assert.ok(body.includes('Number.isFinite(size.right) && Number.isFinite(size.bottom)'), 'hasEdges 必须同时要求 right/bottom 有限');
+  // 行为佐证：1.25 DPR 下边缘分支（126x88）与回退分支（round(99.8*1.25)=125）结果不同，
+  // 证明带边界分支不可被回退策略替代（否则标签像素数与实际截图不一致）。
+  const edges = { left: 100.4, top: 50.6, right: 200.2, bottom: 120.8, width: 99.8, height: 70.2 };
+  assert.deepEqual(physicalSize(edges, 1.25), { width: 126, height: 88 });
+  const fallback = physicalSize({ width: 99.8, height: 70.2 }, 1.25);
+  assert.notDeepEqual(fallback, { width: 126, height: 88 }, '回退分支不得与边缘分支结果相同（证明不可替代）');
+});
+
 test('formatAspectRatio 拒绝零或非法输入', () => {
   assert.throws(() => formatAspectRatio({ width: 0, height: 100 }), /宽度与高度必须为正数/);
   assert.throws(() => formatAspectRatio(null), /尺寸对象/);
