@@ -279,6 +279,32 @@ test('selectionForPointerGesture 源码单击选窗口先于自由选区且命�
   assert.deepEqual(selectionValues(noWindows), { left: 180, top: 159, right: 181, bottom: 160, width: 1, height: 1 });
 });
 
+test('selectionForPointerGesture 窗口列表混入空项必须跳过且越界窗口被夹紧', () => {
+  const source = readFileSync(new URL('./selectionModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function selectionForPointerGesture');
+  const body = source.slice(start, start + 800);
+  // 源码护栏一：窗口命中判定必须带 selection 真值守卫（windowSelections 来自原生窗口枚举，
+  // 已销毁窗口可能残留空项，find 对 null 访问 .left 会抛 TypeError）。
+  assert.ok(body.includes('selection\n      && start.x >= selection.left'), '命中判定必须带 selection 真值守卫');
+  // 源码护栏二：命中的窗口必须经 normalizeSelection 夹紧（窗口可能部分超出显示器边界）。
+  assert.ok(body.includes('return normalizeSelection('), '命中的窗口必须归一化夹紧');
+  // 行为验证一：列表混入 null/undefined 时单击必须跳过空项命中真实窗口。
+  const mixed = [null, { left: 100, top: 100, right: 500, bottom: 400 }, undefined];
+  const hit = selectionForPointerGesture({ x: 180, y: 160 }, { x: 181, y: 159 }, bounds, mixed);
+  assert.deepEqual(selectionValues(hit), { left: 100, top: 100, right: 500, bottom: 400, width: 400, height: 300 }, '必须跳过空项命中真实窗口');
+  // 行为验证二：命中的窗口部分越界（负坐标/超右缘）时被夹紧到边界内，不产出越界选区。
+  const outOfBounds = selectionForPointerGesture(
+    { x: 10, y: 10 },
+    { x: 11, y: 9 },
+    bounds,
+    [{ left: -50, top: -20, right: 820, bottom: 620 }]
+  );
+  assert.deepEqual(selectionValues(outOfBounds), { left: 0, top: 0, right: 800, bottom: 600, width: 800, height: 600 }, '越界窗口必须被夹紧到边界内');
+  // 行为验证三：全空列表单击回退自由选区（不抛错）。
+  const allEmpty = selectionForPointerGesture({ x: 180, y: 160 }, { x: 181, y: 159 }, bounds, [null, undefined]);
+  assert.deepEqual(selectionValues(allEmpty), { left: 180, top: 159, right: 181, bottom: 160, width: 1, height: 1 }, '全空列表必须回退自由选区');
+});
+
 test('selectionFromPhysical 将原生窗口矩形还原为高 DPI 逻辑选区', () => {
   const selection = selectionFromPhysical(
     { left: 250, top: 125, right: 1000, bottom: 625 },
