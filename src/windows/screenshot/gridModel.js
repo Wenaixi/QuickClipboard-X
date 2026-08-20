@@ -16,9 +16,10 @@ export function thirdsGrid(bounds) {
     throw new RangeError('边界尺寸必须为正数');
   }
   const x1 = Math.round(bounds.width / 3);
-  const x2 = Math.round((bounds.width * 2) / 3);
+  // 第二条线按 2/3 取整后必须夹紧到画布内（width=1 时 round(2/3)=1 会越界到画布外不可见）。
+  const x2 = Math.min(Math.round((bounds.width * 2) / 3), bounds.width - 1);
   const y1 = Math.round(bounds.height / 3);
-  const y2 = Math.round((bounds.height * 2) / 3);
+  const y2 = Math.min(Math.round((bounds.height * 2) / 3), bounds.height - 1);
   return {
     vertical: [
       { left: x1, top: 0, width: 1, height: bounds.height },
