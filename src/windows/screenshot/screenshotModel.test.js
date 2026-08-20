@@ -58,6 +58,37 @@ test('normalizeBootstrap 尺寸缺失时逐级回退并保持最小 1 且物理�
   assert.deepEqual(payloadViewport.bounds, { width: 800, height: 600 });
 });
 
+test('normalizeBootstrap 源码正数回退只接受有限正数且任意非法输入组合输出恒正有限', () => {
+  const source = readFileSync(new URL('./screenshotModel.js', import.meta.url), 'utf8');
+  // 源码护栏一：positiveNumber 必须只接受有限正数（Number.isFinite && value > 0），
+  // 0/负数/NaN/Infinity 全部走 fallback——尺寸为 0 会让选区与采样全部失效。
+  assert.ok(source.includes('Number.isFinite(value) && value > 0 ? value : fallback'), 'positiveNumber 必须只接受有限正数');
+  // 行为属性：大量非法输入组合（0/负数/NaN/Infinity/字符串/undefined 混合）下，
+  // dpr、bounds、physicalBounds 必须恒为有限正数，且物理尺寸与逻辑尺寸按 dpr 守恒。
+  const badValues = [0, -1, Number.NaN, Infinity, -Infinity, '800', null, undefined];
+  let combinations = 0;
+  for (const dpr of [undefined, 0, -2, Number.NaN, 2]) {
+    for (const w of [undefined, 0, -5, Number.NaN, 800]) {
+      for (const h of [undefined, 0, -5, Number.NaN, 600]) {
+        const result = normalizeBootstrap({ devicePixelRatio: dpr, monitor: { logicalWidth: w, logicalHeight: h } });
+        assert.ok(Number.isFinite(result.dpr) && result.dpr > 0, `dpr 必须为正有限（输入 ${dpr}）`);
+        assert.ok(Number.isFinite(result.bounds.width) && result.bounds.width > 0, '逻辑宽必须为正有限');
+        assert.ok(Number.isFinite(result.bounds.height) && result.bounds.height > 0, '逻辑高必须为正有限');
+        assert.ok(Number.isFinite(result.physicalBounds.width) && result.physicalBounds.width > 0, '物理宽必须为正有限');
+        assert.ok(Number.isFinite(result.physicalBounds.height) && result.physicalBounds.height > 0, '物理高必须为正有限');
+        assert.equal(result.physicalBounds.width, Math.round(result.bounds.width * result.dpr), '物理宽必须与逻辑宽按 dpr 守恒');
+        assert.equal(result.physicalBounds.height, Math.round(result.bounds.height * result.dpr), '物理高必须与逻辑高按 dpr 守恒');
+        combinations += 1;
+      }
+    }
+  }
+  assert.ok(combinations >= 100, '非法输入组合扫描必须充分');
+  // 显式非法尺寸（0/负数）与非法 dpr（0/负数）也必须被回退链消化。
+  const zeroed = normalizeBootstrap({ devicePixelRatio: 0, monitor: { logicalWidth: 0, logicalHeight: 0 } });
+  assert.equal(zeroed.dpr, 1, 'dpr 0 必须回退 1');
+  assert.deepEqual(zeroed.bounds, { width: 1, height: 1 }, '尺寸 0 必须回退最小 1');
+});
+
 test('normalizeBootstrap 源码生命周期值域白名单且物理尺寸从逻辑推导', () => {
   const source = readFileSync(new URL('./screenshotModel.js', import.meta.url), 'utf8');
   // 源码护栏一：lifecycleMode 值域必须只允许 quick/dispose/auto（非法值回退 quick）。
