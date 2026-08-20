@@ -58,6 +58,27 @@ test('selectionLabelPlacement 源码默认高度 22 间隙 6 且方向判定语�
   assert.equal(selectionLabelPlacement({ left: 800, top: 30, right: 1100, bottom: 330 }, bounds, { height: 22, gap: 8 }).above, true);
 });
 
+test('selectionLabelPlacement 左上角选区上下与左右同时翻转且两判定相互独立', () => {
+  const source = readFileSync(new URL('./labelModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function selectionLabelPlacement');
+  const body = source.slice(start, start + 900);
+  // 源码护栏一：上方判定必须只依赖 top/labelHeight/gap（不含 right），左对齐判定
+  // 必须只依赖 right/labelWidth（不含 top）——两方向翻转独立，互不耦合。
+  const aboveLine = body.split('\n').find((l) => l.includes('const above ='));
+  const alignLine = body.split('\n').find((l) => l.includes('const alignLeft ='));
+  assert.ok(aboveLine && !aboveLine.includes('right'), '上方判定不得依赖右缘');
+  assert.ok(alignLine && !alignLine.includes('top'), '左对齐判定不得依赖上缘');
+  // 行为验证：左上角选区（top=2 上方放不下、right=60 右对齐越界）必须同时翻下方 + 左对齐。
+  const corner = selectionLabelPlacement(
+    { left: 0, top: 2, right: 60, bottom: 62, width: 60, height: 60 },
+    bounds
+  );
+  assert.deepEqual(corner, { above: false, alignLeft: true }, '左上角选区必须同时翻下方且左对齐');
+  // 对照：仅右缘窄（top 充足）只翻左对齐不翻下方；仅上缘不足（right 充足）只翻下方不翻左对齐。
+  assert.deepEqual(selectionLabelPlacement({ left: 0, top: 400, right: 60, bottom: 460 }, bounds), { above: true, alignLeft: true });
+  assert.deepEqual(selectionLabelPlacement({ left: 800, top: 2, right: 1100, bottom: 302 }, bounds), { above: false, alignLeft: false });
+});
+
 test('selectionLabelPlacement 拒绝无效输入或负尺寸', () => {
   assert.throws(() => selectionLabelPlacement({ left: 1, top: 1, right: 2, bottom: 2 }, { width: 0, height: 10 }), /边界尺寸必须为正数/);
   assert.throws(() => selectionLabelPlacement({ left: 1, top: 1, right: 2, bottom: 2 }, bounds, { height: -1 }), /标签宽度与高度必须为正数/);
