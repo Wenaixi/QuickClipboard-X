@@ -53,6 +53,21 @@ test('completeShortcutForEvent 单一来源且 AltGr 拒绝先于 Ctrl 分支', 
   assert.equal(completeShortcutForEvent({ key: 'ENTER', ctrlKey: false, metaKey: false, altKey: false }), 'copy');
 });
 
+test('completeShortcutForEvent shift 修饰不阻塞完成且缺省修饰键按 falsy 处理', () => {
+  // 语义：只拒绝 alt/meta（AltGr 误触发防护），shift 不阻塞——Shift+Enter 仍完成复制，
+  // Ctrl+Shift+C/S/P 仍映射对应动作（与数字键分支的"只拒绝 ctrl/meta/alt"语义一致）。
+  assert.equal(completeShortcutForEvent({ key: 'Enter', ctrlKey: false, metaKey: false, altKey: false, shiftKey: true }), 'copy', 'Shift+Enter 必须仍完成复制');
+  assert.equal(completeShortcutForEvent({ key: 'c', ctrlKey: true, metaKey: false, altKey: false, shiftKey: true }), 'copy', 'Ctrl+Shift+C 必须仍复制');
+  assert.equal(completeShortcutForEvent({ key: 's', ctrlKey: true, metaKey: false, altKey: false, shiftKey: true }), 'save', 'Ctrl+Shift+S 必须仍保存');
+  assert.equal(completeShortcutForEvent({ key: 'p', ctrlKey: true, metaKey: false, altKey: false, shiftKey: true }), 'pin', 'Ctrl+Shift+P 必须仍贴图');
+  // 缺省修饰键字段（真实事件对象总带 ctrlKey/altKey/metaKey，但防御式语义必须容错）：
+  // 无 ctrlKey 字段的 Enter 仍复制；只有 ctrlKey:true 的 c 仍复制（alt/meta 缺省为 falsy）。
+  assert.equal(completeShortcutForEvent({ key: 'Enter' }), 'copy', '缺省修饰键字段的 Enter 必须仍复制');
+  assert.equal(completeShortcutForEvent({ key: 'c', ctrlKey: true }), 'copy', '缺省 alt/meta 字段的 Ctrl+C 必须仍复制');
+  // 非字符串 key 必须安全降级为空字符串返回 null（不抛错）。
+  assert.equal(completeShortcutForEvent({ key: 42, ctrlKey: false, metaKey: false, altKey: false }), null, '数字 key 必须安全返回 null');
+});
+
 test('completeShortcutForEvent 拒绝无效输入', () => {
   assert.throws(() => completeShortcutForEvent(null), /事件对象/);
   assert.throws(() => completeShortcutForEvent('x'), /事件对象/);
