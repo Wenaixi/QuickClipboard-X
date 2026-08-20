@@ -93,6 +93,22 @@ test('cursorForSelectionHover 内部判定必须显式传 0 内缩覆盖完整�
   assert.equal(cursorForSelectionHover({ x: 91, y: 200 }, wide, bounds), null, '选区外容差外必须返回 null');
 });
 
+
+test('cursorForSelectionHover 源码 null selection 守卫必须在 hitSelectionEdge 之前', () => {
+  const source = readFileSync(new URL('./cursorModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function cursorForSelectionHover');
+  const body = source.slice(start, start + 600);
+  // 源码护栏：立即返回 null 的守卫（if (!selection) return null;）必须在
+  // 调用 hitSelectionEdge 之前，否则 selection 为 null 时会因为
+  // hitSelectionEdge 内访问 selection.left 抛出 TypeError，不能安全返回 null。
+  const guardIdx = body.indexOf('if (!selection) return null;');
+  const edgeIdx = body.indexOf('const edge = hitSelectionEdge(point, selection);');
+  assert.ok(guardIdx >= 0 && edgeIdx >= 0, 'null 守卫和 hitSelectionEdge 都必须存在');
+  assert.ok(guardIdx < edgeIdx, 'null selection 守卫必须在 hitSelectionEdge 之前');
+  // 行为验证：selection 为 null 时返回 null而不抛错。
+  assert.equal(cursorForSelectionHover({ x: 550, y: 400 }, null, bounds), null, 'null selection 必须返回 null');
+  assert.equal(cursorForSelectionHover({ x: 550, y: 400 }, undefined, bounds), null, 'undefined selection 必须返回 null');
+});
 test('cursorForSelectionHover 拒绝无效坐标或边界', () => {
   const selection = { left: 400, top: 300, right: 700, bottom: 500, width: 300, height: 200 };
   assert.throws(() => cursorForSelectionHover({ x: Number.NaN, y: 1 }, selection, bounds), /点 x 必须是有限数字/);
