@@ -187,6 +187,35 @@ test('magnetSelection 等距离候选平局时取先出现候选且源码严格�
   assert.notEqual(sQuarter.bottom, 12, 's 边不得错误吸附到中心');
 });
 
+test('magnetSelection 调整路径四条边候选线完整（边缘加中心线）', () => {
+  const source = readFileSync(new URL('./magnetModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function magnetSelection');
+  const body = source.slice(start);
+  // 源码护栏：四条被拖边的候选块必须各自包含屏幕边缘 + 屏幕中心线两个候选
+  //（与平移路径 dxBlock/dyBlock 的完整块锚定一致，§10.4：单行 contains 会被其他分支稀释）。
+  // 只留边缘候选会让靠近中心线时失去磁吸，只留中心线候选会让靠近屏幕边缘时失去磁吸。
+  const eBlock = 'right += bestSnapDelta([\n        { delta: bounds.width - right },\n        { delta: bounds.width / 2 - right },\n      ], tolerance);';
+  const wBlock = 'left += bestSnapDelta([\n        { delta: 0 - left },\n        { delta: bounds.width / 2 - left },\n      ], tolerance);';
+  const sBlock = 'bottom += bestSnapDelta([\n        { delta: bounds.height - bottom },\n        { delta: bounds.height / 2 - bottom },\n      ], tolerance);';
+  const nBlock = 'top += bestSnapDelta([\n        { delta: 0 - top },\n        { delta: bounds.height / 2 - top },\n      ], tolerance);';
+  assert.ok(body.includes(eBlock), 'e 边候选必须完整（右缘加中心线）');
+  assert.ok(body.includes(wBlock), 'w 边候选必须完整（左缘加中心线）');
+  assert.ok(body.includes(sBlock), 's 边候选必须完整（下缘加中心线）');
+  assert.ok(body.includes(nBlock), 'n 边候选必须完整（上缘加中心线）');
+  // 行为验证：w 边左缘 963 距垂直中心 960 仅 3px，必须吸附到 960（中心线候选生效）；
+  // n 边上缘 537 距水平中心 540 仅 3px，必须吸附到 540（中心线候选生效）。
+  // 调整语义：被拖边吸附后精确落线，对边保持原值（w 边调整会改变宽度是正确行为）。
+  const wCenter = magnetSelection({ left: 963, top: 100, right: 1263, bottom: 400 }, bounds, { edge: 'w' });
+  assert.equal(wCenter.left, 960, 'w 边靠近垂直中心线必须吸附到 960');
+  assert.equal(wCenter.right, 1263, 'w 边吸附不得移动对边');
+  const nCenter = magnetSelection({ left: 100, top: 537, right: 400, bottom: 837 }, bounds, { edge: 'n' });
+  assert.equal(nCenter.top, 540, 'n 边靠近水平中心线必须吸附到 540');
+  assert.equal(nCenter.bottom, 837, 'n 边吸附不得移动对边');
+  // 对称行为：e/s 边中心线吸附（既有测试 958→960 / 542→540）与边缘吸附（1915→1920 / 1075→1080）双路共存。
+  assert.equal(magnetSelection({ left: 100, top: 100, right: 958, bottom: 400 }, bounds, { edge: 'e' }).right, 960, 'e 边中心线吸附必须保持');
+  assert.equal(magnetSelection({ left: 100, top: 100, right: 1915, bottom: 400 }, bounds, { edge: 'e' }).right, 1920, 'e 边右缘吸附必须保持');
+});
+
 test('magnetSelection 拒绝无效输入', () => {
   assert.throws(() => magnetSelection({ left: 0, top: 0, right: 1, bottom: 1 }, { width: 0, height: 10 }), /边界尺寸必须为正数/);
   assert.throws(() => magnetSelection({ left: 0, top: 0, right: 1, bottom: 1 }, bounds, { tolerance: -1 }), /吸附容差不能为负数/);
