@@ -59,6 +59,31 @@ test('历史模型默认上限 10 且 push 不可变 undo 不修改原数组', (
   assert.equal(canUndoSelection(undone.history), true, 'undo 后仍有可撤销记录');
 });
 
+test('undo 顺序先查空再查类型且非法数组输入抛错与 limit=1 边界', () => {
+  const source = readFileSync(new URL('./historyModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function undoSelectionHistory');
+  const body = source.slice(start, start + 400);
+  // 源码护栏：null/undefined 检查必须位于数组类型检查之前（否则 undo(null) 会抛错而非返回 null，
+  // 破坏 App 中"无历史返回 null"的语义）。顺序类不变量用下标比较。
+  const nullIdx = body.indexOf('if (history === null || history === undefined)');
+  const arrayIdx = body.indexOf('assertHistoryArray(history)');
+  assert.ok(nullIdx >= 0 && arrayIdx >= 0 && nullIdx < arrayIdx, '空检查必须早于数组类型检查');
+  // 行为：null/undefined 返回 null；字符串/数字等非法输入必须抛错。
+  assert.equal(undoSelectionHistory(null), null);
+  assert.equal(undoSelectionHistory(undefined), null);
+  assert.throws(() => undoSelectionHistory('x'), /历史必须是数组/);
+  assert.throws(() => undoSelectionHistory(42), /历史必须是数组/);
+  // push limit=1 边界：只保留最新 1 条。
+  const one = pushSelectionHistory([{ left: 0 }], { left: 1 }, 1);
+  assert.deepEqual(one, [{ left: 1 }]);
+  // canUndoSelection 与 undo 返回值一致性：非空数组必然可撤销且弹出非 null。
+  const nonEmpty = [{ left: 0 }, { left: 1 }];
+  assert.equal(canUndoSelection(nonEmpty), true);
+  assert.ok(undoSelectionHistory(nonEmpty) !== null, '非空历史撤销必须返回结果');
+  assert.equal(canUndoSelection([]), false);
+  assert.equal(undoSelectionHistory([]), null);
+});
+
 test('pushSelectionHistory 拒绝非法输入', () => {
   assert.throws(() => pushSelectionHistory(null, { left: 0 }), /历史必须是数组/);
   assert.throws(() => pushSelectionHistory([], { left: 0 }, 0), /上限必须是正整数/);

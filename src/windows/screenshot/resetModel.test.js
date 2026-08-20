@@ -31,6 +31,17 @@ test('canResetSelection 默认最小尺寸为 5 且任一维度小于即允许�
   assert.equal(canResetSelection({ width: 5, height: 4 }), true, '高小于阈值允许重置');
 });
 
+test('canResetSelection 浮点宽度高度阈值边界与默认值一致', () => {
+  // 选区坐标可为小数，阈值判定必须覆盖浮点边界：4.999 允许重置、5.001 不允许。
+  assert.equal(canResetSelection({ width: 4.999, height: 20 }), true, '4.999 宽必须允许重置');
+  assert.equal(canResetSelection({ width: 5.001, height: 20 }), false, '5.001 宽不得允许重置');
+  assert.equal(canResetSelection({ width: 20, height: 4.999 }), true, '4.999 高必须允许重置');
+  assert.equal(canResetSelection({ width: 20, height: 5.001 }), false, '5.001 高不得允许重置');
+  // 恰好等于阈值与阈值以上一丁点都不允许（严格小于才允许）。
+  assert.equal(canResetSelection({ width: 5, height: 20 }), false, '恰好 5 宽不允许重置');
+  assert.equal(canResetSelection({ width: 5.0001, height: 20 }), false, '5.0001 宽不允许重置');
+});
+
 test('canResetSelection 拒绝无效输入', () => {
   assert.throws(() => canResetSelection(null), /选区/);
   assert.throws(() => canResetSelection({ width: Number.NaN, height: 1 }), /宽度/);
