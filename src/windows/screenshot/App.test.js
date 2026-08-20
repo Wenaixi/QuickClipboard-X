@@ -652,7 +652,7 @@ test('焦点落在工具栏按钮时全局快捷键不抢原生激活', () => {
 test('选区建立后数字键快捷执行动作且快捷键提示展示', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('const hotkeyAction = actionForHotkey(event.key);'));
-  assert.ok(source.includes('if (hotkeyAction) { event.preventDefault(); void completeScreenshot(hotkeyAction); return; }'));
+  assert.ok(source.includes('if (hotkeyAction && !event.ctrlKey && !event.metaKey && !event.altKey) { event.preventDefault(); void completeScreenshot(hotkeyAction); return; }'));
   assert.ok(source.includes('hotkeyForAction(action.id)'));
 });
 
@@ -742,6 +742,19 @@ test('completeScreenshot 成功失败均解除占用且成功路径清理交互�
   // 源码护栏五：会话未就绪时设置错误并返回，不发起完成请求。
   assert.ok(body.includes("if (!bootstrap.sessionId) {"), '会话未就绪必须守卫');
   assert.ok(body.includes("setActionError(t('screenshot.sessionNotReady'));"), '会话未就绪必须报错');
+});
+
+test('数字键完成动作必须排除修饰键且走完成入口', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const hotkeyIdx = source.indexOf('const hotkeyAction = actionForHotkey(event.key);');
+  assert.ok(hotkeyIdx >= 0, '数字键热键分支必须存在');
+  // 源码护栏：数字键完成必须只响应无修饰键（Ctrl+1/Alt+2/Meta+3 是系统或应用级快捷键，
+  // 不得触发截图完成动作销毁窗口；Ctrl+C/S/P 由 completeShortcutForEvent 单独处理）。
+  // 源码护栏：数字键完成必须只响应无修饰键（Ctrl+1/Alt+2/Meta+3 是系统或应用级快捷键，
+  // 不得触发截图完成动作销毁窗口；Ctrl+C/S/P 由 completeShortcutForEvent 单独处理）。
+  const after = source.slice(hotkeyIdx, hotkeyIdx + 400);
+  assert.ok(after.includes('!event.ctrlKey') && after.includes('!event.metaKey') && after.includes('!event.altKey'), '数字键必须排除 ctrl/meta/alt 修饰键');
+  assert.ok(after.includes('event.preventDefault(); void completeScreenshot(hotkeyAction); return;'), '数字键必须走完成入口');
 });
 
 test('动作工具栏 id 与热键映射一致且处理中互斥显示 processing', () => {
