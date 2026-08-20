@@ -82,6 +82,35 @@ test('thirdsGrid 任意合法边界下四条线整体在画布内可见', () => 
   }
 });
 
+test('thirdsGrid 源码 2/3 线必须夹紧到画布内且四条线宽恒 1px', () => {
+  const source = readFileSync(new URL('./gridModel.js', import.meta.url), 'utf8');
+  // 源码护栏一：第二条垂直线 2/3 取整后必须夹紧到 bounds.width - 1
+  //（宽 1 时 round(2/3)=1 会越界到画布外不可见，夹紧是退化画布可见性的关键）。
+  assert.ok(source.includes('Math.min(Math.round((bounds.width * 2) / 3), bounds.width - 1)'), '第二条垂直线必须夹紧到画布内');
+  // 源码护栏二：第二条水平线同理夹紧到 bounds.height - 1。
+  assert.ok(source.includes('Math.min(Math.round((bounds.height * 2) / 3), bounds.height - 1)'), '第二条水平线必须夹紧到画布内');
+  // 源码护栏三：四条线宽高必须恒为 1px（垂直 width: 1、水平 height: 1，细网格线视觉契约）。
+  assert.ok(source.includes('{ left: x1, top: 0, width: 1, height: bounds.height }'), '第一条垂直线宽必须恒 1px');
+  assert.ok(source.includes('{ left: x2, top: 0, width: 1, height: bounds.height }'), '第二条垂直线宽必须恒 1px');
+  assert.ok(source.includes('{ left: 0, top: y1, width: bounds.width, height: 1 }'), '第一条水平线高必须恒 1px');
+  assert.ok(source.includes('{ left: 0, top: y2, width: bounds.width, height: 1 }'), '第二条水平线高必须恒 1px');
+  // 行为属性：1x1 退化画布下两条线夹紧到 0 且不越界；任意边界下线宽恒 1px 且线完全在画布内。
+  const degenerate = thirdsGrid({ width: 1, height: 1 });
+  assert.deepEqual(degenerate.vertical.map((l) => l.left), [0, 0], '1x1 画布两条垂直线必须夹紧到 0');
+  assert.deepEqual(degenerate.horizontal.map((l) => l.top), [0, 0], '1x1 画布两条水平线必须夹紧到 0');
+  for (const bounds of [{ width: 1, height: 1 }, { width: 2, height: 2 }, { width: 300, height: 150 }, { width: 1920, height: 1080 }]) {
+    const grid = thirdsGrid(bounds);
+    for (const line of grid.vertical) {
+      assert.equal(line.width, 1, '垂直线宽必须恒 1px');
+      assert.ok(line.left + line.width <= bounds.width, '垂直线右缘必须完全在画布内');
+    }
+    for (const line of grid.horizontal) {
+      assert.equal(line.height, 1, '水平线高必须恒 1px');
+      assert.ok(line.top + line.height <= bounds.height, '水平线下缘必须完全在画布内');
+    }
+  }
+});
+
 test('thirdsGrid 拒绝非法边界', () => {
   assert.throws(() => thirdsGrid(null), /边界尺寸/);
   assert.throws(() => thirdsGrid({ width: 0, height: 100 }), /边界尺寸必须为正数/);
