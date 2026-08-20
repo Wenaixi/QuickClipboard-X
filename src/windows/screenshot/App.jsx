@@ -13,7 +13,7 @@ import { actionForHotkey, hotkeyForAction } from './actionModel.js';
 import { selectionLabelPlacement } from './labelModel.js';
 import { cursorForSelectionHover } from './cursorModel.js';
 import { lineStyle } from './annotationModel.js';
-import { readCenterPixel, formatRgb } from './colorModel.js';
+import { readCenterPixel, formatRgb, hexFromRgb } from './colorModel.js';
 import { magnifierScaleForWheel } from './magnifierZoomModel.js';
 import { formatPixelSize, formatMegapixels, formatAspectRatio, physicalSize } from './sizeModel.js';
 import { magnetSelection } from './magnetModel.js';
@@ -201,6 +201,10 @@ function applySelectionStyle(element, selection) {
   element.style.setProperty('--selection-bottom', `${selection.bottom}px`);
   element.style.setProperty('--selection-width', `${selection.width}px`);
   element.style.setProperty('--selection-height', `${selection.height}px`);
+}
+
+function magnifierColorLabel(color, includeFormat) {
+  return includeFormat ? `${formatRgb(color)} · ${hexFromRgb(color)}` : formatRgb(color);
 }
 
 function actionLabel(action, t) {
@@ -581,7 +585,7 @@ function App() {
 
     const square = event.shiftKey && !clicked ? squareSelection(draft.start, end, bootstrap.bounds) : null;
     let finalSelection = square ?? selectionForPointerGesture(draft.start, end, bootstrap.bounds);
-    if (!square && clicked && bootstrap.sessionId) {
+    if (!square && clicked && bootstrap.sessionId && bootstrap.screenshotElementDetection !== 'none') {
       try {
         const physicalSelection = await invoke(FIND_WINDOW_COMMAND, {
           sessionId: bootstrap.sessionId,
@@ -688,7 +692,7 @@ function App() {
       {bootstrap.screenshotMagnifierEnabled && bootstrap.magnifierBackground && magnifierPoint && (draftRef.current || moveRef.current || resizeRef.current) && (
         <>
           <canvas className="screenshot-magnifier" data-screenshot-magnifier="true" style={magnifierLayout} ref={magnifierCanvasRef} />
-          {magnifierColor && <div className="screenshot-color" aria-hidden="true" data-screenshot-color="true" style={colorPanelStyle(magnifierLayout, bootstrap.bounds)}>{formatRgb(magnifierColor)}</div>}
+          {magnifierColor && <div className="screenshot-color" aria-hidden="true" data-screenshot-color="true" style={colorPanelStyle(magnifierLayout, bootstrap.bounds)}>{magnifierColorLabel(magnifierColor, bootstrap.screenshotColorIncludeFormat)}</div>}
         </>
       )}
       {magnifierPoint && (draftRef.current || moveRef.current || resizeRef.current) && (

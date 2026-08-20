@@ -49,6 +49,8 @@ test('normalizeBootstrap 使用显式显示器物理尺寸与逻辑尺寸', () =
     screenshotMagnifierEnabled: true,
     magnifierBackground: null,
     screenshotHintsEnabled: true,
+    screenshotElementDetection: 'all',
+    screenshotColorIncludeFormat: true,
     lifecycleMode: 'quick',
   });
 });
@@ -393,7 +395,8 @@ test('放大镜绘制后读取中心像素颜色并渲染读数标签', () => {
   assert.ok(source.includes('configurePromise\n      .then('), 'configure 监听链尾必须捕获拒绝');
   assert.ok(source.includes('setMagnifierColor(null);'));
   assert.ok(source.includes('data-screenshot-color="true"'));
-  assert.ok(source.includes('formatRgb(magnifierColor)'));
+  assert.ok(source.includes('magnifierColorLabel(magnifierColor, bootstrap.screenshotColorIncludeFormat)'));
+  assert.ok(source.includes('formatRgb(color)'));
   assert.ok(source.includes('colorPanelStyle(magnifierLayout, bootstrap.bounds)'));
 });
 
@@ -564,7 +567,7 @@ test('拖动收尾时非单击选区吸附到屏幕引导线且单击选窗不�
 test('松开时按住 Shift 生成正方形且跳过选窗逻辑', () => {
   const source = readSource('./App.jsx');
   assert.ok(source.includes('const square = event.shiftKey && !clicked ? squareSelection(draft.start, end, bootstrap.bounds) : null;'));
-  assert.ok(source.includes('if (!square && clicked && bootstrap.sessionId) {'));
+  assert.ok(source.includes("if (!square && clicked && bootstrap.sessionId && bootstrap.screenshotElementDetection !== 'none') {"));
 });
 
 test('选区边缘命中优先于内部平移且记录历史进入调整', () => {
@@ -906,6 +909,8 @@ test('normalizeBootstrap 缺失尺寸时以视口和 DPR 推导安全默认值',
       screenshotMagnifierEnabled: true,
       magnifierBackground: null,
       screenshotHintsEnabled: true,
+      screenshotElementDetection: 'all',
+      screenshotColorIncludeFormat: true,
       lifecycleMode: 'quick',
     });
   } finally {
