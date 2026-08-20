@@ -676,6 +676,34 @@ test('resizeSelection 普通路径不翻转且被拖边按对边夹紧到最小 
   assert.equal(outW.left, 0, 'w 边拖出边界必须夹到显示器左缘');
 });
 
+test('resizeSelection 保持比例分支必须先于纯从中心分支且组合时比例守恒', () => {
+  const source = readFileSync(new URL('./selectionModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function resizeSelection');
+  const body = source.slice(start, start + 4000);
+  // 源码护栏一：保持比例分支入口必须存在（keepAspectRatio === true 独立分支）。
+  assert.ok(body.includes('if (options.keepAspectRatio === true) {'), '保持比例分支入口必须存在');
+  // 源码护栏二：保持比例分支必须先于纯从中心分支（用纯中心分支注释锚定）——
+  // 顺序颠倒时 keepAspectRatio + fromCenter 组合会落到纯中心缩放，宽高比丢失。
+  const keepIdx = body.indexOf('if (options.keepAspectRatio === true) {');
+  const pureCenterIdx = body.indexOf('拖动的边与对边对称移动');
+  assert.ok(keepIdx !== -1 && pureCenterIdx !== -1, '两个分支锚点都必须存在');
+  assert.ok(keepIdx < pureCenterIdx, '保持比例分支必须先于纯从中心分支');
+  // 行为验证：非正方形选区（宽高比 2:1）从中心 + 保持比例拖 e 边到 x=350：
+  // 宽 250 高 125（比例 2:1 守恒），中心保持（200, 150 附近，round 误差 0.5）。
+  const base = { left: 100, top: 100, right: 300, bottom: 200, width: 200, height: 100 };
+  const resized = resizeSelection(base, 'e', { x: 350, y: 150 }, bounds, { keepAspectRatio: true, fromCenter: true });
+  assert.deepEqual(selectionValues(resized), { left: 75, top: 88, right: 325, bottom: 213, width: 250, height: 125 });
+  assert.ok(Math.abs(resized.width / resized.height - 2) < 0.001, '组合缩放宽高比必须守恒（2:1）');
+  const centerX = (resized.left + resized.right) / 2;
+  const centerY = (resized.top + resized.bottom) / 2;
+  assert.ok(Math.abs(centerX - 200) <= 0.5, '中心 x 必须保持（round 误差内）');
+  assert.ok(Math.abs(centerY - 150) <= 0.5, '中心 y 必须保持（round 误差内）');
+  // 对照：若组合落到纯中心缩放（顺序错误），宽会按 |350-200|*2=300、高保持 100，比例变为 3:1。
+  const pureCenter = resizeSelection(base, 'e', { x: 350, y: 150 }, bounds, { fromCenter: true });
+  assert.equal(pureCenter.width, 300, '纯中心缩放宽按 2 倍距离');
+  assert.equal(pureCenter.height, 100, '纯中心缩放高保持原值（比例不守恒）');
+});
+
 test('nudgeSelection 按 1px 移动选区并保持尺寸不变', () => {
   const moved = nudgeSelection(
     { left: 100, top: 80, right: 300, bottom: 240, width: 200, height: 160 },
