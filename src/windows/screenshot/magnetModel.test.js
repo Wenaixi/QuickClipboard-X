@@ -122,6 +122,31 @@ test('magnetSelection 平移只改位置不改尺寸且吸附点精确落线', (
   }
 });
 
+test('magnetSelection 源码 e/s 边夹紧下限 left+1/top+1 且极端越界输入保持最小 1px', () => {
+  const source = readFileSync(new URL('./magnetModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function magnetSelection');
+  const body = source.slice(start);
+  // 源码护栏一：e 边调整的夹紧下限必须为 left + 1（拖 e 时 right 不得小于 left+1，
+  // 否则右缘被夹到左缘之下产生零宽/负宽选区）。
+  assert.ok(body.includes('right = clamp(right, left + 1, bounds.width);'), 'e 边夹紧下限必须为 left + 1');
+  // 源码护栏二：s 边调整的夹紧下限必须为 top + 1（拖 s 时 bottom 不得小于 top+1）。
+  assert.ok(body.includes('bottom = clamp(bottom, top + 1, bounds.height);'), 's 边夹紧下限必须为 top + 1');
+  // 行为验证：极端越界输入（right/bottom 远小于 left/top）下调整结果保持最小 1px 且合法。
+  const bounds = { width: 1920, height: 1080 };
+  const e = magnetSelection({ left: 100, top: 100, right: -1000, bottom: 400 }, bounds, { edge: 'e' });
+  assert.equal(e.right, 101, 'e 边极端越界输入必须夹到 left+1');
+  assert.equal(e.width, 1, 'e 边极端越界输入必须保持最小 1px 宽');
+  assert.equal(e.left, 100, '拖 e 不得改变 left');
+  const s = magnetSelection({ left: 100, top: 100, right: 400, bottom: -1000 }, bounds, { edge: 's' });
+  assert.equal(s.bottom, 101, 's 边极端越界输入必须夹到 top+1');
+  assert.equal(s.height, 1, 's 边极端越界输入必须保持最小 1px 高');
+  assert.equal(s.top, 100, '拖 s 不得改变 top');
+  // 常规吸附仍优先于夹紧：距右缘 5px 内拖 e 吸附到 bounds.width。
+  const snapE = magnetSelection({ left: 100, top: 100, right: 1915, bottom: 400 }, bounds, { edge: 'e' });
+  assert.equal(snapE.right, 1920, 'e 边正常吸附必须优先于夹紧');
+  assert.equal(snapE.width, 1820, '吸附不得改变未拖动边');
+});
+
 test('magnetSelection 默认容差 6px 且边界行为一致', () => {
   const source = readFileSync(new URL('./magnetModel.js', import.meta.url), 'utf8');
   // 源码护栏：默认吸附容差必须明确为 6（ShareX 公开行为的合理贴近阈值）。
