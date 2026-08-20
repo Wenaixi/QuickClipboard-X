@@ -84,6 +84,18 @@ test('toolbarStyle 常量单一来源且两侧夹紧的源码语义', () => {
   assert.throws(() => toolbarStyle({ left: 0, top: 0, right: 1, bottom: 1 }, bounds, 'x'), /placement 必须是 above 或 below/);
 });
 
+test('toolbarPlacement 上下空间相等维持下方且恰等阈值不翻转', () => {
+  const bounds = { width: 1920, height: 1080 };
+  // 边界一：上下空间恰好相等（100 = 100）时维持下方（默认下方优先，防止抖动）。
+  assert.equal(toolbarPlacement({ left: 200, top: 100, right: 500, bottom: 980, width: 300, height: 880 }, bounds), 'below', '上下空间相等必须维持下方');
+  // 边界二：下方空间恰少 1px（99 < 100）且上方充足（> 48）时翻转到上方。
+  assert.equal(toolbarPlacement({ left: 200, top: 100, right: 500, bottom: 981, width: 300, height: 881 }, bounds), 'above', '下方空间更小且上方充足必须翻转上方');
+  // 边界三：上方空间恰等阈值（48 = GAP + HEIGHT）时维持下方（<= 语义，恰好等于不翻转）。
+  assert.equal(toolbarPlacement({ left: 200, top: 48, right: 500, bottom: 1048, width: 300, height: 1000 }, bounds), 'below', '上方恰等阈值必须维持下方');
+  // 边界四：下方空间更大（680 > 200）时维持下方（默认下方优先）。
+  assert.equal(toolbarPlacement({ left: 200, top: 200, right: 500, bottom: 400, width: 300, height: 200 }, bounds), 'below', '下方空间更大必须维持下方');
+});
+
 test('toolbarStyle 拒绝无效输入', () => {
   assert.throws(() => toolbarStyle({ left: 0, top: 0, right: 1, bottom: 1 }, { width: 1920, height: 1080 }, 'x'), /placement 必须是 above 或 below/);
   assert.throws(() => toolbarStyle({ left: 0, top: 0, right: 1, bottom: 1 }, { width: 1920, height: 1080 }, 'below', -1), /工具栏宽度必须为正数/);
