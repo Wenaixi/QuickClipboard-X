@@ -46,3 +46,28 @@ test('数字动作映射单一来源且正反向往返对称', () => {
 test('hotkeyForAction 未知动作返回空字符串', () => {
   assert.equal(hotkeyForAction('unknown'), '');
 });
+
+test('动作映射全集封闭且每个动作恰好一个热键与防御式容错', () => {
+  // 源码护栏：映射块必须恰好 4 个条目且与预期完全一致（加重复动作热键如 5: copy
+  // 会让 hotkeyForAction 反向查找产生歧义——find 只返回第一个键）。
+  const source = readFileSync(new URL('./actionModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('const HOTKEY_ACTIONS = {');
+  const blockEnd = source.indexOf('};', start);
+  const block = source.slice(start, blockEnd);
+  const entries = [...block.matchAll(/^  '([0-9])': '([a-z]+)',?$/gm)].map((m) => [m[1], m[2]]);
+  assert.deepEqual(entries, [['1', 'copy'], ['2', 'save'], ['3', 'pin'], ['4', 'ai']], '映射条目必须与预期完全一致');
+  // 行为黑盒：扫描全部数字键 0-9，每个已知动作必须恰好命中一个热键（重复动作必现歧义）。
+  const countByAction = {};
+  for (let i = 0; i <= 9; i += 1) {
+    const action = actionForHotkey(String(i));
+    if (action) countByAction[action] = (countByAction[action] || 0) + 1;
+  }
+  for (const action of ['copy', 'save', 'pin', 'ai']) {
+    assert.equal(countByAction[action], 1, `动作 ${action} 必须恰好一个数字热键`);
+  }
+  // 防御式容错：非字符串 key（真实事件对象 key 恒为字符串，但容错不抛错）安全返回 null。
+  assert.equal(actionForHotkey(undefined), null);
+  assert.equal(actionForHotkey(null), null);
+  assert.equal(actionForHotkey(5), null);
+  assert.equal(actionForHotkey('10'), null);
+});
