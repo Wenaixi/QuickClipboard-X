@@ -99,6 +99,49 @@ test('selectionFromDraft 非法草稿坐标先于边界校验抛错且引用未�
   assert.equal(selectionFromDraft(draft, { shiftKey: false }, { width: 1920, height: 1080 }).width, 100);
 });
 
+test('selectionFromDraft 缺省 shiftKey 字段按 falsy 走普通路径且重置幂等', () => {
+  const source = readFileSync(new URL('./draftModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function selectionFromDraft');
+  const body = source.slice(start, start + 460);
+  // 源码护栏一：Shift 判定必须直接用 event.shiftKey 三元（falsy 语义）——
+  // 事件对象缺 shiftKey 字段（undefined）必须走普通路径，禁止 `=== true` 严格比较。
+  assert.ok(body.includes('return event.shiftKey'), '必须直接使用 event.shiftKey 三元');
+  assert.ok(!body.includes('event.shiftKey === true'), '禁止严格等于 true 比较（undefined 应走普通路径）');
+  // 源码护栏二：resetInteractionState 必须同时清空四个引用并复位四个 setter。
+  const resetStart = source.indexOf('export function resetInteractionState');
+  const resetBody = source.slice(resetStart, resetStart + 400);
+  assert.ok(resetBody.includes('state.draftRef.current = null;'), '草稿引用必须清空');
+  assert.ok(resetBody.includes('state.resizeRef.current = null;'), '调整引用必须清空');
+  assert.ok(resetBody.includes('state.setResizing?.(false)'), '调整 setter 必须复位');
+  // 行为一：事件缺 shiftKey 字段（合成事件/自动化调用常见）走普通路径返回自由选区。
+  const draft = { start: { x: 100, y: 100 }, end: { x: 200, y: 250 } };
+  assert.equal(selectionFromDraft(draft, {}, { width: 1920, height: 1080 }).width, 100, '缺省 shiftKey 必须走普通路径');
+  assert.equal(selectionFromDraft(draft, { shiftKey: undefined }, { width: 1920, height: 1080 }).width, 100, 'shiftKey undefined 必须走普通路径');
+  assert.equal(selectionFromDraft(draft, { shiftKey: true }, { width: 1920, height: 1080 }).width, 150, 'shiftKey true 必须走方形路径');
+  // 行为二：resetInteractionState 幂等——连续调用两次不抛错且引用保持 null、setter 收到两次复位。
+  const calls = [];
+  const state = {
+    draftRef: { current: {} },
+    selectionRef: { current: {} },
+    moveRef: { current: {} },
+    resizeRef: { current: {} },
+    setSelection: (v) => calls.push(['selection', v]),
+    setSelecting: (v) => calls.push(['selecting', v]),
+    setMoving: (v) => calls.push(['moving', v]),
+    setResizing: (v) => calls.push(['resizing', v]),
+  };
+  resetInteractionState(state);
+  resetInteractionState(state);
+  assert.equal(state.draftRef.current, null);
+  assert.equal(state.selectionRef.current, null);
+  assert.equal(state.moveRef.current, null);
+  assert.equal(state.resizeRef.current, null);
+  assert.deepEqual(calls, [
+    ['selection', null], ['selecting', false], ['moving', false], ['resizing', false],
+    ['selection', null], ['selecting', false], ['moving', false], ['resizing', false],
+  ], '幂等重置必须重复复位');
+});
+
 test('resetInteractionState 拒绝无效输入', () => {
   assert.throws(() => resetInteractionState(null), /状态容器/);
 });
