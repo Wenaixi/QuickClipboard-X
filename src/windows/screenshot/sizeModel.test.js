@@ -91,6 +91,22 @@ test('formatAspectRatio 先取整再欧几里得化简为最简整数比', () =>
   assert.equal(formatAspectRatio({ width: 3840, height: 2160 }), '16:9', '4K 必须化简');
 });
 
+test('尺寸格式化源码语义完整（像素取整与百万像素单位）', () => {
+  const source = readFileSync(new URL('./sizeModel.js', import.meta.url), 'utf8');
+  // 源码护栏一：像素尺寸必须四舍五入到整数并用 × 分隔（与选区标签文案一致）。
+  assert.ok(source.includes("return `${Math.round(size.width)} × ${Math.round(size.height)}`;"), '像素尺寸必须取整且用 × 分隔');
+  // 源码护栏二：百万像素必须除以 1_000_000（避免手写零数错位）。
+  assert.ok(source.includes('(size.width * size.height) / 1_000_000'), '百万像素必须除以百万');
+  // 源码护栏三：百万像素必须保留一位小数并带 MP 单位。
+  assert.ok(source.includes("return `${megapixels.toFixed(1)} MP`;"), '百万像素必须保留一位小数并带 MP 单位');
+  // 行为属性：取整边界、百万像素小数位、零尺寸退化。
+  assert.equal(formatPixelSize({ width: 1920.5, height: 1080.5 }), '1921 × 1081');
+  assert.equal(formatPixelSize({ width: 0.4, height: 0.4 }), '0 × 0');
+  assert.equal(formatMegapixels({ width: 2000, height: 1000 }), '2.0 MP');
+  assert.equal(formatMegapixels({ width: 3840, height: 2160 }), '8.3 MP');
+  assert.equal(formatMegapixels({ width: 0, height: 100 }), '0.0 MP');
+});
+
 test('formatAspectRatio 拒绝零或非法输入', () => {
   assert.throws(() => formatAspectRatio({ width: 0, height: 100 }), /宽度与高度必须为正数/);
   assert.throws(() => formatAspectRatio(null), /尺寸对象/);
