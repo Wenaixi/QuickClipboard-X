@@ -7,7 +7,7 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
 use crate::services::screenshot::capture::{capture_monitor, ensure_com_initialized, get_monitor_handle, CaptureRect};
-use crate::services::screenshot::{choose_screenshot_save_destination, copy_screenshot, copy_screenshot_text, emit_screenshot_history_update, encode_and_store_png, prepare_pin_path, recognize_image, save_screenshot, validate_configuration, MainWindowVisibilityRevision, MonitorRect, SessionPhase, ScreenshotSessionManager, StartSessionResult};
+use crate::services::screenshot::{choose_screenshot_save_destination, copy_screenshot, copy_screenshot_text, emit_screenshot_history_update, encode_and_store_png, prepare_pin_path, recognize_image, save_screenshot, validate_configuration, MainWindowVisibilityRevision, MonitorRect, ScreenshotArtifact, SessionPhase, ScreenshotSessionManager, StartSessionResult, StoredScreenshot};
 use crate::services::settings::{get_settings, update_with};
 use crate::windows::main_window::{get_main_window, hide_main_window, is_main_window_visible, show_main_window};
 
@@ -41,6 +41,8 @@ pub struct ScreenshotBootstrap {
     // 截图提示开关（空闲引导/模式提示）：设置项此前在截图窗口零消费，
     // 必须随 bootstrap 下发，前端据此决定是否渲染 idle/mode 提示。
     pub screenshot_hints_enabled: bool,
+    pub screenshot_element_detection: String,
+    pub screenshot_color_include_format: bool,
     // 截图窗口生命周期模式：quick（隐藏复用）/ dispose（销毁）/ auto（超时释放），
     // 前端据此决定成功路径是否关闭窗口，实现设置项的真实后端消费（此前零消费）。
     pub lifecycle_mode: String,
@@ -90,6 +92,8 @@ fn bootstrap_for_session(
     magnifier_background: Option<String>,
     lifecycle_mode: String,
     screenshot_hints_enabled: bool,
+    screenshot_element_detection: String,
+    screenshot_color_include_format: bool,
 ) -> ScreenshotBootstrap {
     ScreenshotBootstrap {
         device_pixel_ratio: monitor.scale_factor,
@@ -103,6 +107,8 @@ fn bootstrap_for_session(
         magnifier_background,
         lifecycle_mode,
         screenshot_hints_enabled,
+        screenshot_element_detection,
+        screenshot_color_include_format,
     }
 }
 
@@ -163,11 +169,31 @@ fn confirm_screenshot_ai_cloud_access(app: &AppHandle) -> Result<bool, String> {
     Ok(true)
 }
 
+#[cfg(target_os = "windows")]
+fn set_window_display_affinity(window: &WebviewWindow) -> Result<(), String> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE,
+    };
+
+    let hwnd = window
+        .hwnd()
+        .map_err(|error| format!("获取截图窗口句柄失败: {error}"))?;
+    let hwnd = windows::Win32::Foundation::HWND(hwnd.0 as *mut _);
+    unsafe { SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE) }
+        .map_err(|error| format!("设置截图窗口捕获排除失败: {error}"))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn set_window_display_affinity(_window: &WebviewWindow) -> Result<(), String> {
+    Ok(())
+}
+
 fn configure_window(window: &WebviewWindow, monitor: &ScreenshotMonitorInfo) -> Result<(), String> {
     window.set_position(PhysicalPosition::new(monitor.left, monitor.top)).map_err(|error| format!("设置截图窗口位置失败: {error}"))?;
     window.set_size(PhysicalSize::new(monitor.physical_width, monitor.physical_height)).map_err(|error| format!("设置截图窗口大小失败: {error}"))?;
     window.set_always_on_top(true).map_err(|error| format!("设置截图窗口置顶失败: {error}"))?;
     window.set_ignore_cursor_events(false).map_err(|error| format!("设置截图窗口交互失败: {error}"))?;
+    set_window_display_affinity(window)?;
     window.show().map_err(|error| format!("显示截图窗口失败: {error}"))?;
     window.set_focus().map_err(|error| format!("聚焦截图窗口失败: {error}"))?;
     Ok(())
@@ -350,6 +376,21 @@ mod source_guards {
         // 先定位再显示避免目标位置闪烁，置顶先于显示避免非置顶闪现，聚焦放最后。
         assert!(pos < size && size < topmost && topmost < ignore && ignore < show && show < focus,
             "配置顺序必须为 位置→尺寸→置顶→交互→显示→聚焦: {pos} {size} {topmost} {ignore} {show} {focus}");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn configure_window_excludes_overlay_from_display_capture() {
+        let source = source_file("windows/screenshot_window/mod.rs");
+        let start = source
+            .find("\nfn configure_window")
+            .expect("缺少截图窗口配置函数");
+        let body = &source[start..];
+        let affinity = body
+            .find("set_window_display_affinity(window)")
+            .expect("截图窗口必须设置为不参与显示器捕获");
+        let show = body.find("window.show()").expect("缺少显示调用");
+        assert!(affinity < show, "必须在显示截图浮窗前启用捕获排除");
     }
 
     #[test]
@@ -544,6 +585,17 @@ mod source_guards {
     }
 
     #[test]
+    fn ai_failure_keeps_processing_session_for_alternate_action() {
+        let source = source_file("windows/screenshot_window/mod.rs");
+        let action_start = source.rfind("if let Err(error) = action_result {").expect("缺少动作失败收口");
+        let action_end = source[action_start..].find("// 正常完成").map(|offset| action_start + offset).expect("缺少正常完成锚点");
+        let body = &source[action_start..action_end];
+        assert!(body.contains("action != \"ai\" || !is_current_processing_session(session_id)"), "AI 识别失败且仍在 Processing 时不得销毁会话");
+        assert!(source.contains("begin_processing_or_reuse("), "失败后的复制/保存/贴图必须能够复用已保存制品");
+        assert!(source.contains("register_screenshot_artifact(session_id, &stored, &selection)"), "新截图必须登记为可重试制品");
+    }
+
+    #[test]
     fn save_and_pin_actions_keep_dialogs_on_ui_path_and_file_work_off_runtime() {
         let source = source_file("windows/screenshot_window/mod.rs");
         let save_start = source.find("\"save\" => {").expect("缺少保存截图动作");
@@ -651,8 +703,9 @@ mod source_guards {
             .find("if existing {\n        // 已有会话：窗口已按原显示器配置，仅重新显示与聚焦")
             .expect("已有会话提前返回分支缺失");
         assert!(
-            body.find("register_screenshot_temp_file(session_id, stored.absolute_path.clone()) {\n        let _ = std::fs::remove_file(&stored.absolute_path);\n        finish_failed_screenshot(app, session_id);\n        return Err(error);")
-                .is_some(),
+            body.contains("register_screenshot_temp_file(session_id, stored.absolute_path.clone())")
+                && body.contains("if !has_reusable_artifact")
+                && body.contains("finish_failed_screenshot(app, session_id);"),
             "register 失败必须与其它失败路径对称清理"
         );
         let busy_guard = body
@@ -678,6 +731,18 @@ mod source_guards {
     }
 
     #[test]
+    fn only_image_copy_retains_the_session_png() {
+        let source = source_file("windows/screenshot_window/mod.rs");
+        let finish_start = source.rfind("let finish_result = {").expect("缺少完成清理动作分支");
+        let finish_end = source[finish_start..].find("cleanup_plan(plan, app)").map(|offset| finish_start + offset).expect("缺少完成清理调用");
+        let body = &source[finish_start..finish_end];
+        let retain = body.find("finish_and_retain_file").expect("复制动作必须保留历史图片");
+        let delete = body.find("state.sessions.finish(session_id, revision)").expect("非复制动作必须走普通完成清理");
+        assert!(retain < delete, "复制与非复制动作必须使用不同的 PNG 清理策略");
+        assert!(body.contains("action == \"copy\""));
+    }
+
+    #[test]
     fn screenshot_capability_has_no_private_or_global_filesystem_scope() {
         let source = source_file("../capabilities/screenshot.json");
         assert!(!source.contains("screenshot-suite:default"));
@@ -698,7 +763,11 @@ fn cleanup_plan(plan: crate::services::screenshot::CleanupPlan, app: &AppHandle)
     }
     if plan.restore_main_window {
         if let Some(window) = get_main_window(app) {
-            show_main_window(&window);
+            // Do not turn a user-visible main window into another show/activate
+            // event after a stale screenshot completion races with manual UI use.
+            if !is_main_window_visible(app) {
+                show_main_window(&window);
+            }
         }
     }
     Ok(())
@@ -749,6 +818,40 @@ fn register_screenshot_temp_file(session_id: &str, path: std::path::PathBuf) -> 
         .sessions
         .register_temp_file(session_id, path)
         .map_err(|error| format!("登记截图临时文件失败: {error:?}"))
+}
+
+fn register_screenshot_artifact(
+    session_id: &str,
+    stored: &StoredScreenshot,
+    selection: &crate::commands::screenshot::ScreenshotSelection,
+) -> Result<(), String> {
+    let mut state = STATE.lock();
+    state
+        .sessions
+        .register_artifact(session_id, ScreenshotArtifact {
+            absolute_path: stored.absolute_path.clone(),
+            relative_path: stored.relative_path.clone(),
+            image_id: stored.image_id.clone(),
+            width: stored.width,
+            height: stored.height,
+            png_bytes: stored.png_bytes,
+            selection_left: selection.left,
+            selection_top: selection.top,
+            selection_width: selection.width,
+            selection_height: selection.height,
+        })
+        .map_err(|error| format!("登记截图制品失败: {error:?}"))
+}
+
+fn stored_from_artifact(artifact: ScreenshotArtifact) -> StoredScreenshot {
+    StoredScreenshot {
+        absolute_path: artifact.absolute_path,
+        relative_path: artifact.relative_path,
+        image_id: artifact.image_id,
+        width: artifact.width,
+        height: artifact.height,
+        png_bytes: artifact.png_bytes,
+    }
 }
 
 fn finish_failed_screenshot(app: &AppHandle, session_id: &str) {
@@ -840,7 +943,22 @@ pub fn start_screenshot(app: &AppHandle, initial_action: Option<&str>) -> Result
             .focused(true)
             .build()
         {
-            Ok(window) => window,
+            Ok(window) => {
+                let app_for_close = app.clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        if is_screenshot_active() {
+                            // Native close must follow the same cleanup path as Esc. Prevent
+                            // destruction first so the session-owned temporary PNG cannot leak.
+                            api.prevent_close();
+                            if let Err(error) = cancel_active_screenshot(&app_for_close) {
+                                eprintln!("[Screenshot] 关闭截图窗口清理失败: {error}");
+                            }
+                        }
+                    }
+                });
+                window
+            }
             Err(error) => {
                 finish_failed_screenshot(app, &session_id);
                 return Err(format!("创建截图窗口失败: {error}"));
@@ -879,6 +997,8 @@ pub fn start_screenshot(app: &AppHandle, initial_action: Option<&str>) -> Result
         magnifier_background,
         settings.screenshot_window_lifecycle_mode.clone(),
         settings.screenshot_hints_enabled,
+        settings.screenshot_element_detection.clone(),
+        settings.screenshot_color_include_format,
     );
     if let Err(error) = configure_window(&window, &monitor) {
         finish_failed_screenshot(app, &bootstrap.session_id);
@@ -939,6 +1059,21 @@ pub fn cancel_screenshot(app: &AppHandle, session_id: &str) -> Result<(), String
     cleanup_plan(plan, app)
 }
 
+/// Cancels the active screenshot when Windows reports a monitor topology change.
+/// The session owns its temporary PNG, so normal cancellation also restores the
+/// main window and removes the now-invalid monitor capture state.
+pub fn cancel_active_screenshot(app: &AppHandle) -> Result<bool, String> {
+    let session_id = {
+        let state = STATE.lock();
+        state.sessions.current().map(|session| session.session_id().to_string())
+    };
+    let Some(session_id) = session_id else {
+        return Ok(false);
+    };
+    cancel_screenshot(app, &session_id)?;
+    Ok(true)
+}
+
 pub fn find_window_selection(
     session_id: &str,
     x: i32,
@@ -971,110 +1106,124 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
         return Err("截图选区不能为空".to_string());
     }
 
-    // 获取当前会话的显示器物理区域并进入 Processing 状态
-    let monitor_rect = {
+    // 获取当前会话的显示器物理区域并进入 Processing 状态。AI 失败后重试时，
+    // Processing 会话带有已保存制品，直接复用它，避免再次捕获并避免丢失用户看到的截图。
+    let (monitor_rect, reusable_artifact) = {
         let mut state = STATE.lock();
-        if let Err(error) = state.sessions.begin_processing(session_id) {
-            drop(state);
+        let artifact = state
+            .sessions
+            .begin_processing_or_reuse(
+                session_id,
+                (selection.left, selection.top, selection.width, selection.height),
+            )
+            .map_err(|error| format!("截图会话状态无效: {error:?}"))?;
+        let monitor = state
+            .sessions
+            .current()
+            .ok_or_else(|| "会话已结束".to_string())?
+            .monitor();
+        (monitor, artifact)
+    };
+
+    let has_reusable_artifact = reusable_artifact.is_some();
+    let stored = if let Some(artifact) = reusable_artifact {
+        stored_from_artifact(artifact)
+    } else {
+        // 从显示器物理区域中心获取 Win32 显示器句柄
+        let center_x = monitor_rect.left.saturating_add((monitor_rect.width / 2) as i32);
+        let center_y = monitor_rect.top.saturating_add((monitor_rect.height / 2) as i32);
+        let hmonitor = get_monitor_handle(center_x, center_y);
+        if hmonitor.0.is_null() {
             finish_failed_screenshot(app, session_id);
-            return Err(format!("截图会话状态无效: {error:?}"));
+            return Err("无法取得截图显示器句柄".to_string());
         }
-        match state.sessions.current() {
-            Some(session) => session.monitor(),
-            None => {
-                drop(state);
+        let hmonitor_raw = hmonitor.0 as isize;
+
+        // 构建裁切选区（前端已转换为物理像素，参考 MonitorRect 原点偏移）
+        let capture_rect = CaptureRect {
+            left: selection.left,
+            top: selection.top,
+            width: selection.width,
+            height: selection.height,
+        };
+
+        // 后台线程执行 WGC 捕获（需要 COM MTA 初始化）
+        let captured_result = match tokio::task::spawn_blocking(move || -> Result<_, String> {
+            let hmonitor = windows::Win32::Graphics::Gdi::HMONITOR(hmonitor_raw as *mut std::ffi::c_void);
+            let _com_initialization = ensure_com_initialized().map_err(|e| e.to_string())?;
+            capture_monitor(hmonitor, capture_rect).map_err(|e| e.to_string())
+        })
+        .await
+        {
+            Ok(result) => result,
+            Err(error) => {
                 finish_failed_screenshot(app, session_id);
-                return Err("会话已结束".to_string());
+                return Err(format!("捕获线程失败: {error}"));
             }
-        }
-    };
+        };
 
-    // 从显示器物理区域中心获取 Win32 显示器句柄
-    let center_x = monitor_rect.left.saturating_add((monitor_rect.width / 2) as i32);
-    let center_y = monitor_rect.top.saturating_add((monitor_rect.height / 2) as i32);
-    let hmonitor = get_monitor_handle(center_x, center_y);
-    if hmonitor.0.is_null() {
-        finish_failed_screenshot(app, session_id);
-        return Err("无法取得截图显示器句柄".to_string());
-    }
-    let hmonitor_raw = hmonitor.0 as isize;
+        let captured = match captured_result {
+            Ok(frame) => frame,
+            Err(error) => {
+                finish_failed_screenshot(app, session_id);
+                return Err(error);
+            }
+        };
 
-    // 构建裁切选区（前端已转换为物理像素，参考 MonitorRect 原点偏移）
-    let capture_rect = CaptureRect {
-        left: selection.left,
-        top: selection.top,
-        width: selection.width,
-        height: selection.height,
-    };
-
-    // 后台线程执行 WGC 捕获（需要 COM MTA 初始化）
-    let captured_result = match tokio::task::spawn_blocking(move || -> Result<_, String> {
-        let hmonitor = windows::Win32::Graphics::Gdi::HMONITOR(hmonitor_raw as *mut std::ffi::c_void);
-        let _com_initialization = ensure_com_initialized().map_err(|e| e.to_string())?;
-        capture_monitor(hmonitor, capture_rect).map_err(|e| e.to_string())
-    })
-    .await
-    {
-        Ok(result) => result,
-        Err(error) => {
+        if !is_current_processing_session(session_id) {
             finish_failed_screenshot(app, session_id);
-            return Err(format!("捕获线程失败: {error}"));
+            return Err("截图会话已取消".to_string());
         }
-    };
 
-    let captured = match captured_result {
-        Ok(frame) => frame,
-        Err(error) => {
+        if let Some(error) = validate_screenshot_action(action) {
             finish_failed_screenshot(app, session_id);
             return Err(error);
         }
-    };
 
-    if !is_current_processing_session(session_id) {
-        finish_failed_screenshot(app, session_id);
-        return Err("截图会话已取消".to_string());
-    }
-
-    if let Some(error) = validate_screenshot_action(action) {
-        finish_failed_screenshot(app, session_id);
-        return Err(error);
-    }
-
-    if !is_current_processing_session(session_id) {
-        finish_failed_screenshot(app, session_id);
-        return Err("截图会话已取消".to_string());
-    }
-
-    // PNG 编码与文件写入放在线程池，避免占用异步运行时线程。
-    let captured_width = captured.width;
-    let captured_height = captured.height;
-    let captured_rgba = captured.rgba;
-    let stored = match tokio::task::spawn_blocking(move || {
-        encode_and_store_png(captured_width, captured_height, &captured_rgba)
-    })
-    .await
-    {
-        Ok(Ok(stored)) => stored,
-        Ok(Err(error)) => {
+        if !is_current_processing_session(session_id) {
             finish_failed_screenshot(app, session_id);
-            return Err(format!("存储截图失败: {error}"));
+            return Err("截图会话已取消".to_string());
         }
-        Err(error) => {
-            finish_failed_screenshot(app, session_id);
-            return Err(format!("截图存储线程失败: {error}"));
-        }
-    };
 
-    if !is_current_processing_session(session_id) {
-        let _ = std::fs::remove_file(&stored.absolute_path);
-        finish_failed_screenshot(app, session_id);
-        return Err("截图会话已取消".to_string());
-    }
-    if let Err(error) = register_screenshot_temp_file(session_id, stored.absolute_path.clone()) {
-        let _ = std::fs::remove_file(&stored.absolute_path);
-        finish_failed_screenshot(app, session_id);
-        return Err(error);
-    }
+        // PNG 编码与文件写入放在线程池，避免占用异步运行时线程。
+        let captured_width = captured.width;
+        let captured_height = captured.height;
+        let captured_rgba = captured.rgba;
+        let stored = match tokio::task::spawn_blocking(move || {
+            encode_and_store_png(captured_width, captured_height, &captured_rgba)
+        })
+        .await
+        {
+            Ok(Ok(stored)) => stored,
+            Ok(Err(error)) => {
+                finish_failed_screenshot(app, session_id);
+                return Err(format!("存储截图失败: {error}"));
+            }
+            Err(error) => {
+                finish_failed_screenshot(app, session_id);
+                return Err(format!("截图存储线程失败: {error}"));
+            }
+        };
+
+        if !is_current_processing_session(session_id) {
+            let _ = std::fs::remove_file(&stored.absolute_path);
+            finish_failed_screenshot(app, session_id);
+            return Err("截图会话已取消".to_string());
+        }
+        if !has_reusable_artifact {
+            if let Err(error) = register_screenshot_temp_file(session_id, stored.absolute_path.clone()) {
+                let _ = std::fs::remove_file(&stored.absolute_path);
+                finish_failed_screenshot(app, session_id);
+                return Err(error);
+            }
+            if let Err(error) = register_screenshot_artifact(session_id, &stored, &selection) {
+                let _ = std::fs::remove_file(&stored.absolute_path);
+                finish_failed_screenshot(app, session_id);
+                return Err(error);
+            }
+        }
+        stored
+    };
 
     // 根据动作执行
     let action_result: Result<(), String> = match action {
@@ -1196,21 +1345,34 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
     };
 
     if let Err(error) = action_result {
-        finish_failed_screenshot(app, session_id);
+        // AI 网络/解析失败时保留当前 Processing 会话和 PNG，用户仍可立即改用
+        // 复制、保存或贴图；只有已进入 Committing 的后续写入失败才做终态清理。
+        if action != "ai" || !is_current_processing_session(session_id) {
+            finish_failed_screenshot(app, session_id);
+        }
         return Err(error);
     }
 
     // 正常完成：清理会话并恢复主窗口。动作在最后一刻已切换到 Committing。
-    let plan = {
+    let finish_result = {
         let mut state = STATE.lock();
         let revision = MainWindowVisibilityRevision(state.visibility_revision);
-        match state.sessions.finish_and_retain_file(session_id, revision, &stored.absolute_path) {
-            Ok(plan) => plan,
-            Err(error) => {
-                // 与其它失败路径保持对称：完成失败也走统一失败清理，避免会话残留。
-                finish_failed_screenshot(app, session_id);
-                return Err(format!("完成截图会话失败: {error:?}"));
-            }
+        if action == "copy" {
+            // Image history points at the content-addressed PNG, so copy is the
+            // only action that intentionally retains the session file.
+            state.sessions.finish_and_retain_file(session_id, revision, &stored.absolute_path)
+        } else {
+            // Save, pin, and AI text all create/use another durable result; the
+            // temporary capture must be deleted during cleanup.
+            state.sessions.finish(session_id, revision)
+        }
+    };
+    let plan = match finish_result {
+        Ok(plan) => plan,
+        Err(error) => {
+            // 必须释放 STATE 锁后再进入统一失败清理；否则失败清理再次取锁会死锁。
+            finish_failed_screenshot(app, session_id);
+            return Err(format!("完成截图会话失败: {error:?}"));
         }
     };
     cleanup_plan(plan, app)

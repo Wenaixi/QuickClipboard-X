@@ -118,7 +118,21 @@ mod windows_display_change_monitor {
         lparam: LPARAM,
     ) -> LRESULT {
         match msg {
-            WM_DISPLAYCHANGE | WM_DPICHANGED | WM_SETTINGCHANGE => {
+            WM_DISPLAYCHANGE => {
+                schedule_hidden_snap_refresh();
+                // A screenshot session stores the original monitor rectangle. Once
+                // Windows reports a topology change that rectangle is no longer a
+                // safe capture target, so cancel it on the app's main thread.
+                input_common::run_on_main_thread(|| {
+                    if let Some(app) = input_common::try_get_app_handle() {
+                        if let Err(error) = crate::windows::screenshot_window::cancel_active_screenshot(&app) {
+                            eprintln!("[Screenshot] 显示器变化取消截图失败: {error}");
+                        }
+                    }
+                });
+                LRESULT(0)
+            }
+            WM_DPICHANGED | WM_SETTINGCHANGE => {
                 schedule_hidden_snap_refresh();
                 LRESULT(0)
             }
