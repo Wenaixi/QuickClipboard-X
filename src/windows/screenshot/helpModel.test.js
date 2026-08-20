@@ -39,6 +39,24 @@ test('helpEntries 每条含非空键与翻译文案', () => {
   }
 });
 
+test('helpEntries 返回 keys 数组拷贝防止共享引用污染', () => {
+  const source = readFileSync(new URL('./helpModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function helpEntries');
+  const body = source.slice(start, start + 400);
+  // 源码护栏：keys 必须展开拷贝（[...item.keys]），禁止直接引用常量数组——
+  // 否则调用方 push 修改会污染 HELP_ITEMS 并影响所有后续调用。
+  assert.ok(body.includes('keys: [...item.keys]'), 'keys 必须展开拷贝');
+  // 行为验证：修改一次调用的返回 keys 不得影响下一次调用（独立副本）。
+  const first = helpEntries(t);
+  const quickAction = first.find((entry) => entry.id === 'quickAction');
+  quickAction.keys.push('9');
+  quickAction.keys[0] = 'mutated';
+  const second = helpEntries(t).find((entry) => entry.id === 'quickAction');
+  assert.deepEqual(second.keys, ['1', '2', '3', '4'], '修改一次调用的 keys 不得污染下一次调用');
+  // 两次调用返回的对象也必须是独立实例（深拷贝到 keys 层）。
+  assert.notEqual(helpEntries(t).find((entry) => entry.id === 'cancel'), helpEntries(t).find((entry) => entry.id === 'cancel'), '每次调用必须返回独立条目对象');
+});
+
 test('helpEntries 拒绝非法翻译函数', () => {
   assert.throws(() => helpEntries(null), /翻译函数/);
   assert.throws(() => helpEntries('x'), /翻译函数/);
