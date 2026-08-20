@@ -573,6 +573,9 @@ function App() {
     const gestureId = gestureIdRef.current;
     draftRef.current = null;
     pointerIdRef.current = null;
+    // 与调整/平移完成路径对称清理指针点，避免残留让下一次单击显示旧位置参考线。
+    setMagnifierPoint(null);
+
     rafWriterRef.current?.cancel();
     root.releasePointerCapture?.(event.pointerId);
 

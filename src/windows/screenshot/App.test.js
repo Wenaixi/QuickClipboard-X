@@ -310,6 +310,28 @@ test('选区建立后渲染三分法构图辅助网格', () => {
   assert.ok(source.includes('data-screenshot-thirds="true"'));
 });
 
+test('十字参考线仅在拖拽中渲染且结束时清理指针点', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  // 源码护栏一：参考线渲染条件必须同时要求 magnifierPoint 且处于拖拽/移动/调整中，
+  // 无选区未拖拽时参考线必须隐藏（禁止无条件渲染贯穿线干扰画面）。
+  const guidesRender = '<CrosshairGuides point={magnifierPoint} bounds={bootstrap.bounds} />';
+  const guidesCond = source.indexOf(guidesRender);
+  assert.ok(guidesCond >= 0, '参考线渲染必须存在');
+  const condStart = source.lastIndexOf('{magnifierPoint && (draftRef.current || moveRef.current || resizeRef.current) && (', guidesCond);
+  assert.ok(condStart >= 0, '参考线渲染必须受 magnifierPoint 与交互状态双重约束');
+  assert.ok(condStart < guidesCond, '参考线渲染条件必须在渲染之前');
+  // 源码护栏二：拖拽完成/调整完成/平移完成/取消四条路径都必须清理 magnifierPoint，
+  // 否则参考线残留覆盖截图完成后的画面。
+  const pointerUp = source.indexOf('const handlePointerUp');
+  const upBody = source.slice(pointerUp, pointerUp + 4000);
+  // 源码护栏三：草稿完成分支（单击/拖拽收尾）必须与调整/平移完成对称地清理 magnifierPoint。
+  // 缺失时残留指针点会让下一次单击（pointerMove 未触发）显示旧位置参考线。
+  const draftIdx = upBody.indexOf('const clicked = isClickGesture(draft.start, end);');
+  assert.ok(draftIdx >= 0, '草稿完成分支必须存在');
+  const draftTail = upBody.slice(draftIdx, draftIdx + 700);
+  assert.ok(draftTail.includes('setMagnifierPoint(null)'), '草稿完成必须清理指针点');
+});
+
 test('十字参考线在拖拽时渲染并贯穿画布', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   assert.ok(source.includes('<CrosshairGuides point={magnifierPoint} bounds={bootstrap.bounds} />'));
