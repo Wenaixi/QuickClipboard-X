@@ -53,6 +53,9 @@ pub fn copy_screenshot_text(text: &str) -> Result<i64, ScreenshotActionError> {
     if text.trim().is_empty() {
         return Err(ScreenshotActionError::Clipboard("AI 未识别出文本".to_string()));
     }
+    // AI 文本写入与普通截图复制一样必须暂停监听；guard 覆盖整个写入和
+    // 哈希预置过程，避免监听回调在预置前启动 worker，造成重复历史记录。
+    let _monitor_guard = crate::services::clipboard::pause_clipboard_monitor_for(500);
     let context = clipboard_rs::ClipboardContext::new()
         .map_err(|error| ScreenshotActionError::Clipboard(format!("创建剪贴板上下文失败: {error}")))?;
     crate::services::paste::set_clipboard_text(&context, text)
@@ -142,6 +145,21 @@ mod tests {
         };
         let error = save_screenshot(&stored, Path::new(""));
         assert!(matches!(error, Err(ScreenshotActionError::Save(_))));
+    }
+
+    #[test]
+    fn ai_text_copy_pauses_monitor_before_clipboard_write() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/screenshot/actions.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读取截图动作源码失败");
+        let start = source.find("pub fn copy_screenshot_text").expect("缺少 AI 文本复制动作");
+        let body = &source[start..source.find("pub fn emit_screenshot_history_update").expect("缺少历史事件函数")];
+        let pause = body.find("pause_clipboard_monitor_for(500)").expect("AI 文本复制必须暂停剪贴板监听");
+        let write = body.find("set_clipboard_text(&context, text)").expect("AI 文本复制必须写系统剪贴板");
+        let hash = body.find("set_last_hash_text(text)").expect("AI 文本复制必须预置去重哈希");
+        assert!(pause < write && write < hash, "监听暂停必须覆盖写入，哈希必须在成功写入后预置");
     }
 
     #[test]
