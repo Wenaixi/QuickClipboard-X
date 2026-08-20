@@ -270,6 +270,35 @@ fn destroy_all_webviews(app: &AppHandle) {
     }
 }
 
+// 确保主窗口可用：窗口对象还在但句柄失效时先销毁再重建。
+// 供单实例启动、主窗口销毁后重建等路径复用，避免直接 get_webview_window
+// 拿到一个句柄已失效的窗口对象。
+pub fn ensure_main_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
+    if let Some(window) = app.get_webview_window("main") {
+        #[cfg(windows)]
+        if window.hwnd().is_ok() {
+            return Ok(window);
+        }
+
+        #[cfg(not(windows))]
+        {
+            return Ok(window);
+        }
+
+        let _ = window.destroy();
+    }
+
+    recreate_main_window(app)?;
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "主窗口重建后仍不可用".to_string())?;
+    #[cfg(windows)]
+    if window.hwnd().is_err() {
+        return Err("主窗口重建后句柄仍不可用".to_string());
+    }
+    Ok(window)
+}
+
 // 重建主窗口
 fn recreate_main_window(app: &AppHandle) -> Result<(), String> {
     use tauri::{WebviewUrl, WebviewWindowBuilder};
@@ -282,8 +311,18 @@ fn recreate_main_window(app: &AppHandle) -> Result<(), String> {
     crate::input_monitor::enable_navigation_keys();
     crate::input_monitor::enable_mouse_monitoring();
 
-    if app.get_webview_window("main").is_some() {
-        return Ok(());
+    if let Some(window) = app.get_webview_window("main") {
+        #[cfg(windows)]
+        if window.hwnd().is_ok() {
+            return Ok(());
+        }
+
+        #[cfg(not(windows))]
+        {
+            return Ok(());
+        }
+
+        let _ = window.destroy();
     }
 
     let settings = crate::get_settings();
@@ -328,6 +367,11 @@ fn recreate_main_window(app: &AppHandle) -> Result<(), String> {
 
     crate::input_monitor::update_main_window(window.clone());
 
+    #[cfg(windows)]
+    if let Ok(hwnd) = window.hwnd() {
+        crate::services::system::focus::add_excluded_hwnd(hwnd.0 as isize);
+    }
+
     crate::init_edge_monitor(window.clone());
 
     let _ = crate::windows::main_window::restore_edge_snap_on_startup(&window);
@@ -367,7 +411,7 @@ mod tests {
         );
     }
 
-    // F14: 早返分支 `if app.get_webview_window("main").is_some() { return Ok(()); }`
+    // F14: 早返分支 `if let Some(window) = app.get_webview_window("main")`
     // 必须保留对 enable_navigation_keys() / enable_mouse_monitoring() 的恢复调用。
     // 若两次 enable 写在早返检查之后,主窗口已存在时早返就跳过恢复——
     // 退出低占用模式后导航键/鼠标监控永久失效。与 enter_low_memory_mode 中
@@ -382,7 +426,7 @@ mod tests {
         let after_start = &src[start..];
         // 早返检查必须先于下一次 enable 调用,故先定位早返下标
         let early_return_rel = after_start
-            .find("if app.get_webview_window(\"main\").is_some()")
+            .find("if let Some(window) = app.get_webview_window(\"main\")")
             .expect("缺早返检查");
         let pos_enable_nav_rel = after_start
             .find("enable_navigation_keys()")
@@ -404,6 +448,37 @@ mod tests {
              当前 enable_mouse_monitoring 位于第 {} 字符,早返检查位于第 {} 字符。",
             pos_enable_mouse_rel,
             early_return_rel,
+        );
+    }
+
+    // §10.3 源码护栏：确保主窗口可用必须检查句柄，句柄失效的窗口要销毁重建，
+    // 否则 Windows 上 WebView 句柄失效后窗口对象残留，无法重建。
+    #[test]
+    fn ensure_main_window_destroys_window_without_hwnd_and_rebuilds() {
+        let src = strip_line_comments(&manager_source());
+        let start = src
+            .find("pub fn ensure_main_window")
+            .expect("缺 ensure_main_window");
+        let end = src[start..]
+            .find("\nfn recreate_main_window")
+            .map(|i| start + i)
+            .unwrap_or(src.len());
+        let body = &src[start..end];
+        assert!(
+            body.contains("get_webview_window(\"main\")"),
+            "确保主窗口必须先尝试获取主窗口"
+        );
+        assert!(
+            body.contains("hwnd().is_ok()"),
+            "必须用句柄判断窗口是否可用"
+        );
+        assert!(
+            body.contains("window.destroy()"),
+            "句柄失效的窗口必须销毁才能重建"
+        );
+        assert!(
+            body.contains("recreate_main_window(app)"),
+            "必须重建主窗口"
         );
     }
 }
