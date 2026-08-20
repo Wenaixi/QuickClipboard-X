@@ -720,6 +720,30 @@ test('空闲与模式提示渲染受截图提示开关守卫', () => {
   assert.ok(model.includes('screenshotHintsEnabled: payload.screenshotHintsEnabled !== false'), 'bootstrap 解析必须携带提示开关');
 });
 
+test('completeScreenshot 成功失败均解除占用且成功路径清理交互状态', () => {
+  const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
+  const start = source.indexOf('const completeScreenshot = async');
+  const body = source.slice(start, start + 2200);
+  // 源码护栏一：成功与失败路径都必须解除动作占用（finally 语义），防止成功路径永久卡在处理中。
+  assert.ok(body.includes('finally {'), '必须有 finally 块');
+  assert.ok(body.includes("setBusyAction('');"), 'finally 必须解除动作占用');
+  // 源码护栏二：失败路径设置错误提示后必须立即返回，不再继续销毁窗口。
+  assert.ok(body.includes("setActionError(t('screenshot.actionFailed'"), '失败必须设置错误提示');
+  const errIdx = body.indexOf("setActionError(t('screenshot.actionFailed'");
+  const retIdx = body.indexOf('return;', errIdx);
+  assert.ok(retIdx >= 0 && retIdx < errIdx + 150, '失败后必须立即返回');
+  // 源码护栏三：成功路径必须清理交互状态（否则 close 触发的 blur 误判为取消发出多余请求）。
+  const resetIdx = body.indexOf('resetInteractionState({ draftRef, selectionRef, moveRef, resizeRef');
+  assert.ok(resetIdx >= 0, '成功路径必须清理交互状态');
+  const closeIdx = body.indexOf('getCurrentWindow().close()', resetIdx);
+  assert.ok(closeIdx >= 0, '清理后必须销毁窗口');
+  // 源码护栏四：只有 dispose 生命周期才关闭窗口，quick/auto 复用窗口只清状态。
+  assert.ok(body.includes("if (bootstrap.lifecycleMode === 'dispose') {"), '仅 dispose 生命周期关闭窗口');
+  // 源码护栏五：会话未就绪时设置错误并返回，不发起完成请求。
+  assert.ok(body.includes("if (!bootstrap.sessionId) {"), '会话未就绪必须守卫');
+  assert.ok(body.includes("setActionError(t('screenshot.sessionNotReady'));"), '会话未就绪必须报错');
+});
+
 test('动作工具栏 id 与热键映射一致且处理中互斥显示 processing', () => {
   const source = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
   const actionsStart = source.indexOf('const ACTIONS = [');
