@@ -75,6 +75,24 @@ test('cursorForSelectionHover 源码边缘判定必须先于内部判定', () =>
   assert.equal(cursorForSelectionHover({ x: 699, y: 400 }, selection, bounds), 'ew-resize', '同时满足内部与边缘时边缘必须优先');
 });
 
+test('cursorForSelectionHover 内部判定必须显式传 0 内缩覆盖完整选区矩形', () => {
+  const source = readFileSync(new URL('./cursorModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function cursorForSelectionHover');
+  const body = source.slice(start, start + 600);
+  // 源码护栏：内部判定必须显式传 0 内缩（完整选区矩形），禁止省略参数用默认 inset 4——
+  // 默认内缩会让窄选区（宽度 <= 8px）的内部矩形空转，中心点丢失移动光标。
+  assert.ok(body.includes("if (hitSelectionInterior(point, selection, 0)) return 'move';"), '内部判定必须显式传 0 内缩');
+  assert.ok(!body.includes("hitSelectionInterior(point, selection)) return 'move'"), '禁止省略内缩参数用默认值');
+  // 行为佐证：远离边缘的中心点返回移动光标；窄选区中心点被边缘判定捕获返回调整光标
+  // （边缘优先，不落到内部判定）；选区外紧邻边缘仍返回 null（容差外不误判）。
+  const wide = { left: 100, top: 100, right: 300, bottom: 300 };
+  assert.equal(cursorForSelectionHover({ x: 200, y: 200 }, wide, bounds), 'move', '宽选区中心必须移动光标');
+  const narrow = { left: 100, top: 100, right: 106, bottom: 300 };
+  const narrowHover = cursorForSelectionHover({ x: 103, y: 200 }, narrow, bounds);
+  assert.ok(narrowHover !== 'move', '窄选区中心点必须在边缘带内（不落内部判定）');
+  assert.equal(cursorForSelectionHover({ x: 91, y: 200 }, wide, bounds), null, '选区外容差外必须返回 null');
+});
+
 test('cursorForSelectionHover 拒绝无效坐标或边界', () => {
   const selection = { left: 400, top: 300, right: 700, bottom: 500, width: 300, height: 200 };
   assert.throws(() => cursorForSelectionHover({ x: Number.NaN, y: 1 }, selection, bounds), /点 x 必须是有限数字/);
