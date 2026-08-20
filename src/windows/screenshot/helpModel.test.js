@@ -56,6 +56,24 @@ test('isHelpShortcut 拒绝普通键与带修饰键的 F1', () => {
   assert.equal(isHelpShortcut(null), false);
 });
 
+test('isHelpShortcut 源码整体拒绝修饰键且白名单仅 F1 与问号', () => {
+  const source = readFileSync(new URL('./helpModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function isHelpShortcut');
+  const body = source.slice(start, start + 400);
+  // 源码护栏一：必须整体拒绝 ctrl/meta/alt 修饰键（组合键不得误开帮助面板）。
+  assert.ok(body.includes('if (event.ctrlKey || event.metaKey || event.altKey) return false;'), '必须整体拒绝修饰键');
+  // 源码护栏二：白名单必须只包含 F1 与问号键。
+  assert.ok(body.includes("return event.key === 'F1' || event.key === '?';"), '白名单必须仅 F1 与问号');
+  // 源码护栏三：非法输入必须返回 false 而非抛错。
+  assert.ok(body.includes("if (!event || typeof event !== 'object') return false;"), '非法输入必须安全返回 false');
+  // 行为属性：组合键全部拒绝、白名单命中、普通键拒绝。
+  assert.equal(isHelpShortcut({ key: 'F1', ctrlKey: true, metaKey: false, altKey: false }), false);
+  assert.equal(isHelpShortcut({ key: 'F1', ctrlKey: false, metaKey: true, altKey: false }), false);
+  assert.equal(isHelpShortcut({ key: '?', ctrlKey: false, metaKey: false, altKey: true }), false);
+  assert.equal(isHelpShortcut({ key: 'F1', ctrlKey: false, metaKey: false, altKey: false }), true);
+  assert.equal(isHelpShortcut({ key: '/', ctrlKey: false, metaKey: false, altKey: false }), false);
+});
+
 test('帮助条目 labelKey 必须在双语言包中存在', () => {
   const source = readFileSync(new URL('./helpModel.js', import.meta.url), 'utf8');
   const labelKeys = [...source.matchAll(/labelKey: '([^']+)'/g)].map((match) => match[1]);
