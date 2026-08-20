@@ -85,6 +85,20 @@ test('草稿转换复用选区模型且重置完整清空全部交互状态', ()
   assert.deepEqual(calls, [['selection', null], ['selecting', false], ['moving', false], ['resizing', false]]);
 });
 
+test('selectionFromDraft 非法草稿坐标先于边界校验抛错且引用未定义也拒绝', () => {
+  // 坐标校验必须先行：start/end 缺失或含非有限坐标时抛 TypeError（不是 RangeError），而不是静默走默认路径。
+  assert.throws(() => selectionFromDraft({}, {}, { width: 1920, height: 1080 }), TypeError);
+  assert.throws(() => selectionFromDraft({ start: { x: 0, y: 0 }, end: { x: Number.NaN, y: 1 } }, {}, { width: 1920, height: 1080 }), TypeError);
+  // 引用未定义（start 缺失）同样拒绝。
+  assert.throws(() => selectionFromDraft({ start: null, end: { x: 1, y: 1 } }, {}, { width: 1920, height: 1080 }), TypeError);
+  // 边界非法抛 RangeError（与坐标校验的错误类型必须不同，防止两类校验混淆）。
+  assert.throws(() => selectionFromDraft({ start: { x: 0, y: 0 }, end: { x: 1, y: 1 } }, {}, { width: 0, height: 1 }), RangeError);
+  // 合法输入不抛错：Shift 方形与普通路径都能正常生成。
+  const draft = { start: { x: 100, y: 100 }, end: { x: 200, y: 250 } };
+  assert.equal(selectionFromDraft(draft, { shiftKey: true }, { width: 1920, height: 1080 }).width, 150);
+  assert.equal(selectionFromDraft(draft, { shiftKey: false }, { width: 1920, height: 1080 }).width, 100);
+});
+
 test('resetInteractionState 拒绝无效输入', () => {
   assert.throws(() => resetInteractionState(null), /状态容器/);
 });
