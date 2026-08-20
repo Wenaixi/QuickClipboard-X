@@ -117,7 +117,9 @@ pub fn invalidate_navigation_hotkeys() {
 }
 
 fn register_navigation_hotkeys_from_settings() -> Result<(), String> {
-    unregister_navigation_hotkeys();
+    if !unregister_navigation_hotkeys() {
+        return Err("原有导航快捷键尚未完全注销，已取消重新注册".to_string());
+    }
 
     let app = get_app()?;
     let configs = navigation_shortcut_configs();
@@ -199,33 +201,62 @@ fn register_navigation_hotkeys_from_settings() -> Result<(), String> {
 
 // 安全摘除导航热键：使用插件 is_registered 探测后再注销，避免对未注册的
 // 裸键 UnregisterHotKey 空跑后内部表与 Windows 层脱节，残留"幽灵热键"。
-fn unregister_navigation_hotkeys() {
+// 返回是否完全注销：unregister 失败或 parse 失败的热键保留回注册表，
+// 供下次同步重试；避免本地表已 take 掉、Windows 层却还残留热键导致无法再摘。
+fn unregister_navigation_hotkeys() -> bool {
     let app = match get_app() {
         Ok(app) => app,
-        Err(_) => return,
+        Err(_) => return false,
     };
 
     let registrations = std::mem::take(&mut *NAVIGATION_SHORTCUTS.lock());
+    let mut remaining_registrations = Vec::new();
     for registration in registrations {
-        if let Ok(shortcut) = parse_shortcut(&registration.shortcut) {
-            if app.global_shortcut().is_registered(shortcut) {
-                super::global::safe_unregister(&app, shortcut);
-                println!(
-                    "已注销导航快捷键 [{}]: {}",
-                    registration.id, registration.shortcut
+        match parse_shortcut(&registration.shortcut) {
+            Ok(shortcut) => {
+                if !app.global_shortcut().is_registered(shortcut) {
+                    // 探测到未注册：视为已摘除，清除状态表即可。
+                    super::global::clear_shortcut_status(&registration.id);
+                    continue;
+                }
+                match app.global_shortcut().unregister(shortcut) {
+                    Ok(_) => {
+                        println!(
+                            "已注销导航快捷键 [{}]: {}",
+                            registration.id, registration.shortcut
+                        );
+                        // F2: 注销成功即清除该 id 的 SHORTCUT_STATUS——
+                        // 导航 id 不在 REGISTERED_SHORTCUTS,global 的
+                        // unregister_all 清理覆盖不到;不清除则用户改回合法键后
+                        // 设置页持续显示红错直到全局 reload/重启。
+                        super::global::clear_shortcut_status(&registration.id);
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "注销导航快捷键 [{}] {} 失败，将在下次同步时重试: {}",
+                            registration.id, registration.shortcut, error
+                        );
+                        remaining_registrations.push(registration);
+                    }
+                }
+            }
+            Err(error) => {
+                eprintln!(
+                    "解析已注册的导航快捷键 [{}] {} 失败，将在下次同步时重试: {}",
+                    registration.id, registration.shortcut, error
                 );
+                remaining_registrations.push(registration);
             }
         }
-        // F2: 注销即清除该 id 的 SHORTCUT_STATUS——导航 id 不在
-        // REGISTERED_SHORTCUTS,global 的 unregister_all 清理覆盖不到;
-        // 不清除则用户改回合法键后设置页持续显示红错直到全局 reload/重启。
-        super::global::clear_shortcut_status(&registration.id);
     }
 
-    NAVIGATION_HOTKEYS_REGISTERED.store(false, Ordering::SeqCst);
+    let fully_unregistered = remaining_registrations.is_empty();
+    *NAVIGATION_SHORTCUTS.lock() = remaining_registrations;
+    NAVIGATION_HOTKEYS_REGISTERED.store(!fully_unregistered, Ordering::SeqCst);
     NAVIGATION_REPEAT_SEQUENCE.fetch_add(1, Ordering::SeqCst);
     NAVIGATION_REPEAT_TOKENS.lock().clear();
     NAVIGATION_THROTTLE_STATE.lock().clear();
+    fully_unregistered
 }
 
 fn navigation_shortcut_configs() -> Vec<NavigationShortcutConfig> {
@@ -641,5 +672,41 @@ mod tests {
             !released_block.contains("emit_navigation_action"),
             "Released 分支禁止发射 paste 动作"
         );
+    }
+
+    // §10.3 源码护栏：注销失败的热键必须保留回注册表重试，否则 unregister
+    // 失败时 Windows 层残留幽灵热键，但本地表已 take 掉，下次无法重试。
+    #[test]
+    fn navigation_unregister_retains_failed_registrations() {
+        let src = strip_line_comments(&navigation_source());
+        let b = fn_body(&src, "unregister_navigation_hotkeys");
+        assert!(
+            b.contains("remaining_registrations"),
+            "注销失败的热键必须保留回注册表，下次同步重试"
+        );
+        assert!(
+            b.contains("fully_unregistered"),
+            "必须计算是否完全注销以返回结果"
+        );
+        assert!(
+            b.contains("-> bool"),
+            "unregister_navigation_hotkeys 必须返回是否完全注销"
+        );
+    }
+
+    // §10.3 源码护栏：注册新键前必须确认旧键已彻底注销，否则残留幽灵热键
+    // 与新键叠加，Windows 层 Enter/Tab/Esc 被吞。
+    #[test]
+    fn navigation_register_cancels_when_old_hotkeys_still_registered() {
+        let src = strip_line_comments(&navigation_source());
+        let b = fn_body(&src, "register_navigation_hotkeys_from_settings");
+        let check_pos = b
+            .find("!unregister_navigation_hotkeys()")
+            .expect("注册新键前必须检查旧键是否注销彻底");
+        let err_pos = b[check_pos..]
+            .find("return Err(")
+            .map(|i| check_pos + i)
+            .expect("注销不彻底时必须取消重新注册并返回错误");
+        assert!(check_pos < err_pos, "检查必须早于返回错误");
     }
 }
