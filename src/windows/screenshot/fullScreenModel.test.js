@@ -43,6 +43,26 @@ test('fullScreenSelection 源码 ceil 完整覆盖且 left/top 恒 0 宽高由�
   assert.equal(exact.bottom, 1080);
 });
 
+test('fullScreenSelection 源码宽高必须由 right 和 bottom 推导而非直接取 bounds', () => {
+  const source = readFileSync(new URL('./fullScreenModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function fullScreenSelection');
+  const body = source.slice(start, start + 600);
+  // 源码护栏：width 必须等于 right，height 必须等于 bottom（由 ceil 取整结果推导，
+  // 若直接取 bounds.width/height 则小数边界时取整后的覆盖宽度与分裂不匹配，全屏覆盖语义失效）。
+  assert.ok(body.includes('width: right'), 'width 必须由 right 推导');
+  assert.ok(body.includes('height: bottom'), 'height 必须由 bottom 推导');
+  // 行为属性：小数边界下 width 必须等于 ceil 后的 right（而非 bounds.width 的 floor）。
+  const bounds = { width: 100.6, height: 50.4 };
+  const selection = fullScreenSelection(bounds);
+  assert.equal(selection.width, selection.right, 'width 必须等于 right');
+  assert.equal(selection.height, selection.bottom, 'height 必须等于 bottom');
+  assert.equal(selection.width, 101, '小数边界 width 必须向上取整');
+  assert.equal(selection.height, 51, '小数边界 height 必须向上取整');
+  // 整数边界下 width 精确等于 bounds.width。
+  const exact = fullScreenSelection({ width: 1920, height: 1080 });
+  assert.equal(exact.width, 1920, '整数边界 width 必须精确等于 bounds.width');
+  assert.equal(exact.height, 1080, '整数边界 height 必须精确等于 bounds.height');
+});
 test('fullScreenSelection 拒绝无效边界', () => {
   assert.throws(() => fullScreenSelection(null), /边界/);
   assert.throws(() => fullScreenSelection({ width: 0, height: 1 }), /正数/);
