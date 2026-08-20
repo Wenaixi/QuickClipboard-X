@@ -85,25 +85,28 @@ pub fn toggle_main_window_visibility(app: &AppHandle) {
         return;
     }
 
-    if let Some(window) = super::get_main_window(app) {
-        if crate::services::system::is_front_app_globally_disabled_from_settings() {
-            return;
-        }
-
-        let state = super::state::get_window_state();
-        let native_visible = window.is_visible().ok();
-
-        let should_show = should_show_window(&state, native_visible);
-
-        if should_show {
-            if state.is_snapped && !state.is_hidden && native_visible == Some(false) {
-                let _ = super::show_snapped_window(&window);
-            } else {
-                show_main_window(&window);
+    match crate::services::low_memory::ensure_main_window(app) {
+        Ok(window) => {
+            if crate::services::system::is_front_app_globally_disabled_from_settings() {
+                return;
             }
-        } else {
-            hide_main_window(&window);
+
+            let state = super::state::get_window_state();
+            let native_visible = window.is_visible().ok();
+
+            let should_show = should_show_window(&state, native_visible);
+
+            if should_show {
+                if state.is_snapped && !state.is_hidden && native_visible == Some(false) {
+                    let _ = super::show_snapped_window(&window);
+                } else {
+                    show_main_window(&window);
+                }
+            } else {
+                hide_main_window(&window);
+            }
         }
+        Err(error) => eprintln!("确保主窗口可用失败: {error}"),
     }
 }
 
@@ -317,6 +320,22 @@ mod tests {
             is_hidden,
             ..MainWindowState::default()
         }
+    }
+
+    // §10.3 源码护栏：toggle 走 ensure_main_window 而不是裸 get_main_window，
+    // 否则句柄失效的主窗口不会被重建。
+    #[test]
+    fn toggle_visibility_uses_ensure_main_window() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/windows/main_window/visibility.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 visibility.rs 源文件");
+        let body = strip_line_comments(fn_body(&source, "toggle_main_window_visibility"));
+        assert!(
+            body.contains("ensure_main_window"),
+            "toggle_main_window_visibility 必须走 ensure_main_window 保证窗口可用"
+        );
     }
 
     #[test]
