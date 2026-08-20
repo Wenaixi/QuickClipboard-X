@@ -895,6 +895,25 @@ test('createRafWriter 源码代数递增且 cancel 复位调度标志并丢弃�
   assert.deepEqual(writes, ['two', 'four'], 'cancel 后新调度必须生效');
 });
 
+
+test('hitSelectionInterior 源码 inset 必须向内收缩（left/top + inset、right/bottom - inset）', () => {
+  const source = readFileSync(new URL('./selectionModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function hitSelectionInterior');
+  const body = source.slice(start, start + 600);
+  // 源码护栏：inset 必须向内收缩能动（left/top + inset 提高上界、right/bottom - inset 降低下界），
+  // 若符号反了（left/top - inset 或 right/bottom + inset）内部区域会扩展到选区外，“内部”合约破坏。
+  assert.ok(body.includes('const left = selection.left + inset;'), '左边界必须 + inset');
+  assert.ok(body.includes('const right = selection.right - inset;'), '右边界必须 - inset');
+  assert.ok(body.includes('const top = selection.top + inset;'), '上边界必须 + inset');
+  assert.ok(body.includes('const bottom = selection.bottom - inset;'), '下边界必须 - inset');
+  // 行为属性：inset 为 0 时内部区域等于选区（但仍以包含上下界为内部，不包含边缘）；
+  // inset 越大内部区域越小；inset 超过选区一半时无内部可命中。
+  const sel = { left: 100, top: 80, right: 300, bottom: 240 };
+  assert.equal(hitSelectionInterior({ x: 104, y: 84 }, sel), true, 'inset=4 时距边缘 4px 必须命中内部');
+  assert.equal(hitSelectionInterior({ x: 103, y: 83 }, sel), false, 'inset=4 时距边缘 3px 不得命中内部');
+  assert.equal(hitSelectionInterior({ x: 200, y: 160 }, sel, 0), true, 'inset=0 时中心必须命中');
+  assert.equal(hitSelectionInterior({ x: 200, y: 160 }, sel, 100), false, 'inset=100 超过选区一半时不得命中');
+});
 test('createRafWriter 在一帧内只提交最后一次几何', () => {
   const callbacks = [];
   const writes = [];
