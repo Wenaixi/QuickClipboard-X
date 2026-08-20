@@ -708,6 +708,37 @@ test('全部选区变换函数必须夹紧到显示器边界内', () => {
   }
 });
 
+test('createRafWriter 源码代数递增且 cancel 复位调度标志并丢弃过期帧', () => {
+  const source = readFileSync(new URL('./selectionModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function createRafWriter');
+  const body = source.slice(start, start + 900);
+  // 源码护栏一：cancel 必须递增代数（generation += 1），过期帧通过代数比较丢弃。
+  assert.ok(body.includes('generation += 1;'), 'cancel 必须递增代数');
+  // 源码护栏二：帧回调必须比较代数，不匹配时丢弃且不触碰共享 pendingValue。
+  assert.ok(body.includes('if (scheduledGeneration !== generation) {'), '帧回调必须比较代数');
+  // 源码护栏三：cancel 必须复位调度标志，否则 cancel 后同帧内再次 schedule 会静默丢值。
+  assert.ok(body.includes('scheduled = false;'), 'cancel 必须复位调度标志');
+  // 行为属性：代数递增后旧帧丢弃、cancel 后同帧再调度不丢值。
+  const callbacks = [];
+  const writes = [];
+  const writer = createRafWriter(
+    (value) => writes.push(value),
+    (callback) => { callbacks.push(callback); return callbacks.length; }
+  );
+  writer.schedule('one');
+  writer.schedule('two');
+  assert.equal(callbacks.length, 1, '同帧多次调度必须只排一帧');
+  callbacks.shift()();
+  assert.deepEqual(writes, ['two'], '一帧内必须只提交最后一次');
+  writer.schedule('three');
+  writer.cancel();
+  writer.schedule('four');
+  callbacks.shift()();
+  assert.deepEqual(writes, ['two'], 'cancel 前旧帧必须丢弃');
+  callbacks.shift()();
+  assert.deepEqual(writes, ['two', 'four'], 'cancel 后新调度必须生效');
+});
+
 test('createRafWriter 在一帧内只提交最后一次几何', () => {
   const callbacks = [];
   const writes = [];
