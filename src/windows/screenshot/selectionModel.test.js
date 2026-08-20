@@ -177,6 +177,33 @@ test('squareSelection 位移为零时保持最小 1px 正方形', () => {
   });
 });
 
+test('squareSelection 源码 side 必须同时受双向可达范围约束且贴边塌缩不越界', () => {
+  const source = readFileSync(new URL('./selectionModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function squareSelection');
+  const body = source.slice(start, start + 1100);
+  // 源码护栏一：side 必须同时受 rawSide / rightExtent / downExtent 三重约束
+  //（漏掉 rightExtent 会让起点贴左/右缘的正向拖拽产出越界选区，漏掉 downExtent 同理）。
+  assert.ok(body.includes('const side = Math.max(1, Math.min(rawSide, rightExtent, downExtent));'), 'side 必须同时受双向可达范围约束');
+  // 源码护栏二：右可达范围必须按拖拽方向取右侧剩余或起点自身坐标（反向时起点坐标即可达范围）。
+  assert.ok(body.includes('const rightExtent = start.x <= end.x ? bounds.width - start.x : start.x;'), '右可达范围必须按方向取剩余或起点');
+  assert.ok(body.includes('const downExtent = start.y <= end.y ? bounds.height - start.y : start.y;'), '下可达范围必须按方向取剩余或起点');
+  // 源码护栏三：反向拖拽的 left/top 必须整体夹紧（起点贴边时塌缩到 0 而不是越界到负值）。
+  assert.ok(body.includes('left = Math.min(Math.max(left, 0), Math.max(0, bounds.width - side));'), '反向拖拽 left 必须整体夹紧');
+  // 行为验证一：起点贴左上角反向拖拽塌缩为 1x1 且不越界（已有测试的行为锚点，这里绑定源码关系）。
+  const corner = squareSelection({ x: 0, y: 0 }, { x: -100, y: -100 }, bounds);
+  assert.equal(corner.width, 1, '贴左上角反向拖拽必须塌缩为 1px');
+  assert.equal(corner.height, 1, '贴左上角反向拖拽必须塌缩为 1px');
+  assert.ok(corner.left >= 0 && corner.top >= 0, '贴边反向拖拽不得越界到负坐标');
+  // 行为验证二：起点贴近右缘正向拖拽，side 受 rightExtent 约束贴右缘扩展（漏掉约束会越界到 1390）。
+  const rightEdge = squareSelection({ x: 795, y: 5 }, { x: 900, y: 900 }, bounds);
+  assert.equal(rightEdge.right, 800, '右缘正向拖拽必须贴右缘');
+  assert.equal(rightEdge.width, 5, '右缘可达范围 5px 必须成为边长');
+  // 行为验证三：起点贴近下缘正向拖拽，side 受 downExtent 约束贴下缘扩展。
+  const bottomEdge = squareSelection({ x: 5, y: 595 }, { x: 900, y: 900 }, bounds);
+  assert.equal(bottomEdge.bottom, 600, '下缘正向拖拽必须贴下缘');
+  assert.equal(bottomEdge.height, 5, '下缘可达范围 5px 必须成为边长');
+});
+
 test('squareSelection 拒绝无效输入', () => {
   assert.throws(() => squareSelection({ x: Number.NaN, y: 1 }, { x: 2, y: 2 }, bounds), /起点 x 必须是有限数字/);
   assert.throws(() => squareSelection({ x: 1, y: 1 }, { x: 2, y: 2 }, { width: 0, height: 10 }), /边界尺寸必须为正数/);
