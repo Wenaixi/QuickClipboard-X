@@ -140,6 +140,32 @@ test('magnetSelection 默认容差 6px 且边界行为一致', () => {
   assert.equal(at11.left, 11, '自定义容差 10 外不得吸附');
 });
 
+test('magnetSelection 最佳吸附候选单一来源且 edge 值域校验完整', () => {
+  const source = readFileSync(new URL('./magnetModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function magnetSelection');
+  const body = source.slice(start);
+  // 源码护栏一：平移与调整两条路径都必须经 bestSnapDelta 取最小位移（不允许内联 if 拼差异）。
+  const snapCalls = (body.match(/bestSnapDelta\(/g) || []).length;
+  assert.ok(snapCalls >= 4, '必须存在至少 4 处 bestSnapDelta 调用（平移 dx/dy + 调整 e/w/n/s）');
+  // 源码护栏二：调整分支必须按 edge.includes 分轴处理（拖 e 只吸附右缘/中心，不得动 left）。
+  assert.ok(body.includes("if (edge.includes('e')) {"), 'e 边调整必须独立分支');
+  assert.ok(body.includes("if (edge.includes('w')) {"), 'w 边调整必须独立分支');
+  // 源码护栏三：edge 值域必须校验为 n/s/e/w 组合（非法值直接拒绝）。
+  assert.ok(body.includes("!/^[nsew]+$/.test(edge)"), 'edge 必须限制为 n/s/e/w 组合');
+  // 行为属性：bestSnapDelta 取最小位移（左缘 1px 与右缘 5px 并存时吸附左缘）；
+  // edge 限制合法组合，拒绝非法组合。
+  const nearBoth = magnetSelection({ left: 1, top: 100, right: 1915, bottom: 400 }, bounds);
+  assert.equal(nearBoth.left, 0, '双候选并存时必须取最小位移（左缘 1px）');
+  assert.equal(nearBoth.right, 1914, '平移时右缘必须随左缘同步移动保持尺寸');
+  assert.equal(nearBoth.width, 1914, '吸附不得改变尺寸');
+  assert.throws(() => magnetSelection({ left: 0, top: 0, right: 1, bottom: 1 }, bounds, { edge: 'x' }), /edge 必须是空串或 n\/s\/e\/w 组合/);
+  assert.throws(() => magnetSelection({ left: 0, top: 0, right: 1, bottom: 1 }, bounds, { edge: 'nsewx' }), /edge 必须是空串或 n\/s\/e\/w 组合/);
+  // 合法组合可用：se 双轴调整同时吸附。
+  const se = magnetSelection({ left: 100, top: 100, right: 1915, bottom: 1075 }, bounds, { edge: 'se' });
+  assert.equal(se.right, 1920, 'se 调整右缘必须吸附');
+  assert.equal(se.bottom, 1080, 'se 调整下缘必须吸附');
+});
+
 test('magnetSelection 拒绝无效输入', () => {
   assert.throws(() => magnetSelection({ left: 0, top: 0, right: 1, bottom: 1 }, { width: 0, height: 10 }), /边界尺寸必须为正数/);
   assert.throws(() => magnetSelection({ left: 0, top: 0, right: 1, bottom: 1 }, bounds, { tolerance: -1 }), /吸附容差不能为负数/);
