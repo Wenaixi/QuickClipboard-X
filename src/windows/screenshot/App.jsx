@@ -658,7 +658,9 @@ function App() {
         return;
       }
       const hotkeyAction = actionForHotkey(event.key);
-      if (hotkeyAction) { event.preventDefault(); void completeScreenshot(hotkeyAction); return; }
+      // 数字键完成只响应无修饰键：Ctrl/Alt/Meta 组合是系统或应用级快捷键（如 Ctrl+1 切换标签页），
+      // 不得触发截图完成动作销毁窗口；Ctrl+C/S/P 由 completeShortcutForEvent 单独处理。
+      if (hotkeyAction && !event.ctrlKey && !event.metaKey && !event.altKey) { event.preventDefault(); void completeScreenshot(hotkeyAction); return; }
       const completeAction = completeShortcutForEvent(event);
       if (completeAction) { event.preventDefault(); void completeScreenshot(completeAction); }
     };
