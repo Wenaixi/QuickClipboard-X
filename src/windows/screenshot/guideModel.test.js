@@ -51,6 +51,24 @@ test('guideLines 任意合法坐标下十字线整体在画布内可见', () => 
   }
 });
 
+test('guideLines 源码十字线线宽恒为 1px 且绘制元素完全包含于画布', () => {
+  const source = readFileSync(new URL('./guideModel.js', import.meta.url), 'utf8');
+  // 源码护栏一：垂直线宽度必须恒为 1（十字参考线是细线，若改宽会变成粗条遮挡选区）。
+  assert.ok(source.includes('vertical: { left: x, top: 0, width: 1, height: bounds.height }'), '垂直线宽必须恒为 1px');
+  // 源码护栏二：水平线高度必须恒为 1（同理）。
+  assert.ok(source.includes('horizontal: { left: 0, top: y, width: bounds.width, height: 1 }'), '水平线高必须恒为 1px');
+  // 行为属性：任意合法/越界输入下，两条线宽高恒为 1px，且整个绘制元素
+  // （含右缘/下缘）完全包含在画布内：left+width <= bounds.width 且 top+height <= bounds.height。
+  const bounds = { width: 1920, height: 1080 };
+  for (const point of [{ x: 0, y: 0 }, { x: 960, y: 540 }, { x: 1919, y: 1079 }, { x: 1920, y: 1080 }, { x: -50, y: 5000 }, { x: 100, y: 800 }]) {
+    const lines = guideLines(point, bounds);
+    assert.equal(lines.vertical.width, 1, '垂直线宽必须恒为 1px');
+    assert.equal(lines.horizontal.height, 1, '水平线高必须恒为 1px');
+    assert.ok(lines.vertical.left + lines.vertical.width <= bounds.width, '垂直线右缘必须完全在画布内');
+    assert.ok(lines.horizontal.top + lines.horizontal.height <= bounds.height, '水平线下缘必须完全在画布内');
+  }
+});
+
 test('guideLines 拒绝无效坐标或边界', () => {
   assert.throws(() => guideLines({ x: Number.NaN, y: 1 }, bounds), /点 x 必须是有限数字/);
   assert.throws(() => guideLines({ x: 1, y: 1 }, { width: 0, height: 10 }), /边界尺寸必须为正数/);
