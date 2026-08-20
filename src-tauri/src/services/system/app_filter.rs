@@ -256,6 +256,7 @@ mod windows_impl {
 
     // 通过进程ID获取进程名称
     fn get_process_name_by_id(process_id: u32) -> (String, String) {
+        use windows::Win32::Foundation::CloseHandle;
         use windows::Win32::System::Threading::{
             OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
         };
@@ -265,20 +266,32 @@ mod windows_impl {
             if let Ok(handle) = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, process_id) {
                 let mut buffer = [0u16; 260];
                 let len = GetModuleFileNameExW(Some(handle), None, &mut buffer);
-                if len > 0 {
+                let result = if len > 0 {
                     let path = String::from_utf16_lossy(&buffer[..len as usize]);
                     let name = path.split('\\').last().unwrap_or(&path).to_string();
-                    return (path, name);
+                    Some((path, name))
+                } else {
+                    None
+                };
+                let _ = CloseHandle(handle);
+                if let Some(result) = result {
+                    return result;
                 }
             }
 
             if let Ok(handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id) {
                 let mut buffer = [0u16; 260];
                 let len = GetModuleFileNameExW(Some(handle), None, &mut buffer);
-                if len > 0 {
+                let result = if len > 0 {
                     let path = String::from_utf16_lossy(&buffer[..len as usize]);
                     let name = path.split('\\').last().unwrap_or(&path).to_string();
-                    return (path, name);
+                    Some((path, name))
+                } else {
+                    None
+                };
+                let _ = CloseHandle(handle);
+                if let Some(result) = result {
+                    return result;
                 }
             }
 
@@ -289,7 +302,7 @@ mod windows_impl {
     // 获取 UWP 应用真实名称
     fn get_uwp_app_name(hwnd: windows::Win32::Foundation::HWND) -> Option<String> {
         use windows::Win32::UI::WindowsAndMessaging::{EnumChildWindows, GetWindowThreadProcessId};
-        use windows::Win32::Foundation::LPARAM;
+        use windows::Win32::Foundation::{CloseHandle, LPARAM};
         use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
         use windows::Win32::System::ProcessStatus::GetModuleFileNameExW;
         use windows::core::BOOL;
@@ -314,13 +327,21 @@ mod windows_impl {
                     if let Ok(handle) = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, child_pid) {
                         let mut buffer = [0u16; 260];
                         let len = GetModuleFileNameExW(Some(handle), None, &mut buffer);
-                        if len > 0 {
+                        let result = if len > 0 {
                             let path = String::from_utf16_lossy(&buffer[..len as usize]);
                             let name = path.split('\\').last().unwrap_or(&path).to_string();
                             if !name.is_empty() && name.to_lowercase() != "applicationframehost.exe" {
-                                ctx.result = Some(name);
-                                return BOOL(0);
+                                Some(name)
+                            } else {
+                                None
                             }
+                        } else {
+                            None
+                        };
+                        let _ = CloseHandle(handle);
+                        if let Some(name) = result {
+                            ctx.result = Some(name);
+                            return BOOL(0);
                         }
                     }
                 }
@@ -334,7 +355,7 @@ mod windows_impl {
 
     // 获取所有可见窗口信息
     pub fn get_all_windows_info() -> Vec<AppInfo> {
-        use windows::Win32::Foundation::{HWND, LPARAM};
+        use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM};
         use windows::Win32::UI::WindowsAndMessaging::{
             EnumWindows, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
         };
@@ -360,9 +381,15 @@ mod windows_impl {
                             if let Ok(handle) = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid) {
                                 let mut buf = [0u16; 260];
                                 let len = GetModuleFileNameExW(Some(handle), None, &mut buf);
-                                if len > 0 {
+                                let result = if len > 0 {
                                     let path = String::from_utf16_lossy(&buf[..len as usize]);
                                     let name = path.split('\\').last().unwrap_or(&path).to_string();
+                                    Some((name, path))
+                                } else {
+                                    None
+                                };
+                                let _ = CloseHandle(handle);
+                                if let Some((name, path)) = result {
                                     windows.push(AppInfo {
                                         name: title,
                                         process: name,
@@ -599,6 +626,30 @@ mod tests {
         assert!(
             !start_body.contains("GetMessageW(&mut msg, Some(hwnd), 0, 0)"),
             "GetMessageW 不得用窗口句柄，窗口消息循环收不到 WM_QUIT"
+        );
+    }
+
+    // §10.3 源码护栏：Windows 实现里每个 OpenProcess 都必须配对 CloseHandle，
+    // 否则进程句柄泄漏。统计测试模块之前的实现源码，避免测试自身字面量污染。
+    #[test]
+    fn every_open_process_is_followed_by_close_handle() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/system/app_filter.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 app_filter.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let impl_src = &stripped[..stripped.find("#[cfg(test)]").unwrap_or(stripped.len())];
+        let open_count = impl_src.matches("OpenProcess(").count();
+        let close_count = impl_src.matches("CloseHandle(").count();
+        assert!(open_count > 0, "护栏必须能发现 OpenProcess 调用，否则失去意义");
+        assert!(
+            close_count >= open_count,
+            "每个 OpenProcess 调用都必须配对 CloseHandle，当前 open={open_count} close={close_count}"
         );
     }
 }
