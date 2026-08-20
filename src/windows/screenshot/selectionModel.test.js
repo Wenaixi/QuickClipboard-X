@@ -652,6 +652,30 @@ test('resizeSelection 拒绝非法边缘或无效输入', () => {
   assert.throws(() => resizeSelection({ left: 0, top: 0, right: 1, bottom: 1 }, 'e', { x: 1, y: Number.NaN }, bounds), /点 y 必须是有限数字/);
 });
 
+test('resizeSelection 普通路径不翻转且被拖边按对边夹紧到最小 1px 源码护栏', () => {
+  const source = readFileSync(new URL('./selectionModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function resizeSelection');
+  const body = source.slice(start, start + 4000);
+  // 源码护栏一：被拖动的边必须按对边夹紧到最小 1px（right 不小于 left+1，left 不大于 right-1），
+  // 拖动越过对边时选区收窄到 1px 而非翻转（ShareX 公开行为：调整边缘不翻转选区）。
+  assert.ok(body.includes("if (edge.includes('e')) right = clamp(right, left + 1, bounds.width);"), 'e 边必须夹紧到 left+1 且不翻转');
+  assert.ok(body.includes("if (edge.includes('w')) left = clamp(left, 0, Math.max(0, right - 1));"), 'w 边必须夹紧到 right-1 且不翻转');
+  assert.ok(body.includes("if (edge.includes('s')) bottom = clamp(bottom, top + 1, bounds.height);"), 's 边必须夹紧到 top+1 且不翻转');
+  assert.ok(body.includes("if (edge.includes('n')) top = clamp(top, 0, Math.max(0, bottom - 1));"), 'n 边必须夹紧到 bottom-1 且不翻转');
+  // 行为佐证：拖 e 边越过 w 边（x=50 < left=100）时 right 收窄到 left+1=101 且 left 不动；
+  // 拖 w 边越过 e 边（x=350 > right=300）时 left 收窄到 right-1=299 且 right 不动。
+  const base = { left: 100, top: 80, right: 300, bottom: 240, width: 200, height: 160 };
+  const overE = resizeSelection(base, 'e', { x: 50, y: 160 }, bounds);
+  assert.deepEqual(selectionValues(overE), { left: 100, top: 80, right: 101, bottom: 240, width: 1, height: 160 });
+  const overW = resizeSelection(base, 'w', { x: 350, y: 160 }, bounds);
+  assert.deepEqual(selectionValues(overW), { left: 299, top: 80, right: 300, bottom: 240, width: 1, height: 160 });
+  // 拖出显示器边界时按边界夹紧：e 边拖到 900 夹到 800，w 边拖到 -50 夹到 0。
+  const outE = resizeSelection(base, 'e', { x: 900, y: 160 }, bounds);
+  assert.equal(outE.right, 800, 'e 边拖出边界必须夹到显示器右缘');
+  const outW = resizeSelection(base, 'w', { x: -50, y: 160 }, bounds);
+  assert.equal(outW.left, 0, 'w 边拖出边界必须夹到显示器左缘');
+});
+
 test('nudgeSelection 按 1px 移动选区并保持尺寸不变', () => {
   const moved = nudgeSelection(
     { left: 100, top: 80, right: 300, bottom: 240, width: 200, height: 160 },
