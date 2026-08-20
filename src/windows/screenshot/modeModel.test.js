@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { modeForState, modeHint } from './modeModel.js';
 
 test('modeForState 调整大小优先于移动优先于框选', () => {
@@ -11,6 +12,27 @@ test('modeForState 调整大小优先于移动优先于框选', () => {
 
 test('modeForState 无任何交互时返回 null', () => {
   assert.equal(modeForState({ selecting: false, moving: false, resizing: false }), null);
+  assert.equal(modeForState({}), null);
+});
+
+test('modeForState 源码优先级顺序锁定为调整大于移动大于框选且缺省字段按 falsy', () => {
+  const source = readFileSync(new URL('./modeModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function modeForState');
+  const body = source.slice(start, start + 400);
+  // 源码护栏一：三个分支必须依次出现（resizing 先于 moving 先于 selecting），
+  // 顺序颠倒会改变 UI 提示优先级——调整中又移动时必须显示调整提示。
+  const resizeIdx = body.indexOf("if (state.resizing) return 'resize';");
+  const moveIdx = body.indexOf("if (state.moving) return 'move';");
+  const selectIdx = body.indexOf("if (state.selecting) return 'select';");
+  assert.ok(resizeIdx !== -1 && moveIdx !== -1 && selectIdx !== -1, '三个分支必须全部存在');
+  assert.ok(resizeIdx < moveIdx && moveIdx < selectIdx, '分支顺序必须为 resizing → moving → selecting');
+  // 源码护栏二：优先级判定必须直接用字段真值（缺省 undefined 按 falsy 返回下一级）。
+  assert.ok(body.includes("if (state.resizing) return 'resize';"), 'resizing 必须直接判定');
+  assert.ok(!body.includes('state.resizing === true'), '禁止严格等于 true（undefined 应按 falsy 处理）');
+  // 行为佐证：调整+框选并存显示调整；移动+框选并存显示移动；仅框选显示框选。
+  assert.equal(modeForState({ resizing: true, moving: true, selecting: true }), 'resize');
+  assert.equal(modeForState({ moving: true, selecting: true }), 'move');
+  assert.equal(modeForState({ selecting: true }), 'select');
   assert.equal(modeForState({}), null);
 });
 
