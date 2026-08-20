@@ -136,6 +136,10 @@ fn show_normal_window(window: &WebviewWindow) {
 
     let _ = window.show();
 
+    // 穿透态(WS_EX_TRANSPARENT)可能残留,普通显示必须恢复鼠标交互,
+    // 否则唤出后整窗穿透,鼠标无法操作。
+    let _ = window.set_ignore_cursor_events(false);
+
     if !was_visible {
         use tauri::Emitter;
         let _ = window.emit("window-show-animation", ());
@@ -281,6 +285,30 @@ fn hide_normal_window(window: &WebviewWindow) {
 mod tests {
     use super::super::state::{MainWindowState, WindowState};
     use super::should_show_window;
+    use crate::services::system::hotkey::test_utils::{fn_body, strip_line_comments};
+
+    // 切片2:show_normal_window 普通显示路径必须清掉 WS_EX_TRANSPARENT,
+    // 否则从贴边态/穿透态切到普通窗口时残留整窗穿透,鼠标无法操作。
+    // show 之后再恢复交互(show 抢焦点会清 WS_EX_TRANSPARENT,顺序必须 show 在前)。
+    #[test]
+    fn show_normal_window_restores_interactive_after_show() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/windows/main_window/visibility.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 visibility.rs 源文件");
+        let body = strip_line_comments(fn_body(&source, "show_normal_window"));
+        let show = body
+            .find("window.show()")
+            .expect("show_normal_window 必须包含 window.show()");
+        let interactive = body
+            .find("set_ignore_cursor_events(false)")
+            .expect("show_normal_window 必须恢复鼠标交互(清 WS_EX_TRANSPARENT)");
+        assert!(
+            show < interactive,
+            "show_normal_window 必须先 show 再恢复交互"
+        );
+    }
 
     fn state(window_state: WindowState, is_snapped: bool, is_hidden: bool) -> MainWindowState {
         MainWindowState {

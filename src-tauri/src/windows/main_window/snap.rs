@@ -53,27 +53,6 @@ fn schedule_post_animation_refresh(
     Ok(())
 }
 
-// 动画结束后写回 ignore=false(打开交互)。
-// show_snapped_window 在动画开启时必须保持穿透,等动画把窗口滑到屏上后再解锁,
-// 避免动画中段在屏外/中间坐标短暂可点。
-// 共享在飞动画版本,任何同步形态决策(cancel_pending_animation)会 bump 使本任务自杀。
-fn schedule_post_animation_set_interactive(
-    window: WebviewWindow,
-    app: tauri::AppHandle,
-    delay_ms: u64,
-) {
-    let version = share_animation_version();
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(delay_ms));
-        if ANIMATION_VERSION.load(Ordering::SeqCst) != version {
-            return;
-        }
-        let _ = app.run_on_main_thread(move || {
-            let _ = window.set_ignore_cursor_events(false);
-        });
-    });
-}
-
 #[derive(Clone, Debug)]
 struct MonitorEdgeContext {
     id: String,
@@ -633,7 +612,7 @@ pub fn hide_snapped_window(window: &WebviewWindow) -> Result<(), String> {
     // 动画分支:先滑到屏外坐标,延迟 200ms 再 refresh,避免半屏状态被穿透导致触发条闪一下
     // 动画条件由 should_play_hide_animation 决定,hover 关闭不跳过滑出动画
     if should_play_hide_animation(&settings) {
-        animate_window_position(window, x, y, resolved.x, resolved.y, 200)?;
+        animate_window_position(window, x, y, resolved.x, resolved.y, 200, None)?;
         schedule_post_animation_refresh(window.clone(), window.app_handle().clone(), 200)?;
     } else {
         refresh_hidden_snapped_window(window)?;
@@ -822,15 +801,25 @@ pub fn show_snapped_window(window: &WebviewWindow) -> Result<(), String> {
         // 动画分支:animate 自带 set_position 逐步到位,期间必须保持穿透,
         // 否则动画中段在屏外/中间坐标可点,被 raw_input 命中再次 hide。
         // 显式 set_ignore_cursor_events(true) 在 show 之后立即写,防止 show 抢焦点
-        // 后窗口在屏外坐标被点击截获;动画结束后由 schedule_post_animation_set_interactive 写回 false。
+        // 后窗口在屏外坐标被点击截获;动画完成回调在末帧同一主线程投递内写回 false,
+        // 与 set_position(end) 严格同序,消除独立 200ms 定时器与动画帧之间的竞态窗口。
         if !window.is_visible().unwrap_or(false) {
             let _ = window.show();
         }
         let _ = window.set_ignore_cursor_events(true);
         let _ = window.emit("edge-snap-show", ());
         let _ = crate::commands::window::emit_main_window_refresh_needed_event(&window.app_handle());
-        animate_window_position(window, x, y, resolved.x, resolved.y, 200)?;
-        schedule_post_animation_set_interactive(window.clone(), window.app_handle().clone(), 200);
+        animate_window_position(
+            window,
+            x,
+            y,
+            resolved.x,
+            resolved.y,
+            200,
+            Some(Box::new(|w| {
+                let _ = w.set_ignore_cursor_events(false);
+            })),
+        )?;
     } else {
         // 非动画分支:先 set_position 落到屏上,再打开交互,最后 show。
         // 全程同步无中段,不会暴露屏外可点状态。
@@ -881,6 +870,7 @@ fn animate_window_position(
     end_x: i32,
     end_y: i32,
     duration_ms: u64,
+    on_complete: Option<Box<dyn FnOnce(WebviewWindow) + Send>>,
 ) -> Result<(), String> {
     let version = begin_animation();
     let window_clone = window.clone();
@@ -894,6 +884,9 @@ fn animate_window_position(
             let window_for_task = window_clone.clone();
             let _ = app.run_on_main_thread(move || {
                 let _ = window_for_task.set_position(tauri::PhysicalPosition::new(end_x, end_y));
+                if let Some(cb) = on_complete {
+                    cb(window_for_task);
+                }
             });
             return;
         }
@@ -923,9 +916,14 @@ fn animate_window_position(
         }
         
         if ANIMATION_VERSION.load(Ordering::SeqCst) == version {
+            // 完成帧:set_position(end) 与恢复交互回调在同一主线程投递内同步执行,
+            // 消除独立定时器与动画帧之间的竞态窗口(残留穿透 / 动画中段可点)。
             let window_for_task = window_clone.clone();
             let _ = app.run_on_main_thread(move || {
                 let _ = window_for_task.set_position(tauri::PhysicalPosition::new(end_x, end_y));
+                if let Some(cb) = on_complete {
+                    cb(window_for_task);
+                }
             });
         }
     });
@@ -943,6 +941,9 @@ pub fn restore_from_snap(window: &WebviewWindow) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
 
+    // 贴边隐藏期间可能残留 WS_EX_TRANSPARENT(整窗穿透),恢复自由窗口时必须清掉,
+    // 否则鼠标无法操作窗口(唤出后只能快捷键)。
+    let _ = window.set_ignore_cursor_events(false);
     clear_snap();
     Ok(())
 }
@@ -1040,6 +1041,24 @@ mod tests {
             .expect("restore_from_snap 必须清理贴边状态");
         assert!(cancel < position, "取消动画必须位于 set_position 之前");
         assert!(cancel < clear, "取消动画必须位于 clear_snap 之前");
+    }
+
+
+    // 切片2:restore_from_snap 从贴边态恢复为自由窗口时必须清掉 WS_EX_TRANSPARENT,
+    // 否则窗口残留整窗穿透,鼠标无法操作。
+    #[test]
+    fn restore_from_snap_restores_interactive_after_position() {
+        let body = strip_line_comments(fn_body(snap_source(), "restore_from_snap"));
+        let position = body
+            .find("set_position")
+            .expect("restore_from_snap 必须包含位置恢复");
+        let interactive = body
+            .find("set_ignore_cursor_events(false)")
+            .expect("restore_from_snap 必须恢复鼠标交互(清 WS_EX_TRANSPARENT)");
+        assert!(
+            position < interactive,
+            "restore_from_snap 必须先落位再恢复交互"
+        );
     }
 
     // edge_monitor 50ms 轮询 + snap_ratio 双 None 时每 tick 都走
@@ -1323,6 +1342,68 @@ mod tests {
              当前 show={}, ignore=true={}",
             pos_show,
             pos_ignore_true
+        );
+    }
+
+    // 切片1:show 动画分支不得再依赖独立 200ms 定时器(schedule_post_animation_set_interactive)
+    // 恢复交互——定时器线程与动画线程双 200ms 竞态,动画末帧与 ignore=false 可能乱序,
+    // 留下整窗穿透(唤出后鼠标点不动)或动画中段可点(被 raw_input 命中再次 hide)。
+    // 恢复交互必须由动画完成回调在同一主线程投递内同步执行。
+    #[test]
+    fn show_animation_restores_interactive_without_separate_timer() {
+        let source = snap_source();
+        let show_start = source
+            .find("pub fn show_snapped_window")
+            .expect("找不到 show_snapped_window 定义");
+        let after = &source[show_start..];
+        let show_end_rel = after
+            .find("\npub fn ")
+            .or_else(|| after.find("\nfn "))
+            .unwrap_or(after.len());
+        let show_body = &after[..show_end_rel];
+
+        let anim_branch_start = show_body
+            .find("clipboard_animation_enabled")
+            .expect("show 路径缺少动画分支判断");
+        let anim_branch = &show_body[anim_branch_start..];
+        let anim_branch_end = anim_branch
+            .find("} else {")
+            .unwrap_or_else(|| anim_branch.find("\n    }").unwrap_or(anim_branch.len()));
+        let anim_branch_body = strip_line_comments(&anim_branch[..anim_branch_end]);
+
+        assert!(
+            !anim_branch_body.contains("schedule_post_animation_set_interactive"),
+            "show 动画分支不得再使用独立 200ms 定时器恢复交互,\
+             必须由动画完成回调在同一主线程投递内同步恢复(否则残留整窗穿透)"
+        );
+    }
+
+    // 动画完成回调必须在动画线程末帧的同一主线程投递内同步调用 on_complete,
+    // 与 set_position(end) 严格同序,消除独立定时器与动画帧之间的竞态窗口。
+    #[test]
+    fn animate_window_position_completion_restores_interactive_in_same_task() {
+        let body = strip_line_comments(fn_body(snap_source(), "animate_window_position"));
+        assert!(
+            body.contains("cb(window_for_task)"),
+            "animate_window_position 完成帧必须调用 on_complete 回调(cb(window_for_task)),\
+             恢复交互必须由动画完成回调在同一主线程投递内同步执行"
+        );
+        // 恢复交互的具体动作(set_ignore_cursor_events(false))必须由 show 路径的
+        // on_complete 闭包承担,而不是独立的 schedule_post_animation_set_interactive 定时器。
+        let source = snap_source();
+        let show_start = source
+            .find("pub fn show_snapped_window")
+            .expect("找不到 show_snapped_window 定义");
+        let after = &source[show_start..];
+        let show_end_rel = after
+            .find("\npub fn ")
+            .or_else(|| after.find("\nfn "))
+            .unwrap_or(after.len());
+        let show_body = strip_line_comments(&after[..show_end_rel]);
+        assert!(
+            show_body.contains("w.set_ignore_cursor_events(false)"),
+            "show 动画分支的 on_complete 回调必须包含 set_ignore_cursor_events(false),\
+             否则动画结束后窗口残留 WS_EX_TRANSPARENT 整窗穿透"
         );
     }
 
