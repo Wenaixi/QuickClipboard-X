@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { magnifierGeometry, sampleMagnifierGrid } from './magnifierModel.js';
 
 const bounds = { width: 1920, height: 1080 };
@@ -46,6 +47,26 @@ test('magnifierGeometry 任意光标位置面板不越界且采样源完整', ()
     assert.ok(geometry.source.left >= 0 && geometry.source.left + geometry.source.cols <= bounds.width, '采样源横向越界');
     assert.ok(geometry.source.top >= 0 && geometry.source.top + geometry.source.rows <= bounds.height, '采样源纵向越界');
   }
+});
+
+test('magnifierGeometry 源码默认常量与采样源按面板尺寸推导', () => {
+  const source = readFileSync(new URL('./magnifierModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function magnifierGeometry');
+  const body = source.slice(start, start + 1200);
+  // 源码护栏一：默认倍率必须为 6（与 App 放大镜默认缩放一致）。
+  assert.ok(body.includes('const scale = options.scale ?? 6;'), '默认倍率必须为 6');
+  // 源码护栏二：面板默认尺寸必须为 168x168（正方形放大镜面板）。
+  assert.ok(body.includes('const panelWidth = options.panelWidth ?? 168;'), '默认面板宽度必须为 168');
+  assert.ok(body.includes('const panelHeight = options.panelHeight ?? 168;'), '默认面板高度必须为 168');
+  // 源码护栏三：采样源格数必须由面板尺寸除以倍率推导（面板每格对应一个源像素）。
+  assert.ok(body.includes('const cols = Math.max(1, Math.floor(panelWidth / scale));'), '采样列数必须由面板宽除以倍率推导');
+  assert.ok(body.includes('const rows = Math.max(1, Math.floor(panelHeight / scale));'), '采样行数必须由面板高除以倍率推导');
+  // 行为属性：默认面板 168x168 倍率 6 时采样源为 28x28 格。
+  const geometry = magnifierGeometry({ x: 400, y: 300 }, bounds);
+  assert.equal(geometry.scale, 6);
+  assert.deepEqual(geometry.panel, { left: 416, top: 316, width: 168, height: 168 });
+  assert.deepEqual(geometry.source.cols, 28, '168/6 必须得到 28 列');
+  assert.deepEqual(geometry.source.rows, 28, '168/6 必须得到 28 行');
 });
 
 test('magnifierGeometry 拒绝无效点、边界或负面板尺寸', () => {
