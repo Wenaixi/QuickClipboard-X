@@ -2,6 +2,7 @@
 
 use tauri::Manager;
 use std::fs;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 mod commands;
 pub mod maintenance;
@@ -35,7 +36,9 @@ pub use windows::plugins::context_menu::is_context_menu_visible;
 pub use services::low_memory::{is_low_memory_mode, enter_low_memory_mode, exit_low_memory_mode};
 pub use startup_diagnostics::install_panic_hook as install_startup_panic_hook;
 
-const STARTUP_UPDATE_CHECK_DELAY_MS: u64 = 800;
+const STARTUP_HOTKEY_RETRY_DELAY_MS: u64 = 1_500;
+static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
+static MAIN_WINDOW_RECOVERY_PENDING: AtomicBool = AtomicBool::new(false);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -122,13 +125,25 @@ pub fn run() {
     
     startup_diagnostics::set_startup_stage("构建 Tauri 应用");
     let builder = tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             if services::low_memory::is_low_memory_mode() {
                 let _ = services::low_memory::toggle_panel();
                 return;
             }
-            if let Some(window) = app.get_webview_window("main") {
-                show_main_window(&window);
+            // 开机自启/管理员重启属后台拉起，不得把主窗口显示出来。
+            let is_background_launch = argv.iter().any(|argument| {
+                matches!(
+                    argument.as_str(),
+                    services::system::startup::AUTO_START_ARG
+                        | services::system::startup::ADMIN_RELAUNCH_ARG
+                )
+            });
+            if is_background_launch {
+                return;
+            }
+            match services::low_memory::ensure_main_window(app) {
+                Ok(window) => show_main_window(&window),
+                Err(error) => eprintln!("单实例请求显示主窗口失败: {error}"),
             }
         }))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -502,6 +517,21 @@ pub fn run() {
                 tauri::RunEvent::Ready => {
                     startup_diagnostics::mark_ready();
                     windows::transfer_shelf::schedule_startup_restore_persisted_shelves(app.clone());
+                    // 启动后延时重试注册快捷键：启动早期插件可能尚未就绪，
+                    // 等 1.5 秒后若未在退出流程中且热键开关开启再重试一次。
+                    tauri::async_runtime::spawn(async {
+                        tokio::time::sleep(std::time::Duration::from_millis(
+                            STARTUP_HOTKEY_RETRY_DELAY_MS,
+                        ))
+                        .await;
+                        if !SHUTDOWN_REQUESTED.load(Ordering::SeqCst)
+                            && crate::get_settings().hotkeys_enabled
+                        {
+                            if let Err(error) = crate::hotkey::reload_from_settings() {
+                                eprintln!("启动后重试注册快捷键失败: {error}");
+                            }
+                        }
+                    });
                 }
                 tauri::RunEvent::ExitRequested { api, .. } => {
                     if services::low_memory::is_low_memory_mode() 
@@ -509,16 +539,79 @@ pub fn run() {
                     {
                         api.prevent_exit();
                     } else {
+                        SHUTDOWN_REQUESTED.store(true, Ordering::SeqCst);
                         services::webdav_sync::crypto::clear_cached_keys();
                     }
                 }
                 tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } => {
-                    if label == "main" && !services::low_memory::is_low_memory_mode() {
+                    if label == "main"
+                        && !services::low_memory::is_low_memory_mode()
+                        && !SHUTDOWN_REQUESTED.load(Ordering::SeqCst)
+                        && !MAIN_WINDOW_RECOVERY_PENDING.swap(true, Ordering::SeqCst)
+                    {
                         services::webdav_sync::crypto::clear_cached_keys();
-                        app.exit(0);
+                        let app_handle = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                            if !SHUTDOWN_REQUESTED.load(Ordering::SeqCst) {
+                                if let Err(error) = services::low_memory::ensure_main_window(&app_handle) {
+                                    eprintln!("主窗口销毁后重建失败: {error}");
+                                }
+                            }
+                            MAIN_WINDOW_RECOVERY_PENDING.store(false, Ordering::SeqCst);
+                        });
                     }
                 }
                 _ => {}
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::services::system::hotkey::test_utils::strip_line_comments;
+
+    fn lib_source() -> String {
+        std::fs::read_to_string(format!(
+            "{}/src/lib.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 lib.rs")
+    }
+
+    // §10.3 源码护栏：单实例回调必须区分后台启动（自启/管理员重启），
+    // 后台启动不得显示主窗口，否则开机自启时会把主窗口弹出来。
+    #[test]
+    fn single_instance_distinguishes_background_launch() {
+        let src = strip_line_comments(&lib_source());
+        let start = src
+            .find("tauri_plugin_single_instance::init")
+            .expect("缺单实例初始化");
+        let end = src[start..]
+            .find(".plugin(tauri_plugin_global_shortcut")
+            .map(|i| start + i)
+            .unwrap_or(src.len());
+        let body = &src[start..end];
+        assert!(body.contains("is_background_launch"), "单实例回调必须区分后台启动");
+        assert!(body.contains("if is_background_launch {"), "后台启动时必须提前返回不得显示主窗口");
+        assert!(body.contains("AUTO_START_ARG"), "必须识别自启参数");
+        assert!(body.contains("ADMIN_RELAUNCH_ARG"), "必须识别管理员重启参数");
+        assert!(body.contains("ensure_main_window"), "正常启动必须用 ensure_main_window 保证窗口可用");
+    }
+
+    // §10.3 源码护栏：主窗口销毁后必须重建，而非直接 app.exit(0) 退出应用。
+    #[test]
+    fn main_window_destroyed_recreates_instead_of_exit() {
+        let src = strip_line_comments(&lib_source());
+        let start = src
+            .find("WindowEvent::Destroyed")
+            .expect("缺窗口销毁事件分支");
+        let end = src[start..]
+            .find("_ => {}")
+            .map(|i| start + i)
+            .unwrap_or(src.len());
+        let body = &src[start..end];
+        assert!(body.contains("ensure_main_window"), "主窗口销毁后必须重建");
+        assert!(body.contains("MAIN_WINDOW_RECOVERY_PENDING"), "重建必须用恢复守卫防重入");
+    }
 }
