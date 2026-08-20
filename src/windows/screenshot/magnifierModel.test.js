@@ -95,6 +95,29 @@ test('sampleMagnifierGrid 按几何从快照 RGBA 采样网格', () => {
   assert.deepEqual(grid[0][0].length, 4);
 });
 
+test('sampleMagnifierGrid 越界几何兜底夹紧到快照末像素且源码显式 min 防护', () => {
+  const source = readFileSync(new URL('./magnifierModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function sampleMagnifierGrid');
+  const body = source.slice(start, start + 700);
+  // 源码护栏：采样坐标必须显式夹紧到快照边界（min(snapshotWidth-1) / min(snapshotHeight-1)），
+  // 即使 geometry.source 未夹紧（外部构造的越界几何）也不得越界读 Uint8Array。
+  assert.ok(body.includes('const x = Math.min(snapshotWidth - 1, Math.floor(area.left) + col);'), 'x 必须夹紧到快照宽-1');
+  assert.ok(body.includes('const y = Math.min(snapshotHeight - 1, Math.floor(area.top) + row);'), 'y 必须夹紧到快照高-1');
+  // 行为验证：构造越界几何（left/top 远超快照），采样必须返回末像素而非越界崩溃。
+  const snapshotWidth = 4;
+  const snapshotHeight = 4;
+  const data = new Uint8Array(snapshotWidth * snapshotHeight * 4);
+  for (let i = 0; i < data.length; i += 1) {
+    data[i] = 7;
+  }
+  const lastIndex = (3 * snapshotWidth + 3) * 4;
+  data[lastIndex] = 99;
+  const outOfBounds = { source: { left: 100, top: 100, cols: 2, rows: 2 } };
+  const grid = sampleMagnifierGrid(data, outOfBounds, snapshotWidth, snapshotHeight);
+  assert.equal(grid.length, 2, '必须按 rows 返回行数');
+  assert.deepEqual(grid[1][1], [99, 7, 7, 7], '越界采样必须夹紧到末像素 (3,3) 的 RGBA');
+});
+
 test('sampleMagnifierGrid 数据不足时拒绝并保持空输入兼容', () => {
   assert.throws(() => sampleMagnifierGrid(new Uint8Array(3), { source: { left: 0, top: 0, cols: 1, rows: 1 } }, 10, 10), /背景快照数据长度不足/);
   assert.deepEqual(sampleMagnifierGrid(null, null, 10, 10), []);
