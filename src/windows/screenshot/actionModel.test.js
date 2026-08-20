@@ -43,8 +43,20 @@ test('数字动作映射单一来源且正反向往返对称', () => {
   assert.equal(hotkeyForAction(actionForHotkey('9')), '', '未知键不得产生动作');
 });
 
-test('hotkeyForAction 未知动作返回空字符串', () => {
-  assert.equal(hotkeyForAction('unknown'), '');
+
+test('hotkeyForAction 源码必须用 || \'\' 回退保障返回类型为字符串', () => {
+  const source = readFileSync(new URL('./actionModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function hotkeyForAction');
+  const body = source.slice(start, start + 400);
+  // 源码护栏：find 不到时返回 undefined，|| \'\' 确保返回类型始终为字符串而非 undefined。
+  assert.ok(body.includes("|| ''"), '必须用 || \'\' 回退 undefined');
+  assert.ok(!body.includes('|| null'), '不能用 || null 回退（类型不匹配）');
+  // 行为验证：未知动作返回空字符串而非 null 或 undefined。
+  assert.equal(hotkeyForAction('unknown'), '', '未知动作必须返回空字符串');
+  assert.equal(hotkeyForAction(''), '', '空动作名必须返回空字符串');
+  // 未知的默认值不能是 undefined 或 null。
+  assert.notEqual(hotkeyForAction('unknown'), undefined, '不能返回 undefined');
+  assert.notEqual(hotkeyForAction('unknown'), null, '不能返回 null');
 });
 
 test('动作映射全集封闭且每个动作恰好一个热键与防御式容错', () => {
