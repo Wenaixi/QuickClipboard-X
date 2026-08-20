@@ -142,6 +142,56 @@ test('selectionFromDraft 缺省 shiftKey 字段按 falsy 走普通路径且重�
   ], '幂等重置必须重复复位');
 });
 
+test('resetInteractionState 源码引用清空先行且 setter 复位顺序固定', () => {
+  const source = readFileSync(new URL('./draftModel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function resetInteractionState');
+  const body = source.slice(start, start + 400);
+  // 源码护栏一：所有引用清空必须先于所有 setter 复位（先清引用再复位状态，
+  // 否则 setter 复位瞬间 React 读到尚未清空的引用产生中间态）。
+  const lastRef = Math.max(
+    body.indexOf('state.draftRef.current = null;'),
+    body.indexOf('state.selectionRef.current = null;'),
+    body.indexOf('state.moveRef.current = null;'),
+    body.indexOf('state.resizeRef.current = null;')
+  );
+  const firstSetter = Math.min(
+    body.indexOf('state.setSelection?.(null)'),
+    body.indexOf('state.setSelecting?.(false)'),
+    body.indexOf('state.setMoving?.(false)'),
+    body.indexOf('state.setResizing?.(false)')
+  );
+  assert.ok(lastRef >= 0 && firstSetter >= 0 && lastRef < firstSetter, '引用清空必须全部先于 setter 复位');
+  // 源码护栏二：setter 复位顺序必须固定为 selection → selecting → moving → resizing
+  //（与引用清空顺序一致，保证状态机复位可预测）。
+  const setSelectionIdx = body.indexOf('state.setSelection?.(null)');
+  const setSelectingIdx = body.indexOf('state.setSelecting?.(false)');
+  const setMovingIdx = body.indexOf('state.setMoving?.(false)');
+  const setResizingIdx = body.indexOf('state.setResizing?.(false)');
+  assert.ok(
+    setSelectionIdx >= 0 && setSelectionIdx < setSelectingIdx
+    && setSelectingIdx < setMovingIdx && setMovingIdx < setResizingIdx,
+    'setter 复位顺序必须 selection → selecting → moving → resizing'
+  );
+  // 行为佐证：重置后四引用全空且 setter 按固定顺序收到复位值。
+  const calls = [];
+  const state = {
+    draftRef: { current: {} },
+    selectionRef: { current: {} },
+    moveRef: { current: {} },
+    resizeRef: { current: {} },
+    setSelection: (v) => calls.push(['selection', v]),
+    setSelecting: (v) => calls.push(['selecting', v]),
+    setMoving: (v) => calls.push(['moving', v]),
+    setResizing: (v) => calls.push(['resizing', v]),
+  };
+  resetInteractionState(state);
+  assert.equal(state.draftRef.current, null);
+  assert.equal(state.selectionRef.current, null);
+  assert.equal(state.moveRef.current, null);
+  assert.equal(state.resizeRef.current, null);
+  assert.deepEqual(calls, [['selection', null], ['selecting', false], ['moving', false], ['resizing', false]]);
+});
+
 test('resetInteractionState 拒绝无效输入', () => {
   assert.throws(() => resetInteractionState(null), /状态容器/);
 });
