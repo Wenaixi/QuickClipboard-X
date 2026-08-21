@@ -22,6 +22,7 @@ const CONFIGURATION_TEST_IMAGE_URL: &str = "data:image/png;base64,iVBORw0KGgoAAA
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AiVisionError {
     NotConfigured,
+    InsecureEndpoint,
     InvalidImage(String),
     Encode(String),
     UnsupportedVisionModel,
@@ -38,6 +39,7 @@ impl std::fmt::Display for AiVisionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotConfigured => write!(f, "AI 视觉识别尚未完成配置"),
+            Self::InsecureEndpoint => write!(f, "AI 端点必须使用 HTTPS，请使用 https:// 地址"),
             Self::InvalidImage(error) => write!(f, "AI 图片无效: {error}"),
             Self::Encode(error) => write!(f, "AI 图片编码失败: {error}"),
             Self::UnsupportedVisionModel => write!(f, "当前 AI 模型不支持图片识别"),
@@ -112,8 +114,11 @@ struct ImageUrl<'a> {
 
 fn normalized_base_url(base_url: &str) -> Result<String, AiVisionError> {
     let trimmed = base_url.trim().trim_end_matches('/');
-    if trimmed.is_empty() || !trimmed.starts_with("https://") {
+    if trimmed.is_empty() {
         return Err(AiVisionError::NotConfigured);
+    }
+    if !trimmed.starts_with("https://") {
+        return Err(AiVisionError::InsecureEndpoint);
     }
     Ok(if trimmed.ends_with("/v1") {
         trimmed.to_string()
@@ -379,7 +384,7 @@ mod tests {
     fn base_url_is_normalized_to_openai_compatible_v1_endpoint() {
         assert_eq!(normalized_base_url("https://example.com"), Ok("https://example.com/v1".to_string()));
         assert_eq!(normalized_base_url("https://example.com/v1/"), Ok("https://example.com/v1".to_string()));
-        assert!(matches!(normalized_base_url("http://example.com"), Err(AiVisionError::NotConfigured)));
+        assert!(matches!(normalized_base_url("http://example.com"), Err(AiVisionError::InsecureEndpoint)));
     }
 
     #[test]
@@ -403,7 +408,7 @@ mod tests {
         );
         assert_eq!(
             validate_configuration("test-key", "http://api.example.com", "gpt-4o"),
-            Err(AiVisionError::NotConfigured)
+            Err(AiVisionError::InsecureEndpoint)
         );
         assert_eq!(
             validate_configuration("test-key", "https://api.example.com", "Qwen/Qwen2-7B-Instruct"),

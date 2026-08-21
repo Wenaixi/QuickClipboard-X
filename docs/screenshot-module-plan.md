@@ -46,6 +46,8 @@
 `Idle -> Selecting -> Processing -> Idle`
 
 每个会话保存随机 `sessionId`、目标显示器物理矩形、主窗口启动前可见状态、覆盖窗状态和临时文件所有权。
+> 实现说明：`SessionPhase` 枚举仅包含 `Selecting/Processing/Committing` 三个显式阶段；`Option<SessionPhase>::None` 即代表 `Idle`。这是 Rust 中表达“无活动会话”的惯用方式，与状态机语义等价。
+
 
 不变量：
 
@@ -189,3 +191,21 @@ Windows 也提供离线原生 OCR：`Windows.Media.Ocr::OcrEngine` 可从用户�
 7. 实机验证 100%/125%/150% DPI、主副屏负坐标、4K、显示器移除、四种动作、快捷键冲突、AI 成功、认证失败、限流及非视觉模型。
 
 每个独立模块完成后立即提交。每次提交前运行受影响测试；阶段完成时运行截图前端测试、`npm run build`、`cargo test --lib --no-default-features` 和相关 Rust 格式检查。
+
+### 截图相关设置字段
+
+| 字段 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| screenshot_enabled | bool | true | 是否启用截图功能 |
+| screenshot_shortcut | String | "Ctrl+Shift+A" | 截图快捷键 |
+| screenshot_quick_save_shortcut | String | "" | 快速保存快捷键 |
+| screenshot_quick_pin_shortcut | String | "" | 快速贴图快捷键 |
+| screenshot_quick_ocr_shortcut | String | "" | 快速 OCR 快捷键 |
+| screenshot_element_detection | String | "all" | 元素检测模式（all/none/...） |
+| screenshot_magnifier_enabled | bool | true | 是否显示放大镜 |
+| screenshot_color_include_format | bool | true | 取色时是否同时显示多种格式 |
+| screenshot_window_lifecycle_mode | String | "quick" | 窗口生命周期模式（quick/dispose/auto） |
+| screenshot_auto_dispose_minutes | u32 | 10 | 智能模式下自动释放等待时间（分钟） |
+| screenshot_ai_enabled | bool | false | 是否启用 AI 视觉识别 |
+| screenshot_ai_prompt | String | "" | AI 识别提示词 |
+| screenshot_ai_cloud_confirmed | bool | false | 云端 AI 隐私确认状态（运行时状态，UI 不暴露） |
