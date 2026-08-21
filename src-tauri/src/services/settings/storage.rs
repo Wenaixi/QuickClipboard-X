@@ -96,7 +96,9 @@ fn preserve_incompatible_settings(path: &Path, content: &str) -> Result<(), Stri
             }
         }
     }
-    Err("不兼容设置备份数量已达上限，已拒绝覆盖原设置".to_string())
+    // 槽位耗尽：覆盖最旧备份（index 0），绝不因历史垃圾备份累积而拒绝启动
+    fs::write(incompatible_settings_backup_path_at(path, 0), content)
+        .map_err(|error| format!("保留不兼容设置备份失败，已拒绝覆盖原设置: {error}"))
 }
 
 pub struct SettingsStorage;
@@ -683,6 +685,31 @@ mod tests {
 
         assert!(loaded.is_err(), "无法安全备份时必须拒绝恢复写回");
         assert_eq!(fs::read_to_string(&target).unwrap(), original);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn backup_slot_exhaustion_overwrites_oldest_instead_of_refusing_launch() {
+        let dir = test_dir();
+        let target = dir.join("settings.json");
+        // 填满 1000 个备份槽位，内容各不相同，模拟历史垃圾备份累积到上限。
+        for index in 0..=999 {
+            fs::write(
+                incompatible_settings_backup_path_at(&target, index),
+                format!("stale-backup-{index}"),
+            )
+            .unwrap();
+        }
+
+        // 槽位耗尽后再保存新的不兼容内容：必须覆盖最旧备份而不是拒绝启动。
+        preserve_incompatible_settings(&target, "new-incompatible-content")
+            .expect("备份槽位耗尽时必须覆盖最旧备份而不是拒绝启动");
+
+        assert_eq!(
+            fs::read_to_string(incompatible_settings_backup_path(&target)).unwrap(),
+            "new-incompatible-content",
+            "最旧备份（index 0）必须被新内容覆盖"
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 }

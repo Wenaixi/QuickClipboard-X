@@ -245,7 +245,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
   const [useEmojiFallbackFont, setUseEmojiFallbackFont] = useState(false);
   // 键盘区域导航:默认 outside(无高亮,←/→ 切主标签);↓ 经 App 转发激活
   // 主路径是后端 global hotkey → App.dispatchEmojiNav → handleNavAction(不依赖 webview keydown)
-  const [kbZone, setKbZone] = useState('outside'); // 'outside' | 'search' | 'grid' | 'sidebar' | 'tabbar'
+  const [kbZone, setKbZone] = useState('outside'); // 'outside' | 'search' | 'grid' | 'sidebar'
   const [kbRow, setKbRow] = useState(-1);
   const [kbCol, setKbCol] = useState(0);
   const kbRowRef = useRef(kbRow);

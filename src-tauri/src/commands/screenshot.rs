@@ -59,10 +59,30 @@ mod tests {
 
     #[test]
     fn ai_configuration_status_is_independent_of_screenshot_action_toggle() {
+        // 有效配置必须返回 true：截图 AI 状态判定只取决于 api_key/base_url/model 三项配置
         assert!(screenshot_ai_config_is_valid(
             "test-key",
             "https://api.example.com/v1",
             "Qwen/Qwen2.5-VL-7B-Instruct",
+        ));
+        // 无效配置必须返回 false：空 api_key 视为未配置
+        assert!(!screenshot_ai_config_is_valid(
+            "",
+            "https://api.example.com/v1",
+            "Qwen/Qwen2.5-VL-7B-Instruct",
+        ));
+        // 无效配置必须返回 false：空 base_url 无法归一化
+        assert!(!screenshot_ai_config_is_valid(
+            "test-key",
+            "",
+            "Qwen/Qwen2.5-VL-7B-Instruct",
+        ));
+        // 无效配置必须返回 false：明确带 instruct 后缀的纯文本模型被拒收
+        // （ensure_vision_model 只拒收含 "instruct" 且不含 vision/vl/qwen2.5-vl 的模型）
+        assert!(!screenshot_ai_config_is_valid(
+            "test-key",
+            "https://api.example.com/v1",
+            "gpt-4o-instruct",
         ));
     }
 

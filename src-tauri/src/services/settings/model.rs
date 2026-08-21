@@ -437,7 +437,9 @@ impl AppSettings {
     }
 
     // 收纳更新检查间隔归一化的唯一权威实现:未知字符串一律降级为 daily。
-    // 仅识别 every3days / weekly / daily 三个值;返回 'static 借用避免调用方再分配。
+    // 仅识别 every3days / weekly / daily 三个值;返回 'static 借用供
+    // updater_window/creator.rs 的 match 直接比较(零分配);需要写入 String
+    // 字段的调用方(commands/settings.rs)自行 to_string。
     // 之前在 commands/settings.rs(:24-30 返回 String)与
     // updater_window/creator.rs(:76-82 返回 &'static str)两处字面相同,合并。
     pub fn normalize_update_check_interval(value: &str) -> &'static str {
