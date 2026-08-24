@@ -123,6 +123,7 @@ scap-main
 .cu*
 /*ents*
 
+<<<<<<< HEAD
 # === Bash 反斜杠误吃导致的泄露日志(本会话发现) ===
 # 见 CLAUDE.md §18 — git checkout 恢复 Cargo.toml 后,bash 把
 # `D:\newC\...cargo-test.log` 当字面路径创建了 21KB 残骸
@@ -145,3 +146,7 @@ D:newC*
 # === Claude Code worktree 目录(不入库) ===
 # .claude/worktrees/ 下是 review-tdd 各组的临时工作树
 .claude/worktrees/
+
+# === 上游新增(v0.5.0) ===
+docs
+/plugins

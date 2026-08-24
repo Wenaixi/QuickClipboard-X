@@ -4,11 +4,12 @@ import { getOneTimePasteEnabled } from '@shared/services/oneTimePaste'
 // 获取剪贴板历史列表
 export async function getClipboardHistory(params = {}) {
   try {
-    const { offset = 0, limit = 50, search, contentType } = params
+    const { offset = 0, limit = 50, search, contentType, pasteStatus } = params
 
     const invokeParams = { offset, limit }
     if (search) invokeParams.search = search
     if (contentType) invokeParams.contentType = contentType
+    if (pasteStatus && pasteStatus !== 'all') invokeParams.pasteStatus = pasteStatus
 
     return await invoke('get_clipboard_history', invokeParams)
   } catch (error) {
@@ -131,7 +132,7 @@ export async function addToFavorites(id) {
 // 贴图片到屏幕
 export async function pinImageToScreen(filePath) {
   try {
-    await invoke('create_native_pin_from_file', { filePath })
+    await invoke('pin_image_from_file', { filePath })
     return true
   } catch (error) {
     console.error('原生贴图失败，回退到 Tauri WebView 版:', error)
@@ -203,7 +204,6 @@ export async function addClipboardToFavorites(id, groupName) {
   })
   return favoriteItem
 }
-
 
 // 另存图片
 export async function saveImageFromPath(filePath) {

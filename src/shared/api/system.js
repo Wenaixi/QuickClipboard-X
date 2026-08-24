@@ -5,7 +5,6 @@ export async function getAppVersion() {
   return await invoke('get_app_version')
 }
 
-
 // 检查是否为便携模式
 export async function isPortableMode() {
   return await invoke('is_portable_mode')

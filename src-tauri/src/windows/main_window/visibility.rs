@@ -106,7 +106,7 @@ pub fn toggle_main_window_visibility(app: &AppHandle) {
                 hide_main_window(&window);
             }
         }
-        Err(error) => eprintln!("确保主窗口可用失败: {error}"),
+        Err(error) => eprintln!("确保主窗口可用失败: {}", error),
     }
 }
 

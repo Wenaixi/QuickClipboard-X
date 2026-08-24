@@ -30,7 +30,7 @@
 
 ## 紹介
 
-**QuickClipboard** は、Tauri 2 + Rust + React で構築されたクロスプラットフォームのクリップボード強化ツールです（現在 Windows と Android に対応）。コピーした瞬間から自動的にテキスト、画像、リッチテキスト、ファイルを記録し、過去にコピーした内容をいつでも取り戻せます。記録だけでなく、スクリーンショット、画像ピン留め、OCR、WebDAV 同期、LAN 同期/転送などの機能も統合しており、日常業務の生産性を大幅に向上させます。
+**QuickClipboard** は、Tauri 2 + Rust + React で構築されたクロスプラットフォームのクリップボード強化ツールです（現在 Windows と Android に対応）。コピーした瞬間から自動的にテキスト、画像、リッチテキスト、ファイルを記録し、過去にコピーした内容をいつでも取り戻せます。記録だけでなく、画像ピン留め、OCR、WebDAV 同期、LAN 同期/転送などの機能も統合しており、日常業務の生産性を大幅に向上させます。
 
 > ネイティブパフォーマンス、低メモリ使用量、起動後すぐに使用可能、システムトレイ常駐。
 
@@ -45,9 +45,8 @@
 | クイックペースト            | リストからペースト · 数字キー 1-9 でペースト · プレーンテキスト / 書式付きペースト · マージコピー / マージペースト · ワンショットペースト · クイックペーストウィンドウ · Win+V 対応 |
 | お気に入りとグループ        | よく使う内容をお気に入り登録 · カスタムグループ / アイコン / カラー · グループ並べ替え · グループへ一括移動 · ショートカットキーでグループ切替 |
 | Emoji / 記号 / ギャラリー   | 絵文字大全 · 記号大全 · カスタム画像 / GIF ギャラリー · 最近使用 · ドラッグまたはクリックで使用 |
-| 画面にピン留め              | デスクトップ固定表示 · GPU アクセラレーション描画 · ドラッグでリサイズ / 固定 · コピー / 名前を付けて保存 · スクリーンショット後に直接ピン留め |
-| 内蔵スクリーンショット      | 標準スクリーンショット · クイックスクリーンショット / クイックピン / クイック OCR · マルチモニター対応 · スクロールスクリーンショット · 自動領域検出 · 画面スポイト · 注釈編集 |
-| OCR 認識                    | 画像 OCR · スクリーンショット OCR · ワンクリックでテキスト抽出とコピー                                                |
+| 画面にピン留め              | デスクトップ固定表示 · ドラッグでリサイズ / 固定 · コピー / 名前を付けて保存 |
+| OCR 認識                    | 画像 OCR · ワンクリックでテキスト抽出とコピー                                                                        |
 | 同期 / 転送                 | WebDAV フル同期 · LAN HTTP 直接接続 · ペアリングコード接続 · 自動プッシュ/プル · ファイル送信                           |
 | エッジスナップとウィンドウ  | 画面端で自動非表示 · カーソル追従で呼び出し · ウィンドウ固定 · 位置 / サイズを記憶 · タイトルバー方向切替                |
 | パーソナライズ              | システム追従 / ライト・ダークテーマ / スーパー背景 · 複数のテーマスタイル · カスタム背景 / ぼかし · カスタムフォント · アニメーション切替 |
@@ -148,13 +147,13 @@
 
 ---
 
-## ダウンロード（v0.4.2）
+## ダウンロード（v0.5.0）
 
 | タイプ                                                      |                       説明 |                                                        ダウンロード数                                                        | リンク                                                                                                                                                                                              |
 | ----------------------------------------------------------- | -------------------------: | :--------------------------------------------------------------------------------------------------------------------------: | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **NSIS インストーラ**<br>`QuickClipboard_0.4.2_x64-setup.exe` | 推奨；自動アンインストール対応 | ![ダウンロード](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_0.4.2_x64-setup.exe?label=) | [![ダウンロード NSIS](https://img.shields.io/badge/ダウンロード-NSISインストーラ-blue?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.4.2/QuickClipboard_0.4.2_x64-setup.exe) |
-| **ポータブル版**<br>`QuickClipboard_0.4.2.exe`              |       インストール不要、ダブルクリックで使用 | ![ダウンロード](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_0.4.2.exe?label=)            | [![ダウンロード ポータブル](https://img.shields.io/badge/ダウンロード-ポータブル版-orange?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.4.2/QuickClipboard_0.4.2.exe)    |
-| **USB ポータブル版**<br>`QuickClipboard_0.4.2_portable.exe` |       USB メモリやモバイル利用に最適 | ![ダウンロード](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_0.4.2_portable.exe?label=)    | [![ダウンロード USB](https://img.shields.io/badge/ダウンロード-USBポータブル版-green?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.4.2/QuickClipboard_0.4.2_portable.exe) |
+| **NSIS インストーラ**<br>`QuickClipboard_0.5.0_x64-setup.exe` | 推奨；自動アンインストール対応 | ![ダウンロード](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_0.5.0_x64-setup.exe?label=) | [![ダウンロード NSIS](https://img.shields.io/badge/ダウンロード-NSISインストーラ-blue?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.5.0/QuickClipboard_0.5.0_x64-setup.exe) |
+| **ポータブル版**<br>`QuickClipboard_0.5.0.exe`              |       インストール不要、ダブルクリックで使用 | ![ダウンロード](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_0.5.0.exe?label=)            | [![ダウンロード ポータブル](https://img.shields.io/badge/ダウンロード-ポータブル版-orange?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.5.0/QuickClipboard_0.5.0.exe)    |
+| **USB ポータブル版**<br>`QuickClipboard_0.5.0_portable.exe` |       USB メモリやモバイル利用に最適 | ![ダウンロード](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_0.5.0_portable.exe?label=)    | [![ダウンロード USB](https://img.shields.io/badge/ダウンロード-USBポータブル版-green?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.5.0/QuickClipboard_0.5.0_portable.exe) |
 | **Android 版**<br>`QuickClipboard_Android_v1.0.4.apk`       |     Android 端末向け | ![ダウンロード](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_Android_v1.0.4.apk?label=)    | [![ダウンロード Android](https://img.shields.io/badge/ダウンロード-Android-success?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.4.0/QuickClipboard_Android_v1.0.4.apk)  |
 | **クラウドドライブ**                                          |    GitHub が遅い場合の代替手段 |                                                          —                                                                    | [![クラウドドライブ](https://img.shields.io/badge/クラウドドライブ-クリック-red?style=for-the-badge)](https://www.123912.com/s/A9Ckjv-Vu75v?pwd=UhWA#)                                              |
 

@@ -13,6 +13,7 @@ pub mod sync_transfer;
 pub mod webdav_sync;
 pub mod drop_proxy;
 pub mod screenshot;
+pub mod text_drag;
 
 pub use clipboard::*;
 pub use favorites::*;

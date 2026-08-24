@@ -10,8 +10,10 @@ use super::global::{get_app, parse_shortcut};
 
 static NAVIGATION_SHORTCUTS: Lazy<Mutex<Vec<NavigationShortcutRegistration>>> =
     Lazy::new(|| Mutex::new(Vec::new()));
+static NAVIGATION_HOTKEYS_LIFECYCLE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 static NAVIGATION_HOTKEYS_DESIRED: AtomicBool = AtomicBool::new(false);
 static NAVIGATION_HOTKEYS_REGISTERED: AtomicBool = AtomicBool::new(false);
+static EXECUTE_ITEM_HOTKEY_SUSPENDED: AtomicBool = AtomicBool::new(false);
 static NAVIGATION_REPEAT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 static NAVIGATION_THROTTLE_STATE: Lazy<Mutex<HashMap<String, Instant>>> =
@@ -47,7 +49,7 @@ pub fn enable_navigation_hotkeys() {
     // 抢锁时，enable 的 sync 可能看到 desired=true 直接跳过注册。
     let _guard = NAVIGATION_SYNC_LOCK.lock();
     NAVIGATION_HOTKEYS_DESIRED.store(true, Ordering::SeqCst);
-    sync_navigation_hotkeys_for_foreground_inner();
+    sync_navigation_hotkeys_for_foreground_locked();
 }
 
 pub fn disable_navigation_hotkeys() {
@@ -59,56 +61,71 @@ pub fn disable_navigation_hotkeys() {
     unregister_navigation_hotkeys();
 }
 
-pub fn sync_navigation_hotkeys_for_foreground() {
-    // 串行化：注册/注销全程持锁，防止前台切换回调、窗口显隐、全局热键重注册
-    // 并发对同一裸键 RegisterHotKey 撞车，失败后 Windows 层残留"幽灵热键"
-    // 吞掉全局 Enter/Tab/Esc。
-    let _guard = NAVIGATION_SYNC_LOCK.lock();
-    sync_navigation_hotkeys_for_foreground_inner();
+// 输入框获得焦点时暂停执行粘贴快捷键，避免全局 Enter 抢占输入法组合提交。
+pub fn suspend_execute_item_hotkey() {
+    if EXECUTE_ITEM_HOTKEY_SUSPENDED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    reload_navigation_hotkeys_from_settings();
 }
 
-fn sync_navigation_hotkeys_for_foreground_inner() {
+// 输入框失去焦点时恢复执行粘贴快捷键。
+pub fn resume_execute_item_hotkey() {
+    if !EXECUTE_ITEM_HOTKEY_SUSPENDED.swap(false, Ordering::SeqCst) {
+        return;
+    }
+
+    reload_navigation_hotkeys_from_settings();
+}
+
+pub fn sync_navigation_hotkeys_for_foreground() {
+    let _lifecycle_guard = NAVIGATION_HOTKEYS_LIFECYCLE_LOCK.lock();
+    sync_navigation_hotkeys_for_foreground_locked();
+}
+
+fn sync_navigation_hotkeys_for_foreground_locked() {
     if !NAVIGATION_HOTKEYS_DESIRED.load(Ordering::SeqCst) {
-        unregister_navigation_hotkeys();
+        unregister_navigation_hotkeys_locked();
         return;
     }
 
     if should_suspend_navigation_hotkeys() {
-        unregister_navigation_hotkeys();
+        unregister_navigation_hotkeys_locked();
         return;
     }
 
     if !NAVIGATION_HOTKEYS_REGISTERED.load(Ordering::SeqCst) {
-        reload_navigation_hotkeys_from_settings_inner();
+        reload_navigation_hotkeys_from_settings_locked();
     }
 }
 
 pub fn reload_navigation_hotkeys_from_settings() {
-    let _guard = NAVIGATION_SYNC_LOCK.lock();
-    reload_navigation_hotkeys_from_settings_inner();
+    let _lifecycle_guard = NAVIGATION_HOTKEYS_LIFECYCLE_LOCK.lock();
+    reload_navigation_hotkeys_from_settings_locked();
 }
 
-fn reload_navigation_hotkeys_from_settings_inner() {
+fn reload_navigation_hotkeys_from_settings_locked() {
     if !NAVIGATION_HOTKEYS_DESIRED.load(Ordering::SeqCst) {
-        unregister_navigation_hotkeys();
+        unregister_navigation_hotkeys_locked();
         return;
     }
 
     if should_suspend_navigation_hotkeys() {
-        unregister_navigation_hotkeys();
+        unregister_navigation_hotkeys_locked();
         return;
     }
 
-    if let Err(error) = register_navigation_hotkeys_from_settings() {
+    if let Err(error) = register_navigation_hotkeys_from_settings_locked() {
         eprintln!("同步导航快捷键失败: {}", error);
     }
 }
 
 // 让内部注册状态整体失效，Windows 层注册由调用方负责摘除。
-// 供 global 层"禁用热键/前台屏蔽"时插件级 unregister_all 后调用，
+// 供 global 层禁用热键/前台屏蔽时插件级 unregister_all 后调用，
 // 使下次前台切换能干净地重建导航热键。
 pub fn invalidate_navigation_hotkeys() {
-    let _guard = NAVIGATION_SYNC_LOCK.lock();
+    let _lifecycle_guard = NAVIGATION_HOTKEYS_LIFECYCLE_LOCK.lock();
     NAVIGATION_HOTKEYS_REGISTERED.store(false, Ordering::SeqCst);
     NAVIGATION_SHORTCUTS.lock().clear();
     NAVIGATION_REPEAT_SEQUENCE.fetch_add(1, Ordering::SeqCst);
@@ -116,8 +133,8 @@ pub fn invalidate_navigation_hotkeys() {
     NAVIGATION_THROTTLE_STATE.lock().clear();
 }
 
-fn register_navigation_hotkeys_from_settings() -> Result<(), String> {
-    if !unregister_navigation_hotkeys() {
+fn register_navigation_hotkeys_from_settings_locked() -> Result<(), String> {
+    if !unregister_navigation_hotkeys_locked() {
         return Err("原有导航快捷键尚未完全注销，已取消重新注册".to_string());
     }
 
@@ -127,6 +144,12 @@ fn register_navigation_hotkeys_from_settings() -> Result<(), String> {
 
     for config in configs {
         if config.shortcut.trim().is_empty() {
+            continue;
+        }
+
+        if config.id == "navigation_execute_item"
+            && EXECUTE_ITEM_HOTKEY_SUSPENDED.load(Ordering::SeqCst)
+        {
             continue;
         }
 
@@ -150,12 +173,12 @@ fn register_navigation_hotkeys_from_settings() -> Result<(), String> {
         let action = config.action.to_string();
         let shortcut_for_log = config.shortcut.clone();
 
-        match app.global_shortcut().on_shortcut(shortcut, move |_app, _shortcut, event| {
-            match event.state {
+        match app
+            .global_shortcut()
+            .on_shortcut(shortcut, move |_app, _shortcut, event| match event.state {
                 ShortcutState::Pressed => handle_navigation_pressed(&id, &action),
                 ShortcutState::Released => handle_navigation_released(&id),
-            }
-        }) {
+            }) {
             Ok(_) => {
                 println!("已注册导航快捷键 [{}]: {}", config.id, config.shortcut);
                 // F2: 成功注册必须写 success 状态,覆盖同 id 的旧失败状态——
@@ -199,11 +222,12 @@ fn register_navigation_hotkeys_from_settings() -> Result<(), String> {
     Ok(())
 }
 
-// 安全摘除导航热键：使用插件 is_registered 探测后再注销，避免对未注册的
-// 裸键 UnregisterHotKey 空跑后内部表与 Windows 层脱节，残留"幽灵热键"。
-// 返回是否完全注销：unregister 失败或 parse 失败的热键保留回注册表，
-// 供下次同步重试；避免本地表已 take 掉、Windows 层却还残留热键导致无法再摘。
-fn unregister_navigation_hotkeys() -> bool {
+fn unregister_navigation_hotkeys() {
+    let _lifecycle_guard = NAVIGATION_HOTKEYS_LIFECYCLE_LOCK.lock();
+    unregister_navigation_hotkeys_locked();
+}
+
+fn unregister_navigation_hotkeys_locked() -> bool {
     let app = match get_app() {
         Ok(app) => app,
         Err(_) => return false,
@@ -352,7 +376,9 @@ fn start_navigation_repeat_if_needed(id: &str, action: &str) {
     let token = NAVIGATION_REPEAT_SEQUENCE
         .fetch_add(1, Ordering::SeqCst)
         .wrapping_add(1);
-    NAVIGATION_REPEAT_TOKENS.lock().insert(id.to_string(), token);
+    NAVIGATION_REPEAT_TOKENS
+        .lock()
+        .insert(id.to_string(), token);
 
     let id = id.to_string();
     let action = action.to_string();
@@ -374,11 +400,7 @@ fn should_continue_repeat(id: &str, token: u64) -> bool {
         return false;
     }
 
-    NAVIGATION_REPEAT_TOKENS
-        .lock()
-        .get(id)
-        .copied()
-        == Some(token)
+    NAVIGATION_REPEAT_TOKENS.lock().get(id).copied() == Some(token)
 }
 
 fn should_suspend_navigation_hotkeys() -> bool {
@@ -467,7 +489,7 @@ mod tests {
     #[test]
     fn navigation_failure_path_probes_before_unregister() {
         let src = strip_line_comments(&navigation_source());
-        let b = fn_body(&src, "register_navigation_hotkeys_from_settings");
+        let b = fn_body(&src, "register_navigation_hotkeys_from_settings_locked");
         assert!(
             b.find("safe_unregister(&app, shortcut)").is_some(),
             "注册失败路径必须调 safe_unregister 清理幽灵热键"
@@ -484,7 +506,7 @@ mod tests {
     #[test]
     fn navigation_failure_writes_shortcut_status() {
         let src = strip_line_comments(&navigation_source());
-        let b = fn_body(&src, "register_navigation_hotkeys_from_settings");
+        let b = fn_body(&src, "register_navigation_hotkeys_from_settings_locked");
         let status_pos = b.find("set_shortcut_status");
         let conflict_pos = b.find("CONFLICT");
         let failed_pos = b.find("REGISTRATION_FAILED");
@@ -543,7 +565,7 @@ mod tests {
     #[test]
     fn navigation_single_key_failure_does_not_poison_global_state() {
         let src = strip_line_comments(&navigation_source());
-        let b = fn_body(&src, "register_navigation_hotkeys_from_settings");
+        let b = fn_body(&src, "register_navigation_hotkeys_from_settings_locked");
         let store_pos = b.find("NAVIGATION_HOTKEYS_REGISTERED.store(");
         assert!(
             store_pos.is_some(),
@@ -562,7 +584,7 @@ mod tests {
     #[test]
     fn navigation_parse_shortcut_failure_writes_shortcut_status() {
         let src = strip_line_comments(&navigation_source());
-        let b = fn_body(&src, "register_navigation_hotkeys_from_settings");
+        let b = fn_body(&src, "register_navigation_hotkeys_from_settings_locked");
         let parse_pos = b
             .find("parse_shortcut(&config.shortcut)")
             .expect("必须存在 parse_shortcut 调用");
@@ -595,13 +617,13 @@ mod tests {
     #[test]
     fn navigation_success_path_clears_stale_failure_status() {
         let src = strip_line_comments(&navigation_source());
-        let b = fn_body(&src, "register_navigation_hotkeys_from_settings");
+        let b = fn_body(&src, "register_navigation_hotkeys_from_settings_locked");
         let ok_pos = b.find("Ok(_)");
         assert!(
             ok_pos.is_some() && b[ok_pos.unwrap()..].find("set_shortcut_status").is_some(),
             "成功注册分支必须写 set_shortcut_status(success) 清除旧失败状态"
         );
-        let ub = fn_body(&src, "unregister_navigation_hotkeys");
+        let ub = fn_body(&src, "unregister_navigation_hotkeys_locked");
         let status_pos = ub.find("set_shortcut_status");
         let clear_pos = ub.find("clear_shortcut_status");
         assert!(
@@ -656,7 +678,7 @@ mod tests {
     #[test]
     fn navigation_handles_both_pressed_and_released_events() {
         let src = strip_line_comments(&navigation_source());
-        let b = fn_body(&src, "register_navigation_hotkeys_from_settings");
+        let b = fn_body(&src, "register_navigation_hotkeys_from_settings_locked");
         assert!(
             b.contains("ShortcutState::Pressed"),
             "必须订阅 ShortcutState::Pressed"
@@ -679,7 +701,7 @@ mod tests {
     #[test]
     fn navigation_unregister_retains_failed_registrations() {
         let src = strip_line_comments(&navigation_source());
-        let b = fn_body(&src, "unregister_navigation_hotkeys");
+        let b = fn_body(&src, "unregister_navigation_hotkeys_locked");
         assert!(
             b.contains("remaining_registrations"),
             "注销失败的热键必须保留回注册表，下次同步重试"
@@ -699,9 +721,9 @@ mod tests {
     #[test]
     fn navigation_register_cancels_when_old_hotkeys_still_registered() {
         let src = strip_line_comments(&navigation_source());
-        let b = fn_body(&src, "register_navigation_hotkeys_from_settings");
+        let b = fn_body(&src, "register_navigation_hotkeys_from_settings_locked");
         let check_pos = b
-            .find("!unregister_navigation_hotkeys()")
+            .find("!unregister_navigation_hotkeys_locked()")
             .expect("注册新键前必须检查旧键是否注销彻底");
         let err_pos = b[check_pos..]
             .find("return Err(")

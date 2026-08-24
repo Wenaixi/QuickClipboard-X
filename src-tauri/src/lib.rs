@@ -53,6 +53,13 @@ pub fn run() {
         }
     }
 
+    #[cfg(windows)]
+    match services::system::startup::restart_after_legacy_auto_start() {
+        Ok(true) => return,
+        Ok(false) => {}
+        Err(error) => eprintln!("迁移旧自启动参数失败: {error}"),
+    }
+
     startup_diagnostics::set_startup_stage("执行启动安全检查");
     startup_diagnostics::mark_starting();
     security::check_webview_security();
@@ -62,26 +69,6 @@ pub fn run() {
     }
     #[cfg(windows)]
     {
-        use std::process::Command;
-        startup_diagnostics::set_startup_stage("处理安装器启动参数");
-        let args: Vec<String> = std::env::args().collect();
-        let is_installer_launch = args.iter().any(|a| a == "--installer-launch");
-        let already_restarted = args.iter().any(|a| a == "--qc-restarted");
-        if is_installer_launch && !already_restarted {
-            if let Ok(exe) = std::env::current_exe() {
-                let mut cmd = Command::new(exe);
-                for a in std::env::args().skip(1) {
-                    if a == "--installer-launch" {
-                        continue;
-                    }
-                    cmd.arg(a);
-                }
-                cmd.arg("--qc-restarted");
-                let _ = cmd.spawn();
-                std::process::exit(0);
-            }
-        }
-
         startup_diagnostics::set_startup_stage("检查启动与管理员配置");
         #[cfg(not(debug_assertions))]
         if let Ok(settings) = services::settings::load_settings_from_file() {
@@ -98,8 +85,7 @@ pub fn run() {
                         eprintln!("修复管理员启动配置失败: {error}");
                     }
                 } else {
-                    let launch_context = services::system::startup::launch_context();
-                    if launch_context.admin_relaunch {
+                    if services::system::startup::is_admin_relaunch() {
                         eprintln!("管理员重启后的进程仍未获得管理员权限，已停止重复提权");
                     } else {
                         startup_diagnostics::set_startup_stage("检查管理员启动：准备启动管理员实例");
@@ -131,19 +117,21 @@ pub fn run() {
                 return;
             }
             // 开机自启/管理员重启属后台拉起，不得把主窗口显示出来。
-            let is_background_launch = argv.iter().any(|argument| {
-                matches!(
-                    argument.as_str(),
-                    services::system::startup::AUTO_START_ARG
-                        | services::system::startup::ADMIN_RELAUNCH_ARG
-                )
-            });
+            let is_background_launch = argv
+                .iter()
+                .any(|argument| {
+                    matches!(
+                        argument.as_str(),
+                        services::system::startup::LEGACY_AUTO_START_ARG
+                            | services::system::startup::ADMIN_RELAUNCH_ARG
+                    )
+                });
             if is_background_launch {
                 return;
             }
             match services::low_memory::ensure_main_window(app) {
                 Ok(window) => show_main_window(&window),
-                Err(error) => eprintln!("单实例请求显示主窗口失败: {error}"),
+                Err(error) => eprintln!("单实例请求显示主窗口失败: {}", error),
             }
         }))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -185,6 +173,7 @@ pub fn run() {
                 commands::drop_proxy::drop_proxy_save_resource,
                 commands::drop_proxy::drop_proxy_save_url,
                 commands::drop_proxy::drop_proxy_cleanup_orphan_resources,
+                commands::text_drag::start_text_drag,
                 windows::preview_window::show_preview_window,
                 windows::preview_window::close_preview_window,
                 windows::preview_window::reveal_preview_window,
@@ -381,7 +370,6 @@ pub fn run() {
                 windows::pin_image_window::close_pin_image_window_by_self,
                 windows::pin_image_window::close_image_preview,
                 windows::pin_image_window::save_pin_image_as,
-                windows::pin_image_window::start_pin_edit_mode,
                 utils::screen::get_all_screens,
                 utils::system::get_system_text_scale,
                 commands::il_init,
@@ -528,7 +516,7 @@ pub fn run() {
                             && crate::get_settings().hotkeys_enabled
                         {
                             if let Err(error) = crate::hotkey::reload_from_settings() {
-                                eprintln!("启动后重试注册快捷键失败: {error}");
+                                eprintln!("启动后重试注册快捷键失败: {}", error);
                             }
                         }
                     });
@@ -555,7 +543,7 @@ pub fn run() {
                             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                             if !SHUTDOWN_REQUESTED.load(Ordering::SeqCst) {
                                 if let Err(error) = services::low_memory::ensure_main_window(&app_handle) {
-                                    eprintln!("主窗口销毁后重建失败: {error}");
+                                    eprintln!("主窗口销毁后重建失败: {}", error);
                                 }
                             }
                             MAIN_WINDOW_RECOVERY_PENDING.store(false, Ordering::SeqCst);

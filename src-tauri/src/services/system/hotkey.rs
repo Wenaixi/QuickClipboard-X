@@ -50,6 +50,14 @@ pub fn disable_navigation_hotkeys() {
     navigation::disable_navigation_hotkeys();
 }
 
+pub fn suspend_execute_item_hotkey() {
+    navigation::suspend_execute_item_hotkey();
+}
+
+pub fn resume_execute_item_hotkey() {
+    navigation::resume_execute_item_hotkey();
+}
+
 #[cfg(test)]
 mod tests {
     use super::test_utils::{fn_body, strip_line_comments};

@@ -5,7 +5,6 @@ import { resolve, dirname } from 'path'
 import { existsSync } from 'fs'
 import { fileURLToPath } from 'url'
 import wasm from 'vite-plugin-wasm'
-
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const isDev = process.env.NODE_ENV === 'development'
 const isTauriDebug = process.env.TAURI_DEBUG === 'true'

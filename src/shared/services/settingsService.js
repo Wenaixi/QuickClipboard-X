@@ -55,7 +55,6 @@ export const defaultSettings = {
   openSettingsShortcut: '',
   quickpasteShortcut: 'Ctrl+`',
   transferShelfCreateShortcut: '',
-  screenshotShortcut: 'Ctrl+Shift+A',
   numberShortcuts: true,
   numberShortcutsModifier: 'Ctrl',
   
@@ -101,6 +100,7 @@ export const defaultSettings = {
   autoFocusSearch: false,
   pasteWithFormat: true,
   pasteShortcutMode: 'ctrl_v',
+  leftClickAction: 'single_paste',
   modifierClickMultiSelect: true,
   pasteToTop: false,
   showListShortcuts: true,

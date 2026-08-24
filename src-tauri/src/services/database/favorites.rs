@@ -382,12 +382,22 @@ pub fn query_favorites(params: FavoritesQueryParams) -> Result<PaginatedResult<F
         }
 
         if let Some(content_type) = params.content_type {
-            if content_type != "all" {
-                // 与搜索词路径一致:转义 %/_/\ + ESCAPE,避免 content_type 含通配符时误匹配
-                let pattern = super::like_pattern(&content_type);
-                where_clauses.push("content_type LIKE ? ESCAPE '\\'");
-                count_params.push(Box::new(pattern.clone()));
-                query_params.push(Box::new(pattern));
+            let types: Vec<_> = content_type.split(',').map(str::trim).filter(|t| !t.is_empty()).collect();
+            if !types.is_empty() && content_type != "all" {
+                // 与搜索词路径一致:转义 %/_/\ + ESCAPE,避免 content_type 含通配符时误匹配(F 系列安全修复)
+                let clauses = types.iter().map(|_| "content_type LIKE ? ESCAPE '\\'").collect::<Vec<_>>().join(" OR ");
+                where_clauses.push(Box::leak(format!("({})", clauses).into_boxed_str()));
+                for content_type in types {
+                    let pattern = super::like_pattern(content_type);
+                    count_params.push(Box::new(pattern.clone()));
+                    query_params.push(Box::new(pattern));
+                }
+            }
+        }
+        if let Some(ref paste_status) = params.paste_status {
+            let statuses: Vec<_> = paste_status.split(',').map(str::trim).filter(|status| *status == "pasted" || *status == "unpasted").collect();
+            if statuses.len() == 1 {
+                where_clauses.push(if statuses[0] == "pasted" { "paste_count > 0" } else { "paste_count = 0" });
             }
         }
 

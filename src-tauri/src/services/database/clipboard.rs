@@ -174,7 +174,8 @@ fn delete_image_files(image_ids: Vec<String>) -> Result<(), String> {
 pub fn query_clipboard_items(params: QueryParams) -> Result<PaginatedResult<ClipboardItem>, String> {
     let search_keyword = params.search.clone();
     let has_filter = search_keyword.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false)
-        || params.content_type.as_ref().map(|t| t != "all").unwrap_or(false);
+        || params.content_type.as_ref().map(|t| t != "all").unwrap_or(false)
+        || params.paste_status.as_ref().map(|s| s.split(',').any(|v| v.trim() == "pasted" || v.trim() == "unpasted")).unwrap_or(false);
     
     with_connection(|conn| {
         let mut where_clauses = vec![];
@@ -189,11 +190,21 @@ pub fn query_clipboard_items(params: QueryParams) -> Result<PaginatedResult<Clip
         }
         
         if let Some(ref content_type) = params.content_type {
-            if content_type != "all" {
-                // 与搜索词路径一致:转义 %/_/\ + ESCAPE,避免 content_type 含通配符时误匹配
-                where_clauses.push("content_type LIKE ? ESCAPE '\\'");
-                let pattern = super::like_pattern(content_type);
-                query_params.push(Box::new(pattern));
+            let types: Vec<_> = content_type.split(',').map(str::trim).filter(|t| !t.is_empty()).collect();
+            if !types.is_empty() && content_type != "all" {
+                // 与搜索词路径一致:转义 %/_/\ + ESCAPE,避免 content_type 含通配符时误匹配(F 系列安全修复)
+                let clauses = types.iter().map(|_| "content_type LIKE ? ESCAPE '\\'").collect::<Vec<_>>().join(" OR ");
+                where_clauses.push(Box::leak(format!("({})", clauses).into_boxed_str()));
+                for content_type in types {
+                    let pattern = if content_type == "text" { super::like_pattern("text") } else { super::like_pattern(content_type) };
+                    query_params.push(Box::new(pattern));
+                }
+            }
+        }
+        if let Some(ref paste_status) = params.paste_status {
+            let statuses: Vec<_> = paste_status.split(',').map(str::trim).filter(|status| *status == "pasted" || *status == "unpasted").collect();
+            if statuses.len() == 1 {
+                where_clauses.push(if statuses[0] == "pasted" { "paste_count > 0" } else { "paste_count = 0" });
             }
         }
         

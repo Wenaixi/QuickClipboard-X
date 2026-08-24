@@ -27,13 +27,13 @@ import { toggleWindowPin } from '@shared/services/titleBarActions';
 import { getVisibleMainTabs, isMainTabVisible } from '@shared/constants/tabVisibility';
 import { toast, TOAST_POSITIONS, TOAST_SIZES } from '@shared/store/toastStore';
 import { formatUserMessage } from '@shared/utils/userMessages';
+import { mergePasteSelectedItems } from './utils/multiSelect';
 import TitleBar from './components/TitleBar';
 import TabNavigation, { FILTER_IDS, EMOJI_MODE_IDS } from './components/TabNavigation';
 import ClipboardTab from './components/ClipboardTab';
 import FavoritesTab from './components/FavoritesTab';
 const EmojiTab = lazy(() => import('./components/EmojiTab'));
 import MultiSelectActionBar from './components/MultiSelectActionBar';
-import WindowResizeHandles from './components/WindowResizeHandles';
 import ToastContainer from '@shared/components/common/ToastContainer';
 
 const TAB_NAVIGATION_MODE = {
@@ -41,6 +41,8 @@ const TAB_NAVIGATION_MODE = {
   SIDEBAR: 'sidebar'
 };
 const SIDEBAR_TABS_MEDIA_QUERY = '(min-width: 550px)';
+const COMPACT_TITLE_BAR_MEDIA_QUERY = '(max-width: 299px)';
+const COMPACT_FILTERS_MEDIA_QUERY = '(max-width: 299px)';
 const WEBDAV_TOAST_CONFIG = {
   size: TOAST_SIZES.EXTRA_SMALL,
   position: TOAST_POSITIONS.BOTTOM_RIGHT
@@ -48,6 +50,14 @@ const WEBDAV_TOAST_CONFIG = {
 
 function getIsSidebarTabsLayout() {
   return typeof window !== 'undefined' && window.matchMedia(SIDEBAR_TABS_MEDIA_QUERY).matches;
+}
+
+function getIsCompactTitleBar() {
+  return typeof window !== 'undefined' && window.matchMedia(COMPACT_TITLE_BAR_MEDIA_QUERY).matches;
+}
+
+function getIsCompactFilters() {
+  return typeof window !== 'undefined' && window.matchMedia(COMPACT_FILTERS_MEDIA_QUERY).matches;
 }
 
 function App() {
@@ -69,11 +79,14 @@ function App() {
   } = useTheme();
   const [activeTab, setActiveTab] = useState('clipboard');
   const [contentFilter, setContentFilter] = useState('all');
+  const [pasteFilter, setPasteFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [emojiMode, setEmojiMode] = useState('emoji'); // 'emoji' | 'symbols' | 'images'
   const [updateBannerState, setUpdateBannerState] = useState(null);
   const [isSidebarTabsLayout, setIsSidebarTabsLayout] = useState(getIsSidebarTabsLayout);
+  const [isCompactTitleBar, setIsCompactTitleBar] = useState(getIsCompactTitleBar);
+  const [isCompactFilters, setIsCompactFilters] = useState(getIsCompactFilters);
   const clipboardTabRef = useRef(null);
   const favoritesTabRef = useRef(null);
   const emojiTabRef = useRef(null);
@@ -140,22 +153,34 @@ function App() {
   // 仅在跨越布局断点时更新，避免缩放期间持续重渲染整个主窗口。
   useEffect(() => {
     const mediaQuery = window.matchMedia(SIDEBAR_TABS_MEDIA_QUERY);
-    const updateLayoutMode = event => {
-      setIsSidebarTabsLayout(event.matches);
+    const compactTitleBarMediaQuery = window.matchMedia(COMPACT_TITLE_BAR_MEDIA_QUERY);
+    const compactFiltersMediaQuery = window.matchMedia(COMPACT_FILTERS_MEDIA_QUERY);
+    const updateLayoutMode = () => {
+      setIsSidebarTabsLayout(mediaQuery.matches);
+      setIsCompactTitleBar(compactTitleBarMediaQuery.matches);
+      setIsCompactFilters(compactFiltersMediaQuery.matches);
     };
 
-    setIsSidebarTabsLayout(mediaQuery.matches);
+    updateLayoutMode();
     if (typeof mediaQuery.addEventListener === 'function') {
       mediaQuery.addEventListener('change', updateLayoutMode);
+      compactTitleBarMediaQuery.addEventListener('change', updateLayoutMode);
+      compactFiltersMediaQuery.addEventListener('change', updateLayoutMode);
     } else {
       mediaQuery.addListener(updateLayoutMode);
+      compactTitleBarMediaQuery.addListener(updateLayoutMode);
+      compactFiltersMediaQuery.addListener(updateLayoutMode);
     }
 
     return () => {
       if (typeof mediaQuery.removeEventListener === 'function') {
         mediaQuery.removeEventListener('change', updateLayoutMode);
+        compactTitleBarMediaQuery.removeEventListener('change', updateLayoutMode);
+        compactFiltersMediaQuery.removeEventListener('change', updateLayoutMode);
       } else {
         mediaQuery.removeListener(updateLayoutMode);
+        compactTitleBarMediaQuery.removeListener(updateLayoutMode);
+        compactFiltersMediaQuery.removeListener(updateLayoutMode);
       }
     };
   }, []);
@@ -175,7 +200,7 @@ function App() {
         } catch (err) {
           console.warn('保存焦点失败:', err);
         }
-        
+
         if (settingsStore.autoClearSearch) {
           setSearchQuery('');
         }
@@ -220,7 +245,7 @@ function App() {
       });
       const unlisten6 = await listen('window-hide-animation', handleWindowHide);
       const unlisten7 = await listen('edge-snap-hide', handleWindowHide);
-      
+
       return () => {
         unlisten1();
         unlisten2();
@@ -452,9 +477,26 @@ function App() {
       favoritesTabRef.current.navigateDown();
     }
   };
-  const handleExecuteItem = () => {
+  const handleExecuteItem = async () => {
     if (isSearchFocused) return;
     blurSearchInput();
+    const isMultiSelectMode = activeTab === 'clipboard'
+      ? clipboardStore.isMultiSelectMode
+      : activeTab === 'favorites'
+        ? favoritesStore.isMultiSelectMode
+        : false;
+
+    if (isMultiSelectMode) {
+      try {
+        if (await mergePasteSelectedItems(activeTab)) {
+          toast.success(t('multiSelect.mergePasted'), WEBDAV_TOAST_CONFIG);
+        }
+      } catch (error) {
+        console.error('合并粘贴失败:', error);
+        toast.error(error?.message || t('common.pasteFailed'), WEBDAV_TOAST_CONFIG);
+      }
+      return;
+    }
     if (activeTab === 'clipboard' && clipboardTabRef.current?.executeCurrentItem) {
       clipboardTabRef.current.executeCurrentItem();
     } else if (activeTab === 'favorites' && favoritesTabRef.current?.executeCurrentItem) {
@@ -578,12 +620,12 @@ function App() {
     enabled: true
   });
   const outerContainerClasses = `
-    h-screen w-screen 
+    h-screen w-screen
     relative
     ${isDark ? 'dark' : ''}
   `.trim().replace(/\s+/g, ' ');
   const containerClasses = `
-    main-container 
+    main-container
     h-full w-full
     flex ${settings.titleBarPosition === 'left' || settings.titleBarPosition === 'right' ? 'flex-row' : 'flex-col'}
     overflow-hidden
@@ -666,7 +708,6 @@ function App() {
         {renderLayout()}
         <ToastContainer />
       </div>
-      <WindowResizeHandles />
     </div>;
 }
 export default App;

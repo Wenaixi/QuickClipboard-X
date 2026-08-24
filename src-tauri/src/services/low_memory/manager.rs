@@ -19,7 +19,6 @@ const WEBVIEW_LABELS: &[&str] = &[
     "context-menu",
     "settings",
     "text-editor",
-    "screenshot",
     "updater",
 ];
 
@@ -29,7 +28,6 @@ const AUTO_LOW_MEMORY_WINDOW_LABELS: &[&str] = &[
     "updater",
     "preview-window",
     "context-menu",
-    "screenshot",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -299,7 +297,6 @@ pub fn ensure_main_window(app: &AppHandle) -> Result<tauri::WebviewWindow, Strin
     Ok(window)
 }
 
-// 重建主窗口
 fn recreate_main_window(app: &AppHandle) -> Result<(), String> {
     use tauri::{WebviewUrl, WebviewWindowBuilder};
 

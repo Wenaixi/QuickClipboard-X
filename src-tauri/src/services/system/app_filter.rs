@@ -302,7 +302,7 @@ mod windows_impl {
     // 获取 UWP 应用真实名称
     fn get_uwp_app_name(hwnd: windows::Win32::Foundation::HWND) -> Option<String> {
         use windows::Win32::UI::WindowsAndMessaging::{EnumChildWindows, GetWindowThreadProcessId};
-        use windows::Win32::Foundation::{CloseHandle, LPARAM};
+        use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM};
         use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
         use windows::Win32::System::ProcessStatus::GetModuleFileNameExW;
         use windows::core::BOOL;

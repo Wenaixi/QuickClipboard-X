@@ -60,3 +60,4 @@ export async function pushSyncTransferLanPeer(deviceId) {
     deviceId,
   });
 }
+

@@ -74,6 +74,8 @@ function TabNavigation({
   onTabChange,
   contentFilter,
   onFilterChange,
+  pasteFilter = 'all',
+  onPasteFilterChange,
   emojiMode,
   onEmojiModeChange,
   onGroupChange,
@@ -87,6 +89,7 @@ function TabNavigation({
   const uiAnimationEnabled = settings.uiAnimationEnabled !== false;
   const visibleOptionalTabs = normalizeVisibleOptionalTabs(settings.visibleOptionalTabs);
   const isSidebarLayout = navigationMode === 'sidebar';
+  const isCompactFiltersLayout = compactFilters && !isSidebarLayout;
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isGroupsPanelOpen, setIsGroupsPanelOpen] = useState(false);
   const [isGroupButtonRevealed, setIsGroupButtonRevealed] = useState(false);
@@ -100,13 +103,11 @@ function TabNavigation({
   const controlsIndicatorRef = useRef(null);
   const rightAreaRef = useRef(null);
   const [tabAnimationKey, setTabAnimationKey] = useState(0);
-  const [filterAnimationKey, setFilterAnimationKey] = useState(0);
   const [emojiModeAnimationKey, setEmojiModeAnimationKey] = useState(0);
   const [isFilterExpanded, setIsFilterExpanded] = useState(false);
   const [collapsedVisibleFilterCount, setCollapsedVisibleFilterCount] = useState(4);
   const [sidebarFixedWidth, setSidebarFixedWidth] = useState(null);
   const sidebarTabsMainRef = useRef(null);
-  const filterCollapseTimerRef = useRef(null);
 
   const allTabs = [{
     id: 'clipboard',
@@ -122,11 +123,7 @@ function TabNavigation({
     icon: 'ti ti-mood-smile'
   }];
   const tabs = allTabs.filter(tab => tab.id === 'clipboard' || visibleOptionalTabs.includes(tab.id));
-  const horizontalTabAreaMinPercent = 28;
-  const horizontalTabAreaMaxPercent = 50;
-  const horizontalTabAreaPercent = allTabs.length <= 1
-    ? horizontalTabAreaMaxPercent
-    : horizontalTabAreaMinPercent + (tabs.length - 1) * ((horizontalTabAreaMaxPercent - horizontalTabAreaMinPercent) / (allTabs.length - 1));
+  const horizontalTabAreaPercent = 35;
   const horizontalRightAreaPercent = 100 - horizontalTabAreaPercent;
 
   const emojiModes = [{
@@ -145,10 +142,6 @@ function TabNavigation({
   }];
 
   const filters = [{
-    id: 'all',
-    label: t('filter.all') || '全部',
-    icon: "ti ti-category"
-  }, {
     id: 'text',
     label: t('filter.text') || '文本',
     icon: "ti ti-file-text"
@@ -190,18 +183,8 @@ function TabNavigation({
   }, [activeTab]);
 
   const updateFilterIndicator = useCallback(() => {
-    const activeElement = filtersRef.current[contentFilter];
-    const activeFilterIndex = FILTER_IDS.indexOf(contentFilter);
-    const isHiddenInCollapsedState = !shouldExpandFilters && activeFilterIndex >= collapsedVisibleFilterCount;
-
-    if (isHiddenInCollapsedState) {
-      applyIndicatorPosition(controlsIndicatorRef.current, { width: 0, left: 0 });
-      return;
-    }
-
-    const nextIndicator = measureIndicator(activeElement, controlsContainerRef.current);
-    applyIndicatorPosition(controlsIndicatorRef.current, nextIndicator);
-  }, [contentFilter, shouldExpandFilters, collapsedVisibleFilterCount]);
+    applyIndicatorPosition(controlsIndicatorRef.current, { width: 0, left: 0 });
+  }, []);
 
   const updateEmojiModeIndicator = useCallback(() => {
     const activeElement = emojiModesRef.current[emojiMode];
@@ -242,18 +225,6 @@ function TabNavigation({
       setIsSidebarCollapsed(false);
     }
   }, [isSidebarLayout]);
-
-  useEffect(() => {
-    if (activeTab === 'emoji') {
-      return undefined;
-    }
-    const timer = setTimeout(() => {
-      setFilterAnimationKey(prev => prev + 1);
-    }, 300);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [contentFilter, activeTab]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -490,21 +461,11 @@ function TabNavigation({
     setIsFilterExpanded(true);
   };
 
-  const handleFilterAreaMouseLeave = (event) => {
-    if (isFilterAutoExpanded) {
-      return;
-    }
-    const nextTarget = event?.relatedTarget;
-    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
-      return;
-    }
-    if (filterCollapseTimerRef.current) {
-      clearTimeout(filterCollapseTimerRef.current);
-    }
-    filterCollapseTimerRef.current = setTimeout(() => {
-      setIsFilterExpanded(false);
-      filterCollapseTimerRef.current = null;
-    }, 180);
+  const handlePasteFilterChange = id => {
+    const nextFilters = isPasteFilterSelected(id)
+      ? selectedPasteFilters.filter(filterId => filterId !== id)
+      : [...selectedPasteFilters, id];
+    onPasteFilterChange(nextFilters.join(',') || 'all');
   };
 
   const renderSidebarButton = ({
@@ -603,8 +564,12 @@ function TabNavigation({
                     id: filter.id,
                     label: filter.label,
                     icon: filter.icon,
-                    isActive: contentFilter === filter.id,
-                    onClick: onFilterChange,
+                    isActive: pasteFilters.some(item => item.id === filter.id)
+                      ? isPasteFilterSelected(filter.id)
+                      : isFilterSelected(filter.id),
+                    onClick: pasteFilters.some(item => item.id === filter.id)
+                      ? handlePasteFilterChange
+                      : handleFilterChange,
                     showLabel: sidebarShowLabel,
                     buttonRef: el => {
                       filtersRef.current[filter.id] = el;
@@ -760,7 +725,7 @@ function TabNavigation({
               top: '50%',
               transform: 'translateY(-50%)'
             }}>
-              <div key={activeTab === 'emoji' ? `emoji-mode-bounce-${emojiModeAnimationKey}` : `filter-bounce-${filterAnimationKey}`} className={`w-full h-full rounded-lg bg-[var(--qc-accent)] ${uiAnimationEnabled ? 'animate-button-bounce' : ''}`} />
+              <div key={`emoji-mode-bounce-${emojiModeAnimationKey}`} className={`w-full h-full rounded-lg bg-[var(--qc-accent)] ${uiAnimationEnabled ? 'animate-button-bounce' : ''}`} />
             </div>
           )}
           {activeTab === 'emoji'

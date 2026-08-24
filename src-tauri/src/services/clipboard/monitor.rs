@@ -205,7 +205,7 @@ pub fn start_clipboard_monitor() -> Result<(), String> {
             IS_RUNNING.store(false, Ordering::SeqCst);
             #[cfg(target_os = "windows")]
             crate::services::system::stop_clipboard_source_monitor();
-            return Err(format!("创建剪贴板监听器失败: {error}"));
+            return Err(format!("创建剪贴板监听器失败: {}", error));
         }
     };
     let watcher_shutdown = watcher.get_shutdown_channel();

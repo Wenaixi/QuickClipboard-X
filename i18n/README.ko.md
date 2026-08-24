@@ -30,7 +30,7 @@
 
 ## 소개
 
-**QuickClipboard**는 Tauri 2 + Rust + React로 구축된 크로스 플랫폼 클립보드 강화 도구입니다 (현재 Windows 및 Android 지원). 복사하는 순간 자동으로 텍스트, 이미지, 리치 텍스트, 파일을 기록하여 이전에 복사한 모든 내용을 언제든지 찾아볼 수 있습니다. 기록뿐만 아니라 스크린샷, 이미지 고정, OCR, WebDAV 동기화, LAN 동기화/전송 등 다양한 기능을 통합하여 일상 업무 생산성을 획기적으로 향상시킵니다.
+**QuickClipboard**는 Tauri 2 + Rust + React로 구축된 크로스 플랫폼 클립보드 강화 도구입니다 (현재 Windows 및 Android 지원). 복사하는 순간 자동으로 텍스트, 이미지, 리치 텍스트, 파일을 기록하여 이전에 복사한 모든 내용을 언제든지 찾아볼 수 있습니다. 기록뿐만 아니라 이미지 고정, OCR, WebDAV 동기화, LAN 동기화/전송 등 다양한 기능을 통합하여 일상 업무 생산성을 획기적으로 향상시킵니다.
 
 > 네이티브 성능, 낮은 메모리 사용량, 실행 즉시 사용 가능, 시스템 트레이 상주.
 
@@ -45,9 +45,8 @@
 | 빠른 붙여넣기            | 목록에서 붙여넣기 · 숫자 키 1-9로 붙여넣기 · 일반 텍스트 / 서식 유지 붙여넣기 · 병합 복사 / 병합 붙여넣기 · 원샷 붙여넣기 · 빠른 붙여넣기 창 · Win+V 지원 |
 | 즐겨찾기 및 그룹         | 자주 사용하는 내용 즐겨찾기 · 사용자 정의 그룹 / 아이콘 / 색상 · 그룹 정렬 · 그룹으로 일괄 이동 · 단축키로 그룹 전환 |
 | Emoji / 기호 / 갤러리    | 완전한 이모지 세트 · 기호 라이브러리 · 사용자 정의 이미지 / GIF 갤러리 · 최근 사용 · 드래그 또는 클릭으로 사용       |
-| 화면에 고정              | 데스크탑 상단 고정 · GPU 가속 렌더링 · 드래그로 크기 조절 / 고정 · 복사 / 다른 이름으로 저장 · 스크린샷 후 바로 고정 |
-| 내장 스크린샷            | 일반 스크린샷 · 빠른 스크린샷 / 빠른 고정 / 빠른 OCR · 다중 모니터 지원 · 스크롤 스크린샷 · 자동 영역 감지 · 화면 색상 추출 · 주석 편집 |
-| OCR 인식                 | 이미지 OCR · 스크린샷 OCR · 원클릭 텍스트 추출 및 복사                                                                 |
+| 화면에 고정              | 데스크탑 상단 고정 · 드래그로 크기 조절 / 고정 · 복사 / 다른 이름으로 저장 |
+| OCR 인식                 | 이미지 OCR · 원클릭 텍스트 추출 및 복사                                 |
 | 동기화 / 전송            | WebDAV 전체 동기화 · LAN HTTP 직접 연결 · 페어링 코드 연결 · 자동 푸시/풀 · 파일 전송                                  |
 | 가장자리 스냅 및 창      | 화면 가장자리에서 자동 숨김 · 커서 따라 호출 · 창 고정 · 위치 / 크기 기억 · 제목 표시줄 방향 전환                      |
 | 개인화                   | 시스템 테마 따르기 / 라이트-다크 테마 / 슈퍼 배경 · 여러 테마 스타일 · 사용자 정의 배경 / 흐림 · 사용자 정의 글꼴 · 애니메이션 전환 |
@@ -152,9 +151,9 @@
 
 | 유형                                                          |                     설명 |                                                           다운로드 수                                                          | 링크                                                                                                                                                                                                |
 | ------------------------------------------------------------- | -----------------------: | :--------------------------------------------------------------------------------------------------------------------------: | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **NSIS 설치 프로그램**<br>`QuickClipboard_0.4.2_x64-setup.exe` | 권장; 자동 제거 지원      | ![다운로드](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_0.4.2_x64-setup.exe?label=)       | [![다운로드 NSIS](https://img.shields.io/badge/다운로드-NSIS설치프로그램-blue?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.4.2/QuickClipboard_0.4.2_x64-setup.exe) |
-| **일반 포터블**<br>`QuickClipboard_0.4.2.exe`                  |       설치 불필요, 바로 사용 | ![다운로드](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_0.4.2.exe?label=)                | [![다운로드 포터블](https://img.shields.io/badge/다운로드-포터블-orange?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.4.2/QuickClipboard_0.4.2.exe)    |
-| **USB 포터블**<br>`QuickClipboard_0.4.2_portable.exe`          |     USB 및 모바일 사용에 적합 | ![다운로드](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_0.4.2_portable.exe?label=)        | [![다운로드 USB](https://img.shields.io/badge/다운로드-USB포터블-green?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.4.2/QuickClipboard_0.4.2_portable.exe) |
+| **NSIS 설치 프로그램**<br>`QuickClipboard_0.5.0_x64-setup.exe` | 권장; 자동 제거 지원      | ![다운로드](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_0.5.0_x64-setup.exe?label=)       | [![다운로드 NSIS](https://img.shields.io/badge/다운로드-NSIS설치프로그램-blue?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.5.0/QuickClipboard_0.5.0_x64-setup.exe) |
+| **일반 포터블**<br>`QuickClipboard_0.5.0.exe`                  |       설치 불필요, 바로 사용 | ![다운로드](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_0.5.0.exe?label=)                | [![다운로드 포터블](https://img.shields.io/badge/다운로드-포터블-orange?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.5.0/QuickClipboard_0.5.0.exe)    |
+| **USB 포터블**<br>`QuickClipboard_0.5.0_portable.exe`          |     USB 및 모바일 사용에 적합 | ![다운로드](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_0.5.0_portable.exe?label=)        | [![다운로드 USB](https://img.shields.io/badge/다운로드-USB포터블-green?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.5.0/QuickClipboard_0.5.0_portable.exe) |
 | **Android APK**<br>`QuickClipboard_Android_v1.0.4.apk`         |       Android 기기용 | ![다운로드](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_Android_v1.0.4.apk?label=)        | [![다운로드 Android](https://img.shields.io/badge/다운로드-Android-success?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.4.0/QuickClipboard_Android_v1.0.4.apk) |
 | **클라우드 드라이브**                                          |    GitHub 속도가 느릴 때 대체 수단 |                                                          —                                                                    | [![클라우드 드라이브](https://img.shields.io/badge/클라우드드라이브-클릭-red?style=for-the-badge)](https://www.123912.com/s/A9Ckjv-Vu75v?pwd=UhWA#)                                                |
 

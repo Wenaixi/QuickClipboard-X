@@ -22,16 +22,31 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
-      - name: Checkout
+      - name: Add GitHub to known hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+        shell: bash
+
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+
+      - name: Configure Cargo to use git CLI
+        run: |
+          mkdir -p ~/.cargo
+          echo '[net]' >> ~/.cargo/config.toml
+          echo 'git-fetch-with-cli = true' >> ~/.cargo/config.toml
+        shell: bash
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: lts/*
-          cache: npm
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable

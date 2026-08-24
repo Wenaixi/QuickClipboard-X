@@ -47,3 +47,4 @@ export async function saveTransferShelfState(id, files, selectedPeerIds) {
 export async function saveTransferShelfGeometry(id) {
   return await invoke('transfer_shelf_save_geometry', { id });
 }
+

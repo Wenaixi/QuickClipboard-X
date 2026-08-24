@@ -30,7 +30,7 @@
 
 ## 简介
 
-**QuickClipboard** 是一款跨平台剪贴板增强工具（现支持Windows，Android），基于 Tauri 2 + Rust + React 构建。它在你复制的那一刻就开始工作——自动记录文本、图片、富文本、文件，让你随时找回曾经复制过的任何内容。不只是记录，QuickClipboard 还集成了截图、贴图、OCR、WebDAV 同步与局域网同步/传输等能力，是日常办公效率的全面提升。
+**QuickClipboard** 是一款跨平台剪贴板增强工具（现支持Windows，Android），基于 Tauri 2 + Rust + React 构建。它在你复制的那一刻就开始工作——自动记录文本、图片、富文本、文件，让你随时找回曾经复制过的任何内容。不只是记录，QuickClipboard 还集成了贴图、OCR、WebDAV 同步与局域网同步/传输等能力，是日常办公效率的全面提升。
 
 > 原生性能，内存占用低，启动即用，常驻系统托盘。
 
@@ -45,9 +45,8 @@
 | 快速粘贴            | 列表粘贴 · 数字快捷键 1-9 粘贴 · 纯文本 / 带格式粘贴 · 合并复制 / 合并粘贴 · 一次性粘贴 · 便捷粘贴窗口 · Win+V 支持 |
 | 收藏与分组          | 收藏常用内容 · 自定义分组 / 图标 / 颜色 · 分组排序 · 批量移动到分组 · 快捷键切换分组                                |
 | Emoji / 符号 / 图库 | Emoji 大全 · 符号大全 · 自定义图片 / GIF 图库 · 最近使用 · 拖拽 / 点击即用                                          |
-| 贴图到屏幕          | 桌面置顶贴图 · GPU 加速渲染 · 拖拽缩放 / 置顶 · 复制 / 另存为 · 截图后直接贴图                                      |
-| 内置截图            | 普通截图 · 快速截屏 / 快速贴图 / 快速 OCR · 多屏支持 · 长截图 · 自动选区 · 屏幕取色 · 标注编辑                      |
-| OCR 识别            | 图片 OCR · 截图 OCR · 一键提取并复制文字                                                                            |
+| 贴图到屏幕          | 桌面置顶贴图 · 拖拽缩放 / 置顶 · 复制 / 另存为                                                                      |
+| OCR 识别            | 图片 OCR · 一键提取并复制文字                                                                                        |
 | 同步 / 传输         | WebDAV 全同步 · 局域网 HTTP 直连 · 配对码连接 · 自动推拉 · 文件发送                                                |
 | 边缘吸附与窗口      | 屏幕边缘自动隐藏 · 跟随光标唤出 · 窗口置顶 · 记忆位置 / 尺寸 · 标题栏方向切换                                       |
 | 个性化              | 跟随系统 / 明暗主题 / 超级背景 · 多套主题风格 · 自定义背景 / 模糊 · 自定义字体 · 动画开关                           |
@@ -148,13 +147,13 @@
 
 ---
 
-## 下载方式（v0.4.2）
+## 下载方式（v0.5.0）
 
 | 类型                                                      |                       说明 |                                                        下载量                                                        | 链接                                                                                                                                                                                            |
 | --------------------------------------------------------- | -------------------------: | :------------------------------------------------------------------------------------------------------------------: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **NSIS 安装包**<br>`QuickClipboard_0.4.2_x64-setup.exe` | 推荐安装方式，支持自动卸载 | ![下载量](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_0.4.2_x64-setup.exe?label=) | [![下载 NSIS](https://img.shields.io/badge/下载-NSIS安装包-blue?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.4.2/QuickClipboard_0.4.2_x64-setup.exe) |
-| **绿色版**<br>`QuickClipboard_0.4.2.exe`                |       免安装，双击即可使用 |      ![下载量](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_0.4.2.exe?label=)      | [![下载绿色版](https://img.shields.io/badge/下载-绿色版-orange?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.4.2/QuickClipboard_0.4.2.exe)            |
-| **便携版**<br>`QuickClipboard_0.4.2_portable.exe`       |      更适合放U盘或移动使用 | ![下载量](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_0.4.2_portable.exe?label=)  | [![下载便携版](https://img.shields.io/badge/下载-便携版-green?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.4.2/QuickClipboard_0.4.2_portable.exe)    |
+| **NSIS 安装包**<br>`QuickClipboard_0.5.0_x64-setup.exe` | 推荐安装方式，支持自动卸载 | ![下载量](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_0.5.0_x64-setup.exe?label=) | [![下载 NSIS](https://img.shields.io/badge/下载-NSIS安装包-blue?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.5.0/QuickClipboard_0.5.0_x64-setup.exe) |
+| **绿色版**<br>`QuickClipboard_0.5.0.exe`                |       免安装，双击即可使用 |      ![下载量](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_0.5.0.exe?label=)      | [![下载绿色版](https://img.shields.io/badge/下载-绿色版-orange?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.5.0/QuickClipboard_0.5.0.exe)            |
+| **便携版**<br>`QuickClipboard_0.5.0_portable.exe`       |      更适合放U盘或移动使用 | ![下载量](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_0.5.0_portable.exe?label=)  | [![下载便携版](https://img.shields.io/badge/下载-便携版-green?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.5.0/QuickClipboard_0.5.0_portable.exe)    |
 | **安卓版**<br>`QuickClipboard_Android_v1.0.4.apk`       |    适用于 Android 设备安装 | ![下载量](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_Android_v1.0.4.apk?label=)  | [![下载安卓版](https://img.shields.io/badge/下载-安卓版-success?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.4.0/QuickClipboard_Android_v1.0.4.apk)  |
 | **网盘下载**                                            |    GitHub 较慢时的备用渠道 |                                                          —                                                           | [![网盘下载](https://img.shields.io/badge/网盘下载-点击进入-red?style=for-the-badge)](https://www.123912.com/s/A9Ckjv-Vu75v?pwd=UhWA#)                                                        |
 

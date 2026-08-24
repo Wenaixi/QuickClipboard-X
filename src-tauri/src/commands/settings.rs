@@ -177,7 +177,6 @@ pub fn save_settings(mut settings: AppSettings, app: tauri::AppHandle) -> Result
         }
     }
 
-
     Ok(())
 }
 
