@@ -70,6 +70,9 @@ pub fn start_edge_monitoring() {
                 continue;
             }
             if !state.is_snapped || state.is_dragging {
+                mouse_state_version.fetch_add(1, Ordering::SeqCst);
+                not_near_since_ms = None;
+                last_near_state = None;
                 std::thread::sleep(Duration::from_millis(100));
                 continue;
             }
@@ -78,7 +81,14 @@ pub fn start_edge_monitoring() {
             if popup_state.is_expired(current_time_millis()) && !state.is_hidden {
                 let session_id = popup_state.session_id;
                 let window_for_task = window.clone();
+                let mouse_state_version_for_task = mouse_state_version.clone();
+                let expected_mouse_state_version = mouse_state_version.load(Ordering::SeqCst);
                 let _ = window.app_handle().run_on_main_thread(move || {
+                    if mouse_state_version_for_task.load(Ordering::SeqCst)
+                        != expected_mouse_state_version
+                    {
+                        return;
+                    }
                     let current_state = crate::get_window_state();
                     let current_popup = super::state::mouse_auto_popup_state();
                     if current_state.is_hidden
@@ -158,8 +168,7 @@ pub fn start_edge_monitoring() {
                         }
                     }
                 });
-            } else if matches!(transition, MouseEdgeTransition::Leave)
-                && !is_near
+            } else if !is_near
                 && !state.is_hidden
                 && !state.is_pinned
                 && not_near_since_ms
@@ -336,5 +345,37 @@ fn ").unwrap_or(tail.len());
             .expect("缺少会话清理");
         assert!(hide < clear);
         assert!(body.contains("current_popup.is_current(session_id)"));
+    }
+
+    #[test]
+    fn delayed_hide_rechecks_on_stable_far_samples() {
+        let source = source_file("src/windows/main_window/edge_monitor.rs");
+        let body = strip_line_comments(&function_body(&source, "start_edge_monitoring"));
+        let stable_guard = body
+            .find("if !state_changed && (is_near || state.is_hidden || state.is_pinned)")
+            .expect("缺少稳定采样快速路径");
+        let hide = body[stable_guard..]
+            .find("hide_snapped_window")
+            .map(|offset| stable_guard + offset)
+            .expect("稳定离开后必须仍有延迟隐藏路径");
+        assert!(stable_guard < hide);
+        assert!(!body[hide..].contains("MouseEdgeTransition::Leave"));
+    }
+
+    #[test]
+    fn stale_timeout_task_is_invalidated_when_window_leaves_snap() {
+        let source = source_file("src/windows/main_window/edge_monitor.rs");
+        let body = strip_line_comments(&function_body(&source, "start_edge_monitoring"));
+        let state_guard = body
+            .find("if !state.is_snapped || state.is_dragging")
+            .expect("缺少非贴边状态守卫");
+        let version_bump = body[state_guard..]
+            .find("mouse_state_version.fetch_add")
+            .map(|offset| state_guard + offset)
+            .expect("离开贴边状态必须失效旧任务");
+        let timeout_task = body
+            .find("mouse_state_version_for_task")
+            .expect("超时任务必须携带状态版本");
+        assert!(version_bump < timeout_task);
     }
 }
