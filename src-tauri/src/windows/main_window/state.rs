@@ -173,7 +173,12 @@ pub fn is_main_window_visible_for_updates() -> bool {
 }
 
 pub fn set_dragging(is_dragging: bool) {
-    WINDOW_STATE.write().is_dragging = is_dragging;
+    let mut state = WINDOW_STATE.write();
+    if is_dragging && !state.is_dragging && state.mouse_auto_popup.active {
+        let session_id = next_mouse_auto_popup_session_id(state.mouse_auto_popup.session_id);
+        state.mouse_auto_popup = MouseAutoPopupState::inactive_with_session(session_id);
+    }
+    state.is_dragging = is_dragging;
 }
 
 pub fn set_snap_edge(
@@ -537,5 +542,14 @@ fn begin_animation",
         set_pinned(!initial_pinned);
         assert_eq!(mouse_auto_popup_state().session_id, before);
         set_pinned(initial_pinned);
+    }
+
+    #[test]
+    fn starting_drag_invalidates_active_popup_session() {
+        let _guard = lock_serial();
+        let session_id = start_mouse_auto_popup(1_000);
+        set_dragging(true);
+        assert!(!mouse_auto_popup_state().is_current(session_id));
+        set_dragging(false);
     }
 }
