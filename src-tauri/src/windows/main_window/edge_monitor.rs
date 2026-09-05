@@ -70,9 +70,6 @@ pub fn start_edge_monitoring() {
                 continue;
             }
             if !state.is_snapped || state.is_dragging {
-                if state.is_dragging {
-                    super::state::invalidate_mouse_auto_popup();
-                }
                 mouse_state_version.fetch_add(1, Ordering::SeqCst);
                 not_near_since_ms = None;
                 last_near_state = None;
@@ -382,5 +379,9 @@ fn ").unwrap_or(tail.len());
         assert!(version_bump < timeout_task);
         assert!(body[state_guard..].contains("not_near_since_ms = None"));
         assert!(body[state_guard..].contains("last_near_state = None"));
+        assert!(
+            !body[state_guard..].contains("super::state::invalidate_mouse_auto_popup()"),
+            "拖拽会话失效必须由 set_dragging 统一负责，监控线程不得重复推进会话代际"
+        );
     }
 }
