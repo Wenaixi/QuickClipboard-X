@@ -202,9 +202,13 @@ pub fn mouse_auto_popup_state() -> MouseAutoPopupState {
 
 pub fn start_mouse_auto_popup(deadline_ms: u64) -> u64 {
     let mut state = WINDOW_STATE.write();
-    let session_id = state.mouse_auto_popup.session_id.saturating_add(1);
+    let session_id = next_mouse_auto_popup_session_id(state.mouse_auto_popup.session_id);
     state.mouse_auto_popup = MouseAutoPopupState::start(session_id, deadline_ms);
     session_id
+}
+
+fn next_mouse_auto_popup_session_id(current: u64) -> u64 {
+    current.checked_add(1).expect("自动弹出会话 ID 已耗尽")
 }
 
 pub fn promote_mouse_auto_popup_for_session(session_id: u64) -> bool {
@@ -227,7 +231,7 @@ pub fn clear_mouse_auto_popup_for_session(session_id: u64) -> bool {
 
 pub fn invalidate_mouse_auto_popup() {
     let mut state = WINDOW_STATE.write();
-    let session_id = state.mouse_auto_popup.session_id.saturating_add(1);
+    let session_id = next_mouse_auto_popup_session_id(state.mouse_auto_popup.session_id);
     state.mouse_auto_popup = MouseAutoPopupState::inactive_with_session(session_id);
 }
 
@@ -270,8 +274,6 @@ pub fn clear_snap() {
     state.snap_position = None;
     state.snap_monitor_id = None;
     state.snap_ratio = None;
-    let session_id = state.mouse_auto_popup.session_id.saturating_add(1);
-    state.mouse_auto_popup = MouseAutoPopupState::inactive_with_session(session_id);
 }
 
 pub fn set_pinned(is_pinned: bool) {
@@ -285,12 +287,119 @@ pub fn is_pinned() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+    use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Mutex, MutexGuard};
+    use std::thread;
 
     static SERIAL: Mutex<()> = Mutex::new(());
+    static SNAP_SOURCE: OnceLock<String> = OnceLock::new();
+
+    fn snap_source() -> &'static str {
+        SNAP_SOURCE.get_or_init(|| {
+            std::fs::read_to_string(format!(
+                "{}/src/windows/main_window/snap.rs",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .expect("找不到 snap.rs 源文件")
+        })
+    }
 
     fn lock_serial() -> MutexGuard<'static, ()> {
-        SERIAL.lock().unwrap_or_else(|error| error.into_inner())
+        SERIAL.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn strip_line_comments(source: &str) -> String {
+        source
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("
+")
+    }
+
+    fn function_body(source: &str, name: &str, end_marker: &str) -> String {
+        let start = source.find(name).expect("找不到函数定义");
+        let after = &source[start..];
+        let end = after.find(end_marker).unwrap_or(after.len());
+        strip_line_comments(&after[..end])
+    }
+
+    #[test]
+    fn hidden_accounting_is_atomic_under_concurrent_reads() {
+        let _guard = lock_serial();
+        set_snap_edge(SnapEdge::Right, Some((0, 0)), None, Some(0.5));
+        set_hidden_and_window_state(false, WindowState::Visible);
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_read = stop.clone();
+        let observed_tear = Arc::new(AtomicBool::new(false));
+        let tear_read = observed_tear.clone();
+        let reader = thread::spawn(move || {
+            while !stop_read.load(Ordering::Relaxed) {
+                let state = get_window_state();
+                if state.is_snapped && state.is_hidden && state.state != WindowState::Hidden {
+                    tear_read.store(true, Ordering::Relaxed);
+                }
+            }
+        });
+
+        for _ in 0..10_000 {
+            set_hidden_and_window_state(true, WindowState::Hidden);
+            set_hidden_and_window_state(false, WindowState::Visible);
+        }
+
+        stop.store(true, Ordering::Relaxed);
+        reader.join().unwrap();
+        assert!(!observed_tear.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn refresh_writes_hidden_accounting_through_atomic_entry() {
+        let body = function_body(
+            snap_source(),
+            "pub fn refresh_hidden_snapped_window",
+            "
+pub fn ",
+        );
+        assert!(body.contains(
+            "set_hidden_and_window_state(true, super::state::WindowState::Hidden)"
+        ));
+        assert!(!body.contains("set_hidden("));
+        assert!(!body.contains("set_window_state("));
+    }
+
+    #[test]
+    fn refresh_rechecks_state_before_writing_hidden_back() {
+        let body = function_body(
+            snap_source(),
+            "pub fn refresh_hidden_snapped_window",
+            "
+pub fn ",
+        );
+        let recheck = body
+            .find("if super::state::get_window_state().is_hidden")
+            .expect("refresh 必须先重查隐藏状态");
+        let write = body
+            .find("set_hidden_and_window_state(true, super::state::WindowState::Hidden)")
+            .expect("refresh 必须有隐藏原子写入");
+        assert!(recheck < write);
+    }
+
+    #[test]
+    fn show_writes_visible_accounting_through_atomic_entry() {
+        let body = function_body(
+            snap_source(),
+            "pub fn show_snapped_window",
+            "
+fn begin_animation",
+        );
+        assert!(body.contains(
+            "set_hidden_and_window_state(false, super::state::WindowState::Visible)"
+        ));
+        assert!(!body.contains("set_hidden("));
+        assert!(!body.contains("set_window_state("));
     }
 
     #[test]
@@ -359,5 +468,11 @@ mod tests {
         invalidate_mouse_auto_popup();
         let third = start_mouse_auto_popup(3_000);
         assert!(third > second);
+    }
+
+    #[test]
+    fn session_id_allocator_rejects_overflow_instead_of_reusing_id() {
+        assert_eq!(next_mouse_auto_popup_session_id(u64::MAX - 1), u64::MAX);
+        assert!(std::panic::catch_unwind(|| next_mouse_auto_popup_session_id(u64::MAX)).is_err());
     }
 }

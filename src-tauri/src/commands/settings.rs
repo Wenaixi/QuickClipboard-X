@@ -13,7 +13,10 @@ fn handle_disable_edge_hide(app: &tauri::AppHandle) {
 
         if state.is_snapped {
             if state.is_hidden {
-                let _ = crate::windows::main_window::show_snapped_window(&window);
+                let _ = crate::windows::main_window::show_snapped_window(
+                    &window,
+                    crate::windows::main_window::MainWindowShowSource::Explicit,
+                );
             }
             let _ = crate::windows::main_window::restore_from_snap(&window);
             crate::windows::main_window::stop_edge_monitoring();

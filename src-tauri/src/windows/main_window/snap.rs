@@ -1,5 +1,5 @@
 use tauri::{WebviewWindow, Manager, Emitter};
-use super::state::{SnapEdge, set_snap_edge, set_hidden_and_window_state, clear_snap, is_snapped};
+use super::state::{MainWindowShowSource, SnapEdge, set_snap_edge, set_hidden_and_window_state, clear_snap, is_snapped};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -752,13 +752,20 @@ pub fn needs_hidden_snap_refresh(window: &WebviewWindow) -> Result<bool, String>
     )
 }
 
-pub fn show_snapped_window(window: &WebviewWindow) -> Result<(), String> {
+pub fn show_snapped_window(
+    window: &WebviewWindow,
+    source: MainWindowShowSource,
+) -> Result<(), String> {
     crate::windows::preview_window::resume_preview_after_main_window_show();
 
     let state = super::state::get_window_state();
 
     if !state.is_snapped {
         return Ok(());
+    }
+
+    if matches!(source, MainWindowShowSource::Explicit) {
+        super::state::invalidate_mouse_auto_popup();
     }
 
     // 取消任何在飞的 hide 动画/post-refresh 任务:
@@ -845,7 +852,10 @@ pub fn show_snapped_window(window: &WebviewWindow) -> Result<(), String> {
     let _ = super::refresh_always_on_top(window);
 
     crate::input_monitor::enable_mouse_monitoring();
-    crate::input_monitor::enable_navigation_keys();
+    match source {
+        MainWindowShowSource::Explicit => crate::input_monitor::enable_navigation_keys(),
+        MainWindowShowSource::MouseAuto => crate::input_monitor::disable_navigation_keys(),
+    }
     
     Ok(())
 }

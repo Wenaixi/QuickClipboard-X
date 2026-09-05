@@ -1,4 +1,4 @@
-use super::state::{set_window_state, WindowState};
+use super::state::{MainWindowShowSource, set_window_state, WindowState};
 use tauri::{AppHandle, LogicalSize, Manager, WebviewWindow};
 
 #[cfg(not(target_os = "windows"))]
@@ -22,6 +22,8 @@ fn capture_window_logical_size(window: &WebviewWindow) -> Result<(u32, u32), Str
 
 // 显示主窗口
 pub fn show_main_window(window: &WebviewWindow) {
+    super::state::invalidate_mouse_auto_popup();
+
     if crate::services::system::is_front_app_globally_disabled_from_settings() {
         return;
     }
@@ -29,7 +31,7 @@ pub fn show_main_window(window: &WebviewWindow) {
     let state = super::state::get_window_state();
 
     if state.is_snapped && state.is_hidden {
-        let _ = super::show_snapped_window(window);
+        let _ = super::show_snapped_window(window, MainWindowShowSource::Explicit);
         return;
     }
 
@@ -43,6 +45,8 @@ pub fn show_main_window(window: &WebviewWindow) {
 
 // 隐藏主窗口
 pub fn hide_main_window(window: &WebviewWindow) {
+    super::state::invalidate_mouse_auto_popup();
+
     if crate::is_context_menu_visible() {
         return;
     }
@@ -98,7 +102,10 @@ pub fn toggle_main_window_visibility(app: &AppHandle) {
 
             if should_show {
                 if state.is_snapped && !state.is_hidden && native_visible == Some(false) {
-                    let _ = super::show_snapped_window(&window);
+                    let _ = super::show_snapped_window(
+                        &window,
+                        MainWindowShowSource::Explicit,
+                    );
                 } else {
                     show_main_window(&window);
                 }
