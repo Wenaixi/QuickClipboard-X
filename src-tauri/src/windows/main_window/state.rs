@@ -183,6 +183,11 @@ pub fn set_snap_edge(
     ratio: Option<f64>,
 ) {
     let mut state = WINDOW_STATE.write();
+    if edge == SnapEdge::None {
+        state.mouse_auto_popup = MouseAutoPopupState::inactive_with_session(
+            state.mouse_auto_popup.session_id,
+        );
+    }
     state.is_snapped = edge != SnapEdge::None;
     state.snap_edge = edge;
     state.snap_position = position;
@@ -267,6 +272,7 @@ pub fn is_snapped() -> bool {
 }
 
 pub fn clear_snap() {
+    invalidate_mouse_auto_popup();
     let mut state = WINDOW_STATE.write();
     state.is_snapped = false;
     state.is_hidden = false;
@@ -474,5 +480,15 @@ fn begin_animation",
     fn session_id_allocator_rejects_overflow_instead_of_reusing_id() {
         assert_eq!(next_mouse_auto_popup_session_id(u64::MAX - 1), u64::MAX);
         assert!(std::panic::catch_unwind(|| next_mouse_auto_popup_session_id(u64::MAX)).is_err());
+    }
+
+    #[test]
+    fn clearing_snap_invalidates_popup_session() {
+        let _guard = lock_serial();
+        set_snap_edge(SnapEdge::Left, Some((0, 0)), None, Some(0.5));
+        let session_id = start_mouse_auto_popup(1_000);
+        clear_snap();
+        assert!(!mouse_auto_popup_state().is_current(session_id));
+        assert!(!get_window_state().is_snapped);
     }
 }

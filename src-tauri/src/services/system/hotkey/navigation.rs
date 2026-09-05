@@ -14,6 +14,7 @@ static NAVIGATION_HOTKEYS_LIFECYCLE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::
 static NAVIGATION_HOTKEYS_DESIRED: AtomicBool = AtomicBool::new(false);
 static NAVIGATION_HOTKEYS_REGISTERED: AtomicBool = AtomicBool::new(false);
 static EXECUTE_ITEM_HOTKEY_SUSPENDED: AtomicBool = AtomicBool::new(false);
+static NAVIGATION_UNREGISTER_RETRY_PENDING: AtomicBool = AtomicBool::new(false);
 static NAVIGATION_REPEAT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 static NAVIGATION_THROTTLE_STATE: Lazy<Mutex<HashMap<String, Instant>>> =
@@ -48,6 +49,7 @@ pub fn enable_navigation_hotkeys() {
     // 消除锁外 store 的 lost wakeup：并发 disable 在 store 与 sync 之间
     // 抢锁时，enable 的 sync 可能看到 desired=true 直接跳过注册。
     let _guard = NAVIGATION_SYNC_LOCK.lock();
+    let _lifecycle_guard = NAVIGATION_HOTKEYS_LIFECYCLE_LOCK.lock();
     NAVIGATION_HOTKEYS_DESIRED.store(true, Ordering::SeqCst);
     sync_navigation_hotkeys_for_foreground_locked();
 }
@@ -58,7 +60,7 @@ pub fn disable_navigation_hotkeys() {
     // 之间抢锁时,enable 的 sync 可能看到 desired=true 跳过注册。
     let _guard = NAVIGATION_SYNC_LOCK.lock();
     NAVIGATION_HOTKEYS_DESIRED.store(false, Ordering::SeqCst);
-    unregister_navigation_hotkeys();
+    unregister_navigation_hotkeys_locked();
 }
 
 // 输入框获得焦点时暂停执行粘贴快捷键，避免全局 Enter 抢占输入法组合提交。
@@ -85,6 +87,12 @@ pub fn sync_navigation_hotkeys_for_foreground() {
 }
 
 fn sync_navigation_hotkeys_for_foreground_locked() {
+    if NAVIGATION_UNREGISTER_RETRY_PENDING.load(Ordering::SeqCst)
+        && !unregister_navigation_hotkeys_locked()
+    {
+        return;
+    }
+
     if !NAVIGATION_HOTKEYS_DESIRED.load(Ordering::SeqCst) {
         unregister_navigation_hotkeys_locked();
         return;
@@ -106,6 +114,12 @@ pub fn reload_navigation_hotkeys_from_settings() {
 }
 
 fn reload_navigation_hotkeys_from_settings_locked() {
+    if NAVIGATION_UNREGISTER_RETRY_PENDING.load(Ordering::SeqCst)
+        && !unregister_navigation_hotkeys_locked()
+    {
+        return;
+    }
+
     if !NAVIGATION_HOTKEYS_DESIRED.load(Ordering::SeqCst) {
         unregister_navigation_hotkeys_locked();
         return;
@@ -127,6 +141,7 @@ fn reload_navigation_hotkeys_from_settings_locked() {
 pub fn invalidate_navigation_hotkeys() {
     let _lifecycle_guard = NAVIGATION_HOTKEYS_LIFECYCLE_LOCK.lock();
     NAVIGATION_HOTKEYS_REGISTERED.store(false, Ordering::SeqCst);
+    NAVIGATION_UNREGISTER_RETRY_PENDING.store(false, Ordering::SeqCst);
     NAVIGATION_SHORTCUTS.lock().clear();
     NAVIGATION_REPEAT_SEQUENCE.fetch_add(1, Ordering::SeqCst);
     NAVIGATION_REPEAT_TOKENS.lock().clear();
@@ -230,7 +245,10 @@ fn unregister_navigation_hotkeys() {
 fn unregister_navigation_hotkeys_locked() -> bool {
     let app = match get_app() {
         Ok(app) => app,
-        Err(_) => return false,
+        Err(_) => {
+            NAVIGATION_UNREGISTER_RETRY_PENDING.store(true, Ordering::SeqCst);
+            return false;
+        }
     };
 
     let registrations = std::mem::take(&mut *NAVIGATION_SHORTCUTS.lock());
@@ -276,6 +294,7 @@ fn unregister_navigation_hotkeys_locked() -> bool {
 
     let fully_unregistered = remaining_registrations.is_empty();
     *NAVIGATION_SHORTCUTS.lock() = remaining_registrations;
+    NAVIGATION_UNREGISTER_RETRY_PENDING.store(!fully_unregistered, Ordering::SeqCst);
     NAVIGATION_HOTKEYS_REGISTERED.store(!fully_unregistered, Ordering::SeqCst);
     NAVIGATION_REPEAT_SEQUENCE.fetch_add(1, Ordering::SeqCst);
     NAVIGATION_REPEAT_TOKENS.lock().clear();
@@ -553,8 +572,8 @@ mod tests {
             "disable_navigation_hotkeys 必须持锁后 store(false)"
         );
         assert!(
-            b.find("unregister_navigation_hotkeys()").is_some(),
-            "disable_navigation_hotkeys 持锁内必须调 unregister_navigation_hotkeys"
+            b.find("unregister_navigation_hotkeys_locked()").is_some(),
+            "disable_navigation_hotkeys 持锁内必须调锁内注销函数"
         );
     }
 
@@ -714,10 +733,36 @@ mod tests {
             b.contains("-> bool"),
             "unregister_navigation_hotkeys 必须返回是否完全注销"
         );
+        assert!(
+            b.contains("NAVIGATION_UNREGISTER_RETRY_PENDING.store(!fully_unregistered"),
+            "注销结果必须写入待重试标志"
+        );
     }
 
-    // §10.3 源码护栏：注册新键前必须确认旧键已彻底注销，否则残留幽灵热键
-    // 与新键叠加，Windows 层 Enter/Tab/Esc 被吞。
+    // §10.3 源码护栏：同步入口必须先清理失败注销，再允许注册新键。
+    #[test]
+    fn navigation_sync_retries_before_registration() {
+        let src = strip_line_comments(&navigation_source());
+        for function in [
+            "sync_navigation_hotkeys_for_foreground_locked",
+            "reload_navigation_hotkeys_from_settings_locked",
+        ] {
+            let body = fn_body(&src, function);
+            let pending = body
+                .find("NAVIGATION_UNREGISTER_RETRY_PENDING.load")
+                .expect("同步入口必须检查注销重试状态");
+            let registration_marker = if function == "sync_navigation_hotkeys_for_foreground_locked" {
+                "reload_navigation_hotkeys_from_settings_locked()"
+            } else {
+                "register_navigation_hotkeys_from_settings_locked()"
+            };
+            let registration = body
+                .find(registration_marker)
+                .expect("同步入口必须包含后续注册路径");
+            assert!(pending < registration, "{} 必须先重试注销再注册", function);
+        }
+    }
+
     #[test]
     fn navigation_register_cancels_when_old_hotkeys_still_registered() {
         let src = strip_line_comments(&navigation_source());
