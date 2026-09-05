@@ -97,7 +97,8 @@ pub fn start_edge_monitoring() {
                     }
                     let current_state = crate::get_window_state();
                     let current_popup = super::state::mouse_auto_popup_state();
-                    if current_state.is_hidden
+                    if crate::is_context_menu_visible()
+                        || current_state.is_hidden
                         || current_state.is_dragging
                         || current_state.is_pinned
                         || !current_popup.is_current(session_id)
@@ -195,6 +196,12 @@ pub fn start_edge_monitoring() {
                     }
 
                     let current_state = crate::get_window_state();
+                    if crate::is_context_menu_visible() {
+                        return;
+                    }
+                    if !current_state.is_snapped {
+                        return;
+                    }
                     let mouse_still_outside = check_mouse_near_edge(&window_for_task, &current_state)
                         .map(|near| !near)
                         .unwrap_or(false);
@@ -350,7 +357,24 @@ fn ").unwrap_or(tail.len());
             .find("clear_mouse_auto_popup_for_session")
             .expect("缺少会话清理");
         assert!(hide < clear);
+        let menu_guard = body
+            .find("crate::is_context_menu_visible()")
+            .expect("超时隐藏必须检查上下文菜单");
+        assert!(menu_guard < hide);
         assert!(body.contains("current_popup.is_current(session_id)"));
+        assert!(body.contains("if crate::hide_snapped_window(&window_for_task).is_ok()"));
+        assert!(body.contains("if !current_state.is_snapped"));
+        let delayed_hide = body
+            .find("let mouse_still_outside")
+            .expect("缺少延迟隐藏回调");
+        let delayed_hide_menu_guard = body[..delayed_hide]
+            .rfind("if crate::is_context_menu_visible()")
+            .expect("延迟隐藏回调必须检查上下文菜单");
+        assert!(delayed_hide_menu_guard < delayed_hide);
+        let delayed_hide_snap_guard = body[..delayed_hide]
+            .rfind("if !current_state.is_snapped")
+            .expect("延迟隐藏回调必须检查贴边状态");
+        assert!(delayed_hide_snap_guard < delayed_hide);
     }
 
     #[test]
