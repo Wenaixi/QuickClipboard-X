@@ -52,21 +52,6 @@ pub const fn observe_mouse_edge(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum NavigationHotkeyDecision {
-    Enable,
-    Disable,
-}
-
-pub const fn navigation_hotkey_decision(
-    source: MainWindowShowSource,
-) -> NavigationHotkeyDecision {
-    match source {
-        MainWindowShowSource::Explicit => NavigationHotkeyDecision::Enable,
-        MainWindowShowSource::MouseAuto => NavigationHotkeyDecision::Disable,
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MouseAutoPopupState {
     pub active: bool,
     pub promoted: bool,
@@ -419,22 +404,18 @@ fn begin_animation",
     }
 
     #[test]
-    fn source_controls_navigation_hotkey_decision() {
-        assert_eq!(
-            navigation_hotkey_decision(MainWindowShowSource::MouseAuto),
-            NavigationHotkeyDecision::Disable
-        );
-        assert_eq!(
-            navigation_hotkey_decision(MainWindowShowSource::Explicit),
-            NavigationHotkeyDecision::Enable
-        );
-    }
-
-    #[test]
     fn first_near_sample_only_establishes_baseline() {
         assert_eq!(
             observe_mouse_edge(None, true),
             (Some(true), MouseEdgeTransition::Baseline)
+        );
+    }
+
+    #[test]
+    fn stable_far_sample_keeps_leave_state() {
+        assert_eq!(
+            observe_mouse_edge(Some(false), false),
+            (Some(false), MouseEdgeTransition::Stable)
         );
     }
 
@@ -472,6 +453,12 @@ fn begin_animation",
         let popup = MouseAutoPopupState::start(7, 1_000);
         assert!(popup.is_current(7));
         assert!(!popup.is_current(8));
+    }
+
+    #[test]
+    fn promoted_popup_is_not_expired() {
+        let popup = MouseAutoPopupState::start(7, 1_000).promote();
+        assert!(!popup.is_expired(2_000));
     }
 
     #[test]
