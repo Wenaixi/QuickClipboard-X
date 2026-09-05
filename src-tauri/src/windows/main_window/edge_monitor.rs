@@ -70,6 +70,9 @@ pub fn start_edge_monitoring() {
                 continue;
             }
             if !state.is_snapped || state.is_dragging {
+                if state.is_dragging {
+                    super::state::invalidate_mouse_auto_popup();
+                }
                 mouse_state_version.fetch_add(1, Ordering::SeqCst);
                 not_near_since_ms = None;
                 last_near_state = None;
@@ -377,5 +380,7 @@ fn ").unwrap_or(tail.len());
             .find("mouse_state_version_for_task")
             .expect("超时任务必须携带状态版本");
         assert!(version_bump < timeout_task);
+        assert!(body[state_guard..].contains("not_near_since_ms = None"));
+        assert!(body[state_guard..].contains("last_near_state = None"));
     }
 }
