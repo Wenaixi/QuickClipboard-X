@@ -311,14 +311,11 @@ fn recreate_main_window(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
         #[cfg(windows)]
         if window.hwnd().is_ok() {
+            crate::windows::main_window::invalidate_mouse_auto_popup();
             return Ok(());
         }
 
-        #[cfg(not(windows))]
-        {
-            return Ok(());
-        }
-
+        crate::windows::main_window::invalidate_mouse_auto_popup();
         let _ = window.destroy();
     }
 
