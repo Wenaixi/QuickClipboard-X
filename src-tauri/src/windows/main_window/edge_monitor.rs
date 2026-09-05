@@ -352,15 +352,20 @@ fn ").unwrap_or(tail.len());
     fn timeout_hide_keeps_session_until_hide_succeeds() {
         let source = source_file("src/windows/main_window/edge_monitor.rs");
         let body = strip_line_comments(&function_body(&source, "start_edge_monitoring"));
-        let hide = body.find("hide_snapped_window").expect("缺少超时隐藏");
+        let hide = body
+            .find("if crate::hide_snapped_window(&window_for_task).is_ok()")
+            .expect("缺少超时隐藏");
         let clear = body
             .find("clear_mouse_auto_popup_for_session")
             .expect("缺少会话清理");
         assert!(hide < clear);
         let menu_guard = body
-            .find("crate::is_context_menu_visible()")
+            .find("if crate::is_context_menu_visible()")
             .expect("超时隐藏必须检查上下文菜单");
         assert!(menu_guard < hide);
+        assert!(body.contains("current_state.is_hidden"));
+        assert!(body.contains("current_state.is_dragging"));
+        assert!(body.contains("current_state.is_pinned"));
         assert!(body.contains("current_popup.is_current(session_id)"));
         assert!(body.contains("if crate::hide_snapped_window(&window_for_task).is_ok()"));
         assert!(body.contains("if !current_state.is_snapped"));
@@ -375,6 +380,8 @@ fn ").unwrap_or(tail.len());
             .rfind("if !current_state.is_snapped")
             .expect("延迟隐藏回调必须检查贴边状态");
         assert!(delayed_hide_snap_guard < delayed_hide);
+        assert!(body.contains("!current_state.is_hidden"));
+        assert!(body.contains("!current_state.is_pinned"));
     }
 
     #[test]
