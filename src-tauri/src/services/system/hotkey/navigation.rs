@@ -82,6 +82,7 @@ pub fn resume_execute_item_hotkey() {
 }
 
 pub fn sync_navigation_hotkeys_for_foreground() {
+    let _sync_guard = NAVIGATION_SYNC_LOCK.lock();
     let _lifecycle_guard = NAVIGATION_HOTKEYS_LIFECYCLE_LOCK.lock();
     sync_navigation_hotkeys_for_foreground_locked();
 }
@@ -109,6 +110,7 @@ fn sync_navigation_hotkeys_for_foreground_locked() {
 }
 
 pub fn reload_navigation_hotkeys_from_settings() {
+    let _sync_guard = NAVIGATION_SYNC_LOCK.lock();
     let _lifecycle_guard = NAVIGATION_HOTKEYS_LIFECYCLE_LOCK.lock();
     reload_navigation_hotkeys_from_settings_locked();
 }
@@ -139,10 +141,17 @@ fn reload_navigation_hotkeys_from_settings_locked() {
 // 供 global 层禁用热键/前台屏蔽时插件级 unregister_all 后调用，
 // 使下次前台切换能干净地重建导航热键。
 pub fn invalidate_navigation_hotkeys() {
+    let _sync_guard = NAVIGATION_SYNC_LOCK.lock();
     let _lifecycle_guard = NAVIGATION_HOTKEYS_LIFECYCLE_LOCK.lock();
     NAVIGATION_HOTKEYS_REGISTERED.store(false, Ordering::SeqCst);
-    NAVIGATION_UNREGISTER_RETRY_PENDING.store(false, Ordering::SeqCst);
-    NAVIGATION_SHORTCUTS.lock().clear();
+    // 保留失败注销的注册记录，后续同步必须继续尝试清理。
+    let has_pending_registrations = !NAVIGATION_SHORTCUTS.lock().is_empty();
+    // ponytail: 依赖单一进程内生命周期锁，跨进程热键占用仍需 Windows 层返回结果确认。
+    if has_pending_registrations {
+        NAVIGATION_UNREGISTER_RETRY_PENDING.store(true, Ordering::SeqCst);
+    } else {
+        NAVIGATION_UNREGISTER_RETRY_PENDING.store(false, Ordering::SeqCst);
+    }
     NAVIGATION_REPEAT_SEQUENCE.fetch_add(1, Ordering::SeqCst);
     NAVIGATION_REPEAT_TOKENS.lock().clear();
     NAVIGATION_THROTTLE_STATE.lock().clear();
@@ -572,6 +581,25 @@ mod tests {
         );
     }
 
+    #[test]
+    fn sync_and_reload_hold_sync_lock_before_lifecycle_lock() {
+        let src = strip_line_comments(&navigation_source());
+        for function in [
+            "sync_navigation_hotkeys_for_foreground",
+            "reload_navigation_hotkeys_from_settings",
+            "invalidate_navigation_hotkeys",
+        ] {
+            let body = fn_body(&src, function);
+            let sync_lock = body
+                .find("NAVIGATION_SYNC_LOCK.lock()")
+                .expect("入口必须持有同步锁");
+            let lifecycle_lock = body
+                .find("NAVIGATION_HOTKEYS_LIFECYCLE_LOCK.lock()")
+                .expect("入口必须持有生命周期锁");
+            assert!(sync_lock < lifecycle_lock, "{} 锁顺序必须固定", function);
+        }
+    }
+
     // F7(连带雪崩治理):单键注册失败不得整体置 NAVIGATION_HOTKEYS_REGISTERED=false,
     // 否则一个键配错会让全部导航键失效——下次前台切换/显隐触发 reload 时
     // unregister 会摘除全部已成功注册的键,用户配错的键连同其余正常键一起
@@ -731,6 +759,23 @@ mod tests {
         assert!(
             b.contains("NAVIGATION_UNREGISTER_RETRY_PENDING.store(!fully_unregistered"),
             "注销结果必须写入待重试标志"
+        );
+    }
+
+    #[test]
+    fn invalidate_navigation_hotkeys_preserves_retry_state() {
+        let src = strip_line_comments(&navigation_source());
+        let b = fn_body(&src, "invalidate_navigation_hotkeys");
+        let table_check = b
+            .find("NAVIGATION_SHORTCUTS.lock().is_empty()")
+            .expect("失效入口必须检查待注销注册表");
+        let clear = b
+            .find("NAVIGATION_UNREGISTER_RETRY_PENDING.store(false")
+            .expect("失效入口必须存在无待注销记录时清除标记的分支");
+        assert!(table_check < clear);
+        assert!(
+            b.contains("NAVIGATION_UNREGISTER_RETRY_PENDING.store(true"),
+            "仍有注册记录时必须保留重试标记"
         );
     }
 
