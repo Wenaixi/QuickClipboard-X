@@ -283,7 +283,12 @@ pub fn clear_snap() {
 }
 
 pub fn set_pinned(is_pinned: bool) {
-    WINDOW_STATE.write().is_pinned = is_pinned;
+    let mut state = WINDOW_STATE.write();
+    if state.is_pinned != is_pinned && state.mouse_auto_popup.active {
+        let session_id = next_mouse_auto_popup_session_id(state.mouse_auto_popup.session_id);
+        state.mouse_auto_popup = MouseAutoPopupState::inactive_with_session(session_id);
+    }
+    state.is_pinned = is_pinned;
 }
 
 pub fn is_pinned() -> bool {
@@ -511,5 +516,26 @@ fn begin_animation",
             .find("state.is_snapped = false")
             .expect("clear_snap 必须清理贴边状态");
         assert!(invalidate < reset);
+    }
+
+    #[test]
+    fn pin_change_invalidates_active_popup_session() {
+        let _guard = lock_serial();
+        let initial_pinned = get_window_state().is_pinned;
+        set_pinned(!initial_pinned);
+        let session_id = start_mouse_auto_popup(1_000);
+        set_pinned(initial_pinned);
+        assert!(!mouse_auto_popup_state().is_current(session_id));
+    }
+
+    #[test]
+    fn pin_change_invalidation_only_advances_active_session() {
+        let _guard = lock_serial();
+        let initial_pinned = get_window_state().is_pinned;
+        invalidate_mouse_auto_popup();
+        let before = mouse_auto_popup_state().session_id;
+        set_pinned(!initial_pinned);
+        assert_eq!(mouse_auto_popup_state().session_id, before);
+        set_pinned(initial_pinned);
     }
 }
