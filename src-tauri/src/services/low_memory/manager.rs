@@ -272,6 +272,8 @@ fn destroy_all_webviews(app: &AppHandle) {
 // 供单实例启动、主窗口销毁后重建等路径复用，避免直接 get_webview_window
 // 拿到一个句柄已失效的窗口对象。
 pub fn ensure_main_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
+    crate::windows::main_window::invalidate_mouse_auto_popup();
+
     if let Some(window) = app.get_webview_window("main") {
         #[cfg(windows)]
         if window.hwnd().is_ok() {
