@@ -80,10 +80,11 @@ pub fn start_edge_monitoring() {
                 let window_for_task = window.clone();
                 let _ = window.app_handle().run_on_main_thread(move || {
                     let current_state = crate::get_window_state();
+                    let current_popup = super::state::mouse_auto_popup_state();
                     if current_state.is_hidden
                         || current_state.is_dragging
                         || current_state.is_pinned
-                        || !super::state::mouse_auto_popup_state().is_current(session_id)
+                        || !current_popup.is_current(session_id)
                     {
                         return;
                     }
@@ -334,5 +335,6 @@ fn ").unwrap_or(tail.len());
             .find("clear_mouse_auto_popup_for_session")
             .expect("缺少会话清理");
         assert!(hide < clear);
+        assert!(body.contains("current_popup.is_current(session_id)"));
     }
 }

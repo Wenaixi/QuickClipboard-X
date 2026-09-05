@@ -183,9 +183,9 @@ pub fn set_snap_edge(
     ratio: Option<f64>,
 ) {
     let mut state = WINDOW_STATE.write();
-    if edge == SnapEdge::None {
+    if edge == SnapEdge::None && state.mouse_auto_popup.active {
         state.mouse_auto_popup = MouseAutoPopupState::inactive_with_session(
-            state.mouse_auto_popup.session_id,
+            next_mouse_auto_popup_session_id(state.mouse_auto_popup.session_id),
         );
     }
     state.is_snapped = edge != SnapEdge::None;
@@ -490,5 +490,26 @@ fn begin_animation",
         clear_snap();
         assert!(!mouse_auto_popup_state().is_current(session_id));
         assert!(!get_window_state().is_snapped);
+    }
+
+    #[test]
+    fn clearing_snap_calls_popup_invalidation_before_state_reset() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/windows/main_window/state.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 state.rs 源文件");
+        let body = source
+            .split("pub fn clear_snap()")
+            .nth(1)
+            .and_then(|tail| tail.split("#[cfg(test)]").next())
+            .expect("找不到 clear_snap 函数体");
+        let invalidate = body
+            .find("invalidate_mouse_auto_popup()")
+            .expect("clear_snap 必须失效会话");
+        let reset = body
+            .find("state.is_snapped = false")
+            .expect("clear_snap 必须清理贴边状态");
+        assert!(invalidate < reset);
     }
 }
