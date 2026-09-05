@@ -237,11 +237,6 @@ fn register_navigation_hotkeys_from_settings_locked() -> Result<(), String> {
     Ok(())
 }
 
-fn unregister_navigation_hotkeys() {
-    let _lifecycle_guard = NAVIGATION_HOTKEYS_LIFECYCLE_LOCK.lock();
-    unregister_navigation_hotkeys_locked();
-}
-
 fn unregister_navigation_hotkeys_locked() -> bool {
     let app = match get_app() {
         Ok(app) => app,
