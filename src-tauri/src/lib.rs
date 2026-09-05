@@ -160,6 +160,7 @@ pub fn run() {
                 commands::save_current_focus,
                 commands::restore_last_focus,
                 commands::hide_main_window_if_auto_shown,
+                commands::promote_main_window_auto_popup,
                 commands::set_window_pinned,
                 commands::toggle_window_visibility,
                 commands::open_settings_window,

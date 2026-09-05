@@ -14,6 +14,7 @@ import { useTheme, applyThemeToBody } from '@shared/hooks/useTheme';
 import { useSettingsSync } from '@shared/hooks/useSettingsSync';
 import { useNavigationKeyboard } from '@shared/hooks/useNavigationKeyboard';
 import { hideMainWindow } from '@shared/api';
+import { promoteMainWindowAutoPopup } from '@shared/api/window';
 import { useWindowAnimation } from '@shared/hooks/useWindowAnimation';
 import {
   resolveOutsideAppAction,
@@ -295,6 +296,7 @@ function App() {
 
     const handlePointerDown = () => {
       refreshMainWindowTopmost();
+      promoteMainWindowAutoPopup().catch(() => {});
     };
 
     const root = document.documentElement;

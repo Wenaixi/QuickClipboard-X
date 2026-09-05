@@ -161,8 +161,28 @@ pub fn restore_last_focus() -> Result<(), String> {
 
 #[tauri::command]
 pub fn hide_main_window_if_auto_shown(window: WebviewWindow) -> Result<(), String> {
+    let state = crate::get_window_state();
+    if !state.mouse_auto_popup.active || state.mouse_auto_popup.promoted {
+        return Ok(());
+    }
     crate::hide_main_window(&window);
     Ok(())
+}
+
+#[tauri::command]
+pub fn promote_main_window_auto_popup(
+    window: WebviewWindow,
+) -> Result<bool, String> {
+    let state = crate::get_window_state();
+    if state.is_hidden || state.is_dragging || !window.is_visible().unwrap_or(false) {
+        return Ok(false);
+    }
+    if !state.is_snapped {
+        return Ok(false);
+    }
+    Ok(crate::windows::main_window::promote_mouse_auto_popup_for_session(
+        state.mouse_auto_popup.session_id,
+    ))
 }
 
 #[tauri::command]
