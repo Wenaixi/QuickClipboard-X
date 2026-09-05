@@ -272,6 +272,7 @@ fn destroy_all_webviews(app: &AppHandle) {
 // 供单实例启动、主窗口销毁后重建等路径复用，避免直接 get_webview_window
 // 拿到一个句柄已失效的窗口对象。
 pub fn ensure_main_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
+    // 复用或重建前取消旧自动弹出任务，避免异步回调作用于新窗口。
     crate::windows::main_window::invalidate_mouse_auto_popup();
 
     if let Some(window) = app.get_webview_window("main") {
@@ -302,6 +303,9 @@ pub fn ensure_main_window(app: &AppHandle) -> Result<tauri::WebviewWindow, Strin
 fn recreate_main_window(app: &AppHandle) -> Result<(), String> {
     use tauri::{WebviewUrl, WebviewWindowBuilder};
 
+    // 重建路径只处理失效对象，调用方负责在复用路径清理会话。
+    crate::windows::main_window::invalidate_mouse_auto_popup();
+
     // 退出低占用模式必须对称恢复导航键/鼠标监听。即使主窗口已存在走
     // 早返分支,enter_low_memory_mode 已调过 disable_navigation_keys() /
     // disable_mouse_monitoring()(行 67/70),这里必须无条件 enable,否则
@@ -313,11 +317,9 @@ fn recreate_main_window(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
         #[cfg(windows)]
         if window.hwnd().is_ok() {
-            crate::windows::main_window::invalidate_mouse_auto_popup();
             return Ok(());
         }
 
-        crate::windows::main_window::invalidate_mouse_auto_popup();
         let _ = window.destroy();
     }
 
@@ -405,6 +407,10 @@ mod tests {
             b.find("enable_navigation_keys()") < b.find("enable_mouse_monitoring()"),
             "导航键恢复必须先于鼠标监控恢复"
         );
+        assert!(
+            b.contains("invalidate_mouse_auto_popup()"),
+            "重建失效窗口前必须清理旧自动弹出会话"
+        );
     }
 
     // F14: 早返分支 `if let Some(window) = app.get_webview_window("main")`
@@ -444,6 +450,10 @@ mod tests {
              当前 enable_mouse_monitoring 位于第 {} 字符,早返检查位于第 {} 字符。",
             pos_enable_mouse_rel,
             early_return_rel,
+        );
+        assert!(
+            after_start[..early_return_rel].contains("invalidate_mouse_auto_popup()"),
+            "重建函数必须在检查旧窗口前失效自动弹出会话"
         );
     }
 
