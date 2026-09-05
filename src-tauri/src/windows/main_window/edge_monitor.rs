@@ -62,10 +62,16 @@ pub fn start_edge_monitoring() {
             let state = crate::get_window_state();
 
             if is_resize_suppressed() {
+                mouse_state_version.fetch_add(1, Ordering::SeqCst);
+                not_near_since_ms = None;
+                last_near_state = None;
                 std::thread::sleep(Duration::from_millis(50));
                 continue;
             }
             if crate::windows::screenshot_window::is_screenshot_active() {
+                mouse_state_version.fetch_add(1, Ordering::SeqCst);
+                not_near_since_ms = None;
+                last_near_state = None;
                 std::thread::sleep(Duration::from_millis(100));
                 continue;
             }
@@ -383,5 +389,13 @@ fn ").unwrap_or(tail.len());
             !body[state_guard..].contains("super::state::invalidate_mouse_auto_popup()"),
             "拖拽会话失效必须由 set_dragging 统一负责，监控线程不得重复推进会话代际"
         );
+        let resize_guard = body
+            .find("if is_resize_suppressed()")
+            .expect("缺少调整大小状态守卫");
+        let screenshot_guard = body
+            .find("if crate::windows::screenshot_window::is_screenshot_active()")
+            .expect("缺少截图状态守卫");
+        assert!(body[resize_guard..].contains("mouse_state_version.fetch_add"));
+        assert!(body[screenshot_guard..].contains("mouse_state_version.fetch_add"));
     }
 }
