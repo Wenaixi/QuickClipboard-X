@@ -347,15 +347,31 @@ mod tests {
     }
 
     fn function_body(source: &str, name: &str) -> String {
-        let start = source.find(name).expect("找不到函数");
-        let tail = &source[start..];
-        let end = [tail.find("
-fn "), tail.find("
-pub fn ")]
-            .into_iter()
-            .flatten()
+        let declaration = [
+            format!("
+fn {name}("),
+            format!("
+pub fn {name}("),
+        ];
+        let start = declaration
+            .iter()
+            .filter_map(|marker| source.find(marker))
             .min()
-            .unwrap_or(tail.len());
+            .map(|offset| offset + 1)
+            .expect("找不到函数定义");
+        let tail = &source[start..];
+        let end = [
+            tail.find("
+fn "),
+            tail.find("
+pub fn "),
+            tail.find("
+#[cfg(test)]"),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+        .unwrap_or(tail.len());
         tail[..end].to_string()
     }
 
