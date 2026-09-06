@@ -433,20 +433,24 @@ pub fn "),
         assert!(body.contains("current_popup.is_current(session_id)"));
         assert!(body.contains("if crate::hide_snapped_window(&window_for_task).is_ok()"));
         assert!(body.contains("current_state.is_snapped"));
-        let delayed_hide = body
+        let delayed_hide = source
             .find("let mouse_still_outside")
             .expect("缺少延迟隐藏回调");
-        let delayed_hide_menu_guard = body[..delayed_hide]
-            .rfind("!crate::is_context_menu_visible()")
-            .expect("延迟隐藏回调必须拒绝上下文菜单");
-        assert!(delayed_hide_menu_guard < delayed_hide);
-        let delayed_hide_snap_guard = body[..delayed_hide]
-            .rfind("current_state.is_snapped")
-            .expect("延迟隐藏回调必须检查贴边状态");
-        assert!(delayed_hide_snap_guard < delayed_hide);
-        assert!(body[..delayed_hide].contains("!current_state.is_dragging"));
-        assert!(body.contains("!current_state.is_hidden"));
-        assert!(body.contains("!current_state.is_pinned"));
+        let delayed_hide_expression = &source[delayed_hide..];
+        assert!(
+            delayed_hide_expression.contains("!crate::is_context_menu_visible()"),
+            "延迟隐藏回调必须拒绝上下文菜单"
+        );
+        assert!(
+            delayed_hide_expression.contains("current_state.is_snapped"),
+            "延迟隐藏回调必须检查贴边状态"
+        );
+        assert!(
+            delayed_hide_expression.contains("!current_state.is_dragging"),
+            "延迟隐藏回调必须拒绝拖拽状态"
+        );
+        assert!(delayed_hide_expression.contains("!current_state.is_hidden"));
+        assert!(delayed_hide_expression.contains("!current_state.is_pinned"));
     }
 
     #[test]
