@@ -34,7 +34,7 @@ pub fn unregister_all() {
     // global::unregister_all 假设锁已持，不得再 lock。
     let _guard = global::GLOBAL_HOTKEY_SYNC_LOCK.lock();
     global::unregister_all();
-    navigation::sync_navigation_hotkeys_for_foreground();
+    navigation::unregister_navigation_hotkeys();
 }
 
 pub fn sync_hotkeys_for_foreground() {
@@ -84,6 +84,14 @@ mod tests {
         assert!(
             lock_pos.is_some() && call_pos.is_some() && lock_pos < call_pos,
             "顶层 unregister_all 必须在调 global::unregister_all 之前持 GLOBAL_HOTKEY_SYNC_LOCK"
+        );
+        let navigation_pos = b
+            .find("navigation::unregister_navigation_hotkeys()")
+            .expect("顶层全部注销必须覆盖导航热键");
+        assert!(call_pos.unwrap() < navigation_pos);
+        assert!(
+            !b.contains("navigation::disable_navigation_hotkeys()"),
+            "全部注销不得永久关闭后续导航键恢复资格"
         );
     }
 }

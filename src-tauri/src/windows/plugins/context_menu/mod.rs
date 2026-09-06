@@ -111,15 +111,15 @@ pub fn clear_options_for_session(sid: u64) {
 
 pub fn set_active_menu_session(sid: u64) {
     let state = state();
-    state.active_session.store(sid, Ordering::Relaxed);
-    state.visible.store(true, Ordering::Relaxed);
+    state.active_session.store(sid, Ordering::SeqCst);
+    state.visible.store(true, Ordering::SeqCst);
 }
 
 pub fn clear_active_menu_session(sid: u64) {
     let state = state();
-    if state.active_session.load(Ordering::Relaxed) == sid {
-        state.active_session.store(0, Ordering::Relaxed);
-        state.visible.store(false, Ordering::Relaxed);
+    if state.active_session.load(Ordering::SeqCst) == sid {
+        state.active_session.store(0, Ordering::SeqCst);
+        state.visible.store(false, Ordering::SeqCst);
     }
 }
 
@@ -152,5 +152,7 @@ pub fn clear_menu_regions() {
 }
 
 pub fn is_context_menu_visible() -> bool {
-    is_menu_visible()
+    let state = state();
+    state.active_session.load(Ordering::SeqCst) != 0
+        || state.visible.load(Ordering::SeqCst)
 }

@@ -129,6 +129,9 @@ pub fn save_settings(mut settings: AppSettings, app: tauri::AppHandle) -> Result
     }
 
     if edge_hover_changed {
+        if !settings.edge_hover_popup_enabled {
+            crate::windows::main_window::invalidate_mouse_auto_popup();
+        }
         // 新值已落地,再按新开关刷新贴边隐藏形态
         if let Some(window) = app.get_webview_window("main") {
             let state = crate::windows::main_window::get_window_state();
@@ -527,6 +530,27 @@ mod tests {
     // (与 6c197ee9 栽过的同类 footgun 同源)。
     // 用更具体的代码片段锚点 "update_settings(settings.clone())?;"
     // 避免函数名被注释误命中。
+    #[test]
+    fn disabling_hover_invalidates_active_auto_popup_session() {
+        let source = settings_source();
+        let start = source
+            .find("pub fn save_settings")
+            .expect("找不到 save_settings 定义");
+        let body = &source[start..];
+        let hover_change = body
+            .find("if edge_hover_changed {")
+            .expect("缺少悬浮开关变化处理");
+        let invalidate = body[hover_change..]
+            .find("if !settings.edge_hover_popup_enabled {")
+            .map(|offset| hover_change + offset)
+            .expect("关闭悬浮时必须进入失效分支");
+        let session = body[invalidate..]
+            .find("invalidate_mouse_auto_popup()")
+            .map(|offset| invalidate + offset)
+            .expect("关闭悬浮时必须失效自动弹出会话");
+        assert!(hover_change < invalidate && invalidate < session);
+    }
+
     #[test]
     fn save_settings_handle_disable_edge_hide_runs_after_update_settings() {
         let source = settings_source();

@@ -208,7 +208,7 @@ fn next_mouse_auto_popup_session_id(current: u64) -> u64 {
 
 pub fn promote_mouse_auto_popup_for_session(session_id: u64) -> bool {
     let mut state = WINDOW_STATE.write();
-    if !state.mouse_auto_popup.is_current(session_id) {
+    if !state.mouse_auto_popup.is_current(session_id) || state.mouse_auto_popup.promoted {
         return false;
     }
     state.mouse_auto_popup = state.mouse_auto_popup.promote();
@@ -262,8 +262,9 @@ pub fn is_snapped() -> bool {
 }
 
 pub fn clear_snap() {
-    invalidate_mouse_auto_popup();
     let mut state = WINDOW_STATE.write();
+    let session_id = next_mouse_auto_popup_session_id(state.mouse_auto_popup.session_id);
+    state.mouse_auto_popup = MouseAutoPopupState::inactive_with_session(session_id);
     state.is_snapped = false;
     state.is_hidden = false;
     state.snap_edge = SnapEdge::None;
@@ -462,6 +463,14 @@ fn begin_animation",
     }
 
     #[test]
+    fn promotion_is_consumed_once_per_auto_popup_session() {
+        let _guard = lock_serial();
+        let session_id = start_mouse_auto_popup(1_000);
+        assert!(promote_mouse_auto_popup_for_session(session_id));
+        assert!(!promote_mouse_auto_popup_for_session(session_id));
+    }
+
+    #[test]
     fn session_ids_are_monotonic_across_clear_and_invalidate() {
         let _guard = lock_serial();
         let first = start_mouse_auto_popup(1_000);
@@ -490,7 +499,7 @@ fn begin_animation",
     }
 
     #[test]
-    fn clearing_snap_calls_popup_invalidation_before_state_reset() {
+    fn clearing_snap_resets_popup_and_snap_under_one_state_lock() {
         let source = std::fs::read_to_string(format!(
             "{}/src/windows/main_window/state.rs",
             env!("CARGO_MANIFEST_DIR")
@@ -501,13 +510,21 @@ fn begin_animation",
             .nth(1)
             .and_then(|tail| tail.split("#[cfg(test)]").next())
             .expect("找不到 clear_snap 函数体");
-        let invalidate = body
-            .find("invalidate_mouse_auto_popup()")
-            .expect("clear_snap 必须失效会话");
+        assert!(
+            body.contains("let mut state = WINDOW_STATE.write();"),
+            "clear_snap 必须只获取一次状态写锁"
+        );
+        assert!(
+            !body.contains("invalidate_mouse_auto_popup()"),
+            "clear_snap 不得在状态锁外失效会话"
+        );
+        let popup = body
+            .find("state.mouse_auto_popup = MouseAutoPopupState::inactive_with_session")
+            .expect("clear_snap 必须在状态锁内失效会话");
         let reset = body
             .find("state.is_snapped = false")
             .expect("clear_snap 必须清理贴边状态");
-        assert!(invalidate < reset);
+        assert!(popup < reset);
     }
 
     #[test]

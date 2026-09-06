@@ -15,6 +15,7 @@ static NAVIGATION_HOTKEYS_DESIRED: AtomicBool = AtomicBool::new(false);
 static NAVIGATION_HOTKEYS_REGISTERED: AtomicBool = AtomicBool::new(false);
 static EXECUTE_ITEM_HOTKEY_SUSPENDED: AtomicBool = AtomicBool::new(false);
 static NAVIGATION_UNREGISTER_RETRY_PENDING: AtomicBool = AtomicBool::new(false);
+static NAVIGATION_UNREGISTER_RETRY_SCHEDULED: AtomicBool = AtomicBool::new(false);
 static NAVIGATION_REPEAT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 static NAVIGATION_THROTTLE_STATE: Lazy<Mutex<HashMap<String, Instant>>> =
@@ -30,6 +31,7 @@ static NAVIGATION_SYNC_LOCK: Mutex<()> = Mutex::new(());
 
 const NAVIGATION_REPEAT_INITIAL_DELAY: Duration = Duration::from_millis(300);
 const NAVIGATION_FAST_REPEAT_INTERVAL: Duration = Duration::from_millis(45);
+const NAVIGATION_UNREGISTER_RETRY_INTERVAL: Duration = Duration::from_millis(250);
 
 #[derive(Clone)]
 struct NavigationShortcutRegistration {
@@ -59,7 +61,16 @@ pub fn disable_navigation_hotkeys() {
     // 消除锁外 store 的 lost wakeup：并发 enable 在 store 与锁内 unregister
     // 之间抢锁时,enable 的 sync 可能看到 desired=true 跳过注册。
     let _guard = NAVIGATION_SYNC_LOCK.lock();
+    let _lifecycle_guard = NAVIGATION_HOTKEYS_LIFECYCLE_LOCK.lock();
     NAVIGATION_HOTKEYS_DESIRED.store(false, Ordering::SeqCst);
+    unregister_navigation_hotkeys_locked();
+}
+
+// 立即释放当前导航键，但不改窗口生命周期写入的期望状态。
+// 托盘关闭全部热键后，后续恢复仍由显式窗口显示流程重新决定。
+pub fn unregister_navigation_hotkeys() {
+    let _sync_guard = NAVIGATION_SYNC_LOCK.lock();
+    let _lifecycle_guard = NAVIGATION_HOTKEYS_LIFECYCLE_LOCK.lock();
     unregister_navigation_hotkeys_locked();
 }
 
@@ -246,11 +257,38 @@ fn register_navigation_hotkeys_from_settings_locked() -> Result<(), String> {
     Ok(())
 }
 
+fn schedule_navigation_unregister_retry() {
+    if NAVIGATION_UNREGISTER_RETRY_SCHEDULED
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+
+    std::thread::spawn(|| loop {
+        std::thread::sleep(NAVIGATION_UNREGISTER_RETRY_INTERVAL);
+        sync_navigation_hotkeys_for_foreground();
+
+        if !NAVIGATION_UNREGISTER_RETRY_PENDING.load(Ordering::SeqCst) {
+            NAVIGATION_UNREGISTER_RETRY_SCHEDULED.store(false, Ordering::SeqCst);
+            if NAVIGATION_UNREGISTER_RETRY_PENDING.load(Ordering::SeqCst)
+                && NAVIGATION_UNREGISTER_RETRY_SCHEDULED
+                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                    .is_ok()
+            {
+                continue;
+            }
+            return;
+        }
+    });
+}
+
 fn unregister_navigation_hotkeys_locked() -> bool {
     let app = match get_app() {
         Ok(app) => app,
         Err(_) => {
             NAVIGATION_UNREGISTER_RETRY_PENDING.store(true, Ordering::SeqCst);
+            schedule_navigation_unregister_retry();
             return false;
         }
     };
@@ -299,6 +337,9 @@ fn unregister_navigation_hotkeys_locked() -> bool {
     let fully_unregistered = remaining_registrations.is_empty();
     *NAVIGATION_SHORTCUTS.lock() = remaining_registrations;
     NAVIGATION_UNREGISTER_RETRY_PENDING.store(!fully_unregistered, Ordering::SeqCst);
+    if !fully_unregistered {
+        schedule_navigation_unregister_retry();
+    }
     NAVIGATION_HOTKEYS_REGISTERED.store(!fully_unregistered, Ordering::SeqCst);
     NAVIGATION_REPEAT_SEQUENCE.fetch_add(1, Ordering::SeqCst);
     NAVIGATION_REPEAT_TOKENS.lock().clear();
@@ -760,6 +801,20 @@ mod tests {
             b.contains("NAVIGATION_UNREGISTER_RETRY_PENDING.store(!fully_unregistered"),
             "注销结果必须写入待重试标志"
         );
+        assert!(
+            b.contains("schedule_navigation_unregister_retry()"),
+            "注销失败必须安排独立重试，不得只等待后续生命周期事件"
+        );
+    }
+
+    #[test]
+    fn navigation_retry_worker_retries_without_new_lifecycle_event() {
+        let src = strip_line_comments(&navigation_source());
+        let b = fn_body(&src, "schedule_navigation_unregister_retry");
+        assert!(b.contains("NAVIGATION_UNREGISTER_RETRY_SCHEDULED"));
+        assert!(b.contains("NAVIGATION_UNREGISTER_RETRY_INTERVAL"));
+        assert!(b.contains("sync_navigation_hotkeys_for_foreground()"));
+        assert!(b.contains("NAVIGATION_UNREGISTER_RETRY_PENDING.load"));
     }
 
     #[test]

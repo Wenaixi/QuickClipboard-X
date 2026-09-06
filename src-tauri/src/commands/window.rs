@@ -180,9 +180,13 @@ pub fn promote_main_window_auto_popup(
     if !state.is_snapped {
         return Ok(false);
     }
-    Ok(crate::windows::main_window::promote_mouse_auto_popup_for_session(
+    let promoted = crate::windows::main_window::promote_mouse_auto_popup_for_session(
         state.mouse_auto_popup.session_id,
-    ))
+    );
+    if promoted {
+        crate::input_monitor::enable_navigation_keys();
+    }
+    Ok(promoted)
 }
 
 #[tauri::command]
@@ -263,4 +267,28 @@ pub fn get_update_banner_state() -> Option<crate::windows::updater_window::Updat
 #[tauri::command]
 pub async fn open_cached_update_window(app: AppHandle) -> Result<bool, String> {
     crate::windows::updater_window::open_cached_update_window(&app).await
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn promote_auto_popup_restores_navigation_after_first_success() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/commands/window.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到窗口命令源文件");
+        let start = source
+            .find("pub fn promote_main_window_auto_popup")
+            .expect("缺少自动弹出提升命令");
+        let body = &source[start..];
+        let promoted = body
+            .find("let promoted = crate::windows::main_window::promote_mouse_auto_popup_for_session")
+            .expect("提升命令必须记录首次提升结果");
+        let enable = body
+            .find("crate::input_monitor::enable_navigation_keys()")
+            .expect("首次提升后必须恢复导航键");
+        assert!(promoted < enable);
+        assert!(body[enable..].contains("Ok(promoted)"));
+    }
 }
