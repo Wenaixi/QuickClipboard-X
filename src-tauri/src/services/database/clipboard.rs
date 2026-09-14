@@ -957,17 +957,22 @@ pub fn delete_clipboard_item(id: i64) -> Result<(), String> {
         let Some((image_ids, uuid)) = item else {
             return Ok(Vec::new());
         };
+        // B5:tombstone + DELETE 包同一事务,与 delete_clipboard_items 口径
+        // 一致——否则崩溃/异常时可能只写墓碑不删记录(本地幽灵删除,云端会
+        // 删它但本地还在)或只删记录不写墓碑(云端残留,B3 同款问题)。
+        let tx = conn.unchecked_transaction()?;
         let deleted_at = chrono::Local::now().timestamp();
         let tombstone_id = uuid.filter(|value| !value.trim().is_empty()).unwrap_or_else(|| id.to_string());
         super::tombstones::record_sync_tombstone_in_conn(
-            conn,
+            &tx,
             super::tombstones::COLLECTION_HISTORY,
             &tombstone_id,
             &crate::services::sync_transfer::device_id(),
             deleted_at,
         )?;
 
-        conn.execute("DELETE FROM clipboard WHERE id = ?1", params![id])?;
+        tx.execute("DELETE FROM clipboard WHERE id = ?1", params![id])?;
+        tx.commit()?;
 
         let mut to_delete = Vec::new();
         if let Some(ids) = image_ids {
@@ -1319,6 +1324,36 @@ mod limit_tombstone_guard {
         assert!(
             body.contains("record_sync_tombstone_in_conn"),
             "裁剪删除必须写 tombstone,否则云端/peers 永久残留被裁剪记录"
+        );
+    }
+}
+
+#[cfg(test)]
+mod single_delete_tx_guard {
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+    // B5(单删无事务):delete_clipboard_item 的 tombstone + DELETE 必须包在
+    // 同一事务里——崩溃可能只写墓碑不删记录(本地幽灵删除)或只删记录不写
+    // 墓碑(云端残留)。与 delete_clipboard_items 的既有事务路径对齐。
+    #[test]
+    fn delete_clipboard_item_wraps_tombstone_and_delete_in_tx() {
+        let src = strip_line_comments(&source_file("src/services/database/clipboard.rs"));
+        let body = fn_body(&src, "delete_clipboard_item");
+        let tx_pos = body
+            .find("unchecked_transaction")
+            .expect("delete_clipboard_item 必须开事务");
+        let tx_seg = &body[tx_pos..];
+        let tombstone_pos = tx_seg
+            .find("record_sync_tombstone_in_conn")
+            .expect("事务内必须先写 tombstone");
+        let tombstone_seg = &tx_seg[tombstone_pos..];
+        assert!(
+            tombstone_seg.contains("DELETE FROM clipboard WHERE id = ?1"),
+            "tombstone 后必须在同一事务内 DELETE"
+        );
+        assert!(
+            tombstone_seg.contains("tx.commit()"),
+            "DELETE 后必须提交事务"
         );
     }
 }
