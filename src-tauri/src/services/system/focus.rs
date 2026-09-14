@@ -264,7 +264,7 @@ unsafe extern "system" fn focus_callback(
     let name = String::from_utf16_lossy(&name_buf[..name_len as usize]);
     
     // 过滤窗口
-    if class_name == "Shell_TrayWnd" 
+    if class_name == "Shell_TrayWnd"
         || class_name == "Shell_SecondaryTrayWnd"
         || class_name == "NotifyIconOverflowWindow"
         || class_name == "TopLevelWindowForOverflowXamlIsland"
@@ -274,6 +274,10 @@ unsafe extern "system" fn focus_callback(
         || class_name == "DropDown"
         || class_name == "Xaml_WindowedPopupClass"
         || name == "快速剪贴板"
+        // A3:设置窗口标题含"设置 - 快速剪贴板",名字以"设置"开头即视为自身
+        // 窗口——主窗口在设置页聚焦时聚焦事件若被过滤,导航键仍注册,
+        // Tab/方向键会被 RegisterHotKey 吞掉,设置界面无法键盘移动光标。
+        || name.starts_with("设置")
         || name == "菜单" {
         return;
     }
@@ -305,6 +309,53 @@ mod tests {
         assert!(
             close_count >= open_count,
             "OpenProcess 调用必须配对 CloseHandle，当前 open={open_count} close={close_count}"
+        );
+    }
+
+    // A3 护栏:focus_callback 过滤块必须把设置窗口当作自身窗口过滤——
+    // 设置窗口标题为"设置 - 快速剪贴板",若聚焦事件不被过滤,前台切到设置页
+    // 时 sync_hotkeys_for_foreground 会把导航键注册上,Tab/方向键被吞掉,
+    // 设置界面无法键盘移动光标。
+    #[test]
+    fn focus_callback_filters_settings_window_as_own() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/system/focus.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 focus.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = stripped
+            .find("unsafe extern \"system\" fn focus_callback")
+            .expect("缺 focus_callback");
+        let rest = &stripped[start..];
+        let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(stripped.len());
+        let body = &stripped[start..end];
+        let sync_pos = body
+            .find("sync_hotkeys_for_foreground()")
+            .expect("focus_callback 必须同步前台热键");
+        let filter_seg = &body[..sync_pos];
+        // 过滤块必须同时包含:自身主窗口标题 + 设置窗口标题(以"设置"开头)
+        assert!(
+            filter_seg.contains("快速剪贴板"),
+            "过滤块必须过滤主窗口标题"
+        );
+        assert!(
+            filter_seg.contains("name.starts_with(\"设置\")"),
+            "过滤块必须把设置窗口(标题以 设置 开头)当自身窗口过滤"
+        );
+        let settings_pos = filter_seg
+            .find("name.starts_with(\"设置\")")
+            .expect("设置窗口过滤条件必须存在");
+        let menu_pos = filter_seg
+            .find("name == \"菜单\"")
+            .expect("过滤块末尾菜单条件必须存在");
+        assert!(
+            settings_pos < menu_pos,
+            "设置窗口过滤必须早于 sync,且在菜单条件之前"
         );
     }
 }
