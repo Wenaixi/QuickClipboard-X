@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use super::chunk_manager::{load_chunk, save_chunk};
 use super::index_manager::{load_index, save_index};
-use super::types::{CloudRecord, CloudRecordMeta, ImageFileIndex, ImageFileIndexEntry, RecordChunk, SyncCollection, SyncIndexEntry, SyncReport, CHUNK_RECORD_LIMIT};
+use super::types::{CloudRecord, CloudRecordMeta, ImageFileIndex, ImageFileIndexEntry, SyncCollection, SyncIndexEntry, SyncReport, CHUNK_RECORD_LIMIT};
 use super::webdav_client::WebdavClient;
 
 pub async fn upload_all(client: &WebdavClient, device_id: &str) -> Result<SyncReport, String> {
@@ -235,7 +235,11 @@ async fn upload_collection_incremental(
     }
 
     for (chunk_id, records) in new_records_by_chunk {
-        let mut chunk = RecordChunk::default();
+        // B1:新 chunk 必须先从远端 load 现有块再内存合并——直接以空块 PUT
+        // 会整块覆盖对端设备并发写入同一 chunk 的记录(两设备各自推进
+        // next_chunk 可指向同一 chunk 号)。load 后对不存在的新块返回空,
+        // 对已存在的块则按 uuid 覆盖式合并,保留对端记录。
+        let mut chunk = load_chunk(client, collection, chunk_id).await?;
         for record in records {
             chunk.records.insert(record.uuid.clone(), record.clone());
             index.entries.insert(
@@ -423,6 +427,27 @@ mod image_rescan_guards {
         assert!(
             body.contains("webdav_list_favorite_record_metas"),
             "必须全量扫收藏表 image_id 补传"
+        );
+    }
+
+    // B1(并发 chunk 覆盖):新记录落块必须先从远端 load 现有块再内存合并——
+    // 直接 RecordChunk::default() 空块 PUT 会整块覆盖对端设备并发写入同一
+    // chunk 的记录。护栏断言新 chunk 分支含 load_chunk 调用,且无空块构造。
+    #[test]
+    fn new_chunk_uploads_merge_remote_chunk_instead_of_blank_overwrite() {
+        let src = strip_line_comments(&source_file("src/services/webdav_sync/uploader.rs"));
+        let body = fn_body(&src, "upload_collection_incremental");
+        let new_chunk_pos = body
+            .find("new_records_by_chunk")
+            .expect("upload_collection_incremental 必须处理新记录分块");
+        let new_chunk_seg = &body[new_chunk_pos..];
+        assert!(
+            new_chunk_seg.contains("load_chunk(client, collection, chunk_id)"),
+            "新 chunk 分支必须先 load 远端现有块再合并,否则空块覆盖对端并发写入"
+        );
+        assert!(
+            !new_chunk_seg.contains("RecordChunk::default()"),
+            "新 chunk 分支不得用空块直接 PUT"
         );
     }
 }
