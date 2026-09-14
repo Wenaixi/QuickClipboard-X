@@ -466,7 +466,14 @@ fn start_navigation_repeat_if_needed(id: &str, action: &str) {
         std::thread::sleep(NAVIGATION_REPEAT_INITIAL_DELAY);
 
         while should_continue_repeat(&id, token) {
-            emit_navigation_action(&action);
+            // 重复线程与 Pressed 直发共享同一节流表:绕过节流表会让按住时的
+            // 自动重复(Pressed 洪流)与线程重复叠加成双倍速率(抖动)。这里走
+            // 节流后按节流延迟独占推进,同时把当前 token 写回保持 should_continue。
+            if emit_navigation_action_if_ready(&action) {
+                NAVIGATION_REPEAT_TOKENS
+                    .lock()
+                    .insert(id.clone(), token);
+            }
             std::thread::sleep(interval);
         }
     });
@@ -536,7 +543,9 @@ fn should_throttle(action: &str) -> bool {
 
 fn get_throttle_delay(action: &str) -> Option<Duration> {
     match action {
-        "navigate-up" | "navigate-down" => None,
+        // 按住时 Pressed 直发 + 重复线程双路都经节流表:up/down 给 45ms
+        // 下限(OS 重复率 ~30ms 会被合并,重复线程 45ms 独占推进),其余维持原样。
+        "navigate-up" | "navigate-down" => Some(Duration::from_millis(45)),
         "tab-left" | "tab-right" | "filter-left" | "filter-right" => Some(Duration::from_millis(150)),
         "previous-group" | "next-group" => Some(Duration::from_millis(100)),
         "execute-item" | "focus-search" | "hide-window" | "toggle-pin" => {
@@ -886,6 +895,33 @@ mod tests {
             .map(|i| check_pos + i)
             .expect("注销不彻底时必须取消重新注册并返回错误");
         assert!(check_pos < err_pos, "检查必须早于返回错误");
+    }
+
+    // 按住方向键时 OS 自动重复会产生 Pressed 洪流,重复线程与直发双路叠加
+    // 成双倍速率(抖动)。修复必须满足:重复线程循环经 emit_navigation_action_if_ready
+    // 共享节流表,且 navigate-up/down 有非 None 节流延迟。
+    #[test]
+    fn navigation_repeat_loop_shares_throttle_table() {
+        let src = strip_line_comments(&navigation_source());
+        let b = fn_body(&src, "start_navigation_repeat_if_needed");
+        let loop_pos = b
+            .find("while should_continue_repeat(&id, token)")
+            .expect("重复线程必须保留 while 循环");
+        let repeat_block = &b[loop_pos..];
+        assert!(
+            repeat_block.contains("emit_navigation_action_if_ready"),
+            "重复线程循环必须经节流表发射,禁止直调 emit_navigation_action 造成双倍抖动"
+        );
+        let helper = fn_body(&src, "emit_navigation_action_if_ready");
+        assert!(
+            helper.contains("should_throttle(action)"),
+            "emit_navigation_action_if_ready 必须真正走节流表"
+        );
+        let throttle = fn_body(&src, "get_throttle_delay");
+        assert!(
+            throttle.contains("\"navigate-up\" | \"navigate-down\" => Some("),
+            "navigate-up/down 必须给非 None 节流延迟,否则 Pressed 直发与线程叠加无节流"
+        );
     }
 
     // A2(快捷键回环):enable_navigation_hotkeys 必须复位残留的
