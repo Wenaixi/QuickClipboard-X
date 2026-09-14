@@ -7,131 +7,17 @@ import {
   clamp,
   isFiniteNumber,
 } from '../utils';
+import {
+  HTML_LAYOUT_WRAP,
+  HTML_LAYOUT_NOWRAP,
+  setImportantStyle,
+  applyHtmlLayout,
+  applyHtmlElementLayout,
+} from '@shared/utils/htmlLayout';
 
 const PLACEHOLDER_SRC = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeGxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxyZWN0IHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiBmaWxsPSIjZjBmMGYwIi8+PC9zdmc+';
 const ERROR_SRC = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeGxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxyZWN0IHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiBmaWxsPSIjZmZlYmVlIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiNjNjI4MjgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj7lpb3ml7bplK7mj5DmnKzmiqUgPC90ZXh0Pjwvc3ZnPg==';
 const HTML_SURFACE_BORDER_SIZE = 2;
-const HTML_LAYOUT_WRAP = 'wrap';
-const HTML_LAYOUT_NOWRAP = 'nowrap';
-
-const RESPONSIVE_LAYOUT_TAGS = new Set([
-  'DIV',
-  'P',
-  'SECTION',
-  'ARTICLE',
-  'HEADER',
-  'FOOTER',
-  'MAIN',
-  'ASIDE',
-  'NAV',
-  'BLOCKQUOTE',
-  'LI',
-  'UL',
-  'OL',
-  'SPAN',
-  'STRONG',
-  'EM',
-  'B',
-  'I',
-  'U',
-  'S',
-  'SUB',
-  'SUP',
-  'SMALL',
-  'FIGURE',
-  'FIGCAPTION',
-  'A',
-]);
-
-const MEDIA_TAGS = new Set(['IMG', 'VIDEO', 'CANVAS', 'SVG', 'IFRAME', 'OBJECT', 'EMBED']);
-const PRESERVE_INTRINSIC_WIDTH_TAGS = new Set(['TABLE', 'IMG', 'VIDEO', 'CANVAS', 'SVG', 'IFRAME', 'OBJECT', 'EMBED']);
-
-function setImportantStyle(style, property, value) {
-  if (
-    style.getPropertyValue(property) === value
-    && style.getPropertyPriority(property) === 'important'
-  ) {
-    return;
-  }
-
-  style.setProperty(property, value, 'important');
-}
-
-function applyHtmlElementLayout(element, mode, isRoot = false) {
-  if (!element || !element.style) {
-    return;
-  }
-
-  const shouldWrap = mode !== HTML_LAYOUT_NOWRAP;
-  const tagName = element.tagName;
-
-  setImportantStyle(element.style, 'box-sizing', 'border-box');
-  setImportantStyle(element.style, 'min-width', '0');
-  setImportantStyle(element.style, 'white-space', shouldWrap ? 'normal' : 'pre');
-  setImportantStyle(element.style, 'overflow-wrap', shouldWrap ? 'anywhere' : 'normal');
-  setImportantStyle(element.style, 'word-break', shouldWrap ? 'break-word' : 'normal');
-
-  if (tagName === 'PRE' || tagName === 'CODE') {
-    setImportantStyle(element.style, 'white-space', shouldWrap ? 'pre-wrap' : 'pre');
-    setImportantStyle(element.style, 'overflow-x', 'auto');
-    setImportantStyle(element.style, 'width', 'auto');
-    setImportantStyle(element.style, 'max-width', 'none');
-  } else if (tagName === 'TABLE') {
-    setImportantStyle(element.style, 'width', '100%');
-    setImportantStyle(element.style, 'max-width', '100%');
-    setImportantStyle(element.style, 'table-layout', 'fixed');
-    setImportantStyle(element.style, 'border-collapse', 'collapse');
-  } else if (tagName === 'IMG') {
-    setImportantStyle(element.style, 'display', 'inline-block');
-    setImportantStyle(element.style, 'width', 'auto');
-    setImportantStyle(element.style, 'height', 'auto');
-    setImportantStyle(element.style, 'max-width', 'none');
-    setImportantStyle(element.style, 'object-fit', 'contain');
-  } else if (MEDIA_TAGS.has(tagName)) {
-    setImportantStyle(element.style, 'width', 'auto');
-    setImportantStyle(element.style, 'height', 'auto');
-    setImportantStyle(element.style, 'max-width', 'none');
-  } else if (RESPONSIVE_LAYOUT_TAGS.has(tagName)) {
-    setImportantStyle(element.style, 'width', 'auto');
-    if (shouldWrap) {
-      setImportantStyle(element.style, 'white-space', 'normal');
-    }
-  }
-
-  if (!isRoot) {
-    if (element.style.position && element.style.position !== 'static') {
-      setImportantStyle(element.style, 'position', 'static');
-      setImportantStyle(element.style, 'top', 'auto');
-      setImportantStyle(element.style, 'right', 'auto');
-      setImportantStyle(element.style, 'bottom', 'auto');
-      setImportantStyle(element.style, 'left', 'auto');
-    }
-
-    if (element.style.float && element.style.float !== 'none') {
-      setImportantStyle(element.style, 'float', 'none');
-    }
-
-    if (element.style.transform && element.style.transform !== 'none') {
-      setImportantStyle(element.style, 'transform', 'none');
-    }
-  }
-
-  if (!PRESERVE_INTRINSIC_WIDTH_TAGS.has(tagName)) {
-    element.removeAttribute('width');
-    element.removeAttribute('height');
-  }
-}
-
-function applyHtmlLayout(root, mode = HTML_LAYOUT_WRAP) {
-  if (!root) {
-    return;
-  }
-
-  applyHtmlElementLayout(root, mode, true);
-  root.querySelectorAll('*').forEach((element) => {
-    applyHtmlElementLayout(element, mode, false);
-  });
-}
 
 function copyChildNodes(source, target) {
   const fragment = document.createDocumentFragment();
@@ -349,6 +235,13 @@ const HtmlPreview = forwardRef(function HtmlPreview(
 
         const imageId = img.getAttribute('data-image-id');
         const src = img.getAttribute('src');
+
+        // C2:非本地图片(无 data-image-id / 非 image-id: 前缀)的远程 src
+        // 会被 WebView 自动拉取,统一 no-referrer 防泄露来源站。
+        if (!imageId && !(src && src.startsWith('image-id:'))) {
+          img.referrerPolicy = 'no-referrer';
+          img.loading = 'lazy';
+        }
 
         if (imageId) {
           const originalSrc = img.src;

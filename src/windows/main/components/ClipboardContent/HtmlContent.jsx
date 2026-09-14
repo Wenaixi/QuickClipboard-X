@@ -3,6 +3,7 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 import { sanitizeHTML } from '@shared/utils/htmlProcessor';
 import { invoke } from '@tauri-apps/api/core';
 import { highlightHtmlContent, clearHighlights, scrollToFirstHighlight } from '@shared/utils/highlightText';
+import { applyHtmlLayout } from '@shared/utils/htmlLayout';
 
 const PLACEHOLDER_SRC = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2YwZjBmMCIvPjwvc3ZnPg==';
 const ERROR_SRC = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2ZmZWJlZSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjEyIiBmaWxsPSIjYzYyODI4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+5Zu+54mH5Yqg6L295aSx6LSlPC90ZXh0Pjwvc3ZnPg==';
@@ -26,10 +27,21 @@ function HtmlContent({
     processedRef.current = htmlContent;
     const cleanHTML = sanitizeHTML(htmlContent);
     contentRef.current.innerHTML = cleanHTML;
+    // C1:注入后立即中和布局——剪贴板来源的 HTML 内联样式可伪造
+    // position/float/transform 覆盖宿主 UI 元素,统一重写为流式布局。
+    applyHtmlLayout(contentRef.current);
     const images = contentRef.current.querySelectorAll('img');
     images.forEach(img => {
       const imageId = img.getAttribute('data-image-id');
       const src = img.getAttribute('src');
+
+      // C2:非本地图片(无 data-image-id / 非 image-id: 前缀)的远程 src
+      // 会被 WebView 自动拉取,统一 referrerPolicy 防泄露来源站 + lazy 懒加载
+      // 避免列表一次性并发拉取大量外链图片拖慢窗口。
+      if (!imageId && !(src && src.startsWith('image-id:'))) {
+        img.referrerPolicy = 'no-referrer';
+        img.loading = 'lazy';
+      }
 
       // 优先使用 data-image-id
       if (imageId) {

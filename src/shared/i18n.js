@@ -41,7 +41,7 @@ if (!i18n.isInitialized) {
       lng: 'zh-CN', 
       debug: false, 
       interpolation: {
-        escapeValue: false, 
+        escapeValue: true,
       }
     })
 }
