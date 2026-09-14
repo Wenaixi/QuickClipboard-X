@@ -546,8 +546,9 @@ fn upsert_history_records(records: &[CloudRecord], ignore_tombstones: bool) -> R
                 .query_row(
                     "SELECT COALESCE(source_device_id, ''), updated_at, content, html_content, content_type,
                             image_id, item_order, paste_count, source_app, source_icon_hash, char_count, created_at
-                     FROM clipboard WHERE uuid = ?1 LIMIT 1",
-                    params![record.uuid],
+                     FROM clipboard
+                     WHERE uuid = ?1 OR (uuid IS NULL AND CAST(id AS TEXT) = ?2) LIMIT 1",
+                    params![record.uuid, record.uuid],
                     |row| {
                         Ok((
                             row.get::<_, String>(0)?,
@@ -607,21 +608,23 @@ fn upsert_history_records(records: &[CloudRecord], ignore_tombstones: bool) -> R
 
                 tx.execute(
                     "UPDATE clipboard SET
-                        source_device_id = ?1,
+                        uuid = ?1,
+                        source_device_id = ?2,
                         is_remote = 1,
-                        content = ?2,
-                        html_content = ?3,
-                        content_type = ?4,
-                        image_id = ?5,
-                        item_order = ?6,
-                        paste_count = ?7,
-                        source_app = ?8,
-                        source_icon_hash = ?9,
-                        char_count = ?10,
-                        created_at = ?11,
-                        updated_at = ?12
-                     WHERE uuid = ?13",
+                        content = ?3,
+                        html_content = ?4,
+                        content_type = ?5,
+                        image_id = ?6,
+                        item_order = ?7,
+                        paste_count = ?8,
+                        source_app = ?9,
+                        source_icon_hash = ?10,
+                        char_count = ?11,
+                        created_at = ?12,
+                        updated_at = ?13
+                     WHERE uuid = ?14 OR (uuid IS NULL AND CAST(id AS TEXT) = ?15)",
                     params![
+                        record.uuid,
                         record.source_device_id,
                         record.content,
                         record.html_content,
@@ -634,6 +637,7 @@ fn upsert_history_records(records: &[CloudRecord], ignore_tombstones: bool) -> R
                         record.char_count,
                         record.created_at,
                         restored_updated_at,
+                        record.uuid,
                         record.uuid,
                     ],
                 )?;
@@ -1226,6 +1230,45 @@ mod limit_zero_guard {
         assert!(
             body.contains("max_count.max(1)"),
             "max_count=0 必须钳制到至少 1,不得清空全部历史"
+        );
+    }
+}
+
+#[cfg(test)]
+mod upsert_null_uuid_guard {
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+    // B2(NULL uuid 重复):upsert_history_records 的 existing 查询必须与
+    // webdav_get_history_record_by_uuid 口径一致,含 NULL uuid 兜底分支——
+    // 否则本地 uuid 为 NULL 的旧记录被上传(uuid 兜底成 id 字符串)后,对端
+    // upsert 查 WHERE uuid=?1 匹配不到 NULL 行,INSERT 出重复行。
+    #[test]
+    fn upsert_existing_query_has_null_uuid_fallback() {
+        let src = strip_line_comments(&source_file("src/services/database/clipboard.rs"));
+        let body = fn_body(&src, "upsert_history_records");
+        let existing_pos = body
+            .find("FROM clipboard")
+            .expect("upsert 必须查 clipboard 表");
+        let existing_seg = &body[existing_pos..];
+        assert!(
+            existing_seg.contains("CAST(id AS TEXT) = ?2"),
+            "existing 查询必须含 NULL uuid 兜底(uuid IS NULL AND CAST(id AS TEXT)=uuid)"
+        );
+    }
+
+    // B2 配套:UPDATE 分支的 WHERE 同样要覆盖 NULL uuid 行,否则 existing
+    // 兜底命中的 NULL 行会被 UPDATE 更新 0 行,新值不落地。
+    #[test]
+    fn upsert_update_where_covers_null_uuid_rows() {
+        let src = strip_line_comments(&source_file("src/services/database/clipboard.rs"));
+        let body = fn_body(&src, "upsert_history_records");
+        let update_pos = body
+            .find("UPDATE clipboard SET")
+            .expect("upsert 必须含 UPDATE 分支");
+        let update_seg = &body[update_pos..];
+        assert!(
+            update_seg.contains("CAST(id AS TEXT) = ?15"),
+            "UPDATE 分支 WHERE 必须覆盖 NULL uuid 行"
         );
     }
 }
