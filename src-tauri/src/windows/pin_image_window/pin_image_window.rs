@@ -61,7 +61,7 @@ pub async fn pin_image_from_file(
     let (img_width, img_height, pos_x, pos_y) = if is_preview {
         let (orig_w, orig_h) = read_image_logical_size(&file_path, &app)?;
         let (img_w, img_h) = scale_for_preview(orig_w, orig_h, &app);
-        
+
         let (cursor_x, cursor_y) = crate::mouse::get_cursor_position();
         let (mon_x, mon_y, mon_right, mon_bottom, scale_factor) = crate::utils::screen::ScreenUtils::get_monitor_at_cursor(&app)
             .map(|m| {
@@ -70,30 +70,33 @@ pub async fn pin_image_from_file(
                 (pos.x, pos.y, pos.x + size.width as i32, pos.y + size.height as i32, m.scale_factor())
             })
             .unwrap_or((0, 0, 1920, 1080, 1.0));
-        
+
         let window_w = ((img_w as f64 + 10.0) * scale_factor).round() as i32;
         let window_h = ((img_h as f64 + 10.0) * scale_factor).round() as i32;
         let px = if mon_right - cursor_x >= window_w { cursor_x } else { cursor_x - window_w };
         let py = if mon_bottom - cursor_y >= window_h { cursor_y } else { cursor_y - window_h };
-        
+
         (img_w, img_h, px.max(mon_x), py.max(mon_y))
     } else if use_physical_coords {
         let img_x = image_physical_x.unwrap();
         let img_y = image_physical_y.unwrap();
         let img_phys_w = image_physical_width.unwrap_or(100);
         let img_phys_h = image_physical_height.unwrap_or(100);
-        
+
         let scale_factor = crate::utils::screen::ScreenUtils::get_scale_factor_at_point(&app, img_x, img_y);
         let padding = (5.0 * scale_factor).round() as i32;
         let logical_w = (img_phys_w as f64 / scale_factor).round() as u32;
         let logical_h = (img_phys_h as f64 / scale_factor).round() as u32;
-        
+
         (logical_w.max(1), logical_h.max(1), img_x - padding, img_y - padding)
     } else if let (Some(px), Some(py)) = (x, y) {
+        // C1:x/y 分支窗口落在指定坐标所在显示器——图片逻辑尺寸必须按该屏
+        // scale 折算,否则两屏 scale 不同时 inner_size(logical) 与 set_position
+        // (physical) 混用导致物理尺寸错误。
         let (w, h) = if let (Some(w), Some(h)) = (width, height) {
             (w, h)
         } else {
-            read_image_logical_size(&file_path, &app)?
+            read_image_logical_size_at(&file_path, &app, px, py)?
         };
         (w, h, px, py)
     } else {
@@ -152,14 +155,39 @@ fn read_image_logical_size(file_path: &str, app: &AppHandle) -> Result<(u32, u32
         .map_err(|e| format!("打开图片文件失败: {}", e))?
         .with_guessed_format()
         .map_err(|e| format!("识别图片格式失败: {}", e))?;
-    
+
     let (w, h) = reader.into_dimensions()
         .map_err(|e| format!("读取图片尺寸失败: {}", e))?;
-    
+
     let scale_factor = crate::utils::screen::ScreenUtils::get_monitor_at_cursor(app)
         .map(|m| m.scale_factor())
         .unwrap_or(1.0);
-    
+
+    Ok(((w as f64 / scale_factor).round() as u32, (h as f64 / scale_factor).round() as u32))
+}
+
+// C1:按目标坐标所在显示器折算图片逻辑尺寸——贴图窗口用 inner_size(logical)
+// 建窗、set_position(physical) 落位,若目标屏与光标屏 scale 不同,仍按光标屏
+// 折算会让物理尺寸错误(如 100% 屏折出的 1.2x 逻辑尺寸落在 200% 屏上被放大
+// 一倍)。use_physical_coords 分支已用 get_scale_factor_at_point,此变体与之对齐。
+fn read_image_logical_size_at(
+    file_path: &str,
+    app: &AppHandle,
+    target_x: i32,
+    target_y: i32,
+) -> Result<(u32, u32), String> {
+    let reader = image::ImageReader::open(file_path)
+        .map_err(|e| format!("打开图片文件失败: {}", e))?
+        .with_guessed_format()
+        .map_err(|e| format!("识别图片格式失败: {}", e))?;
+
+    let (w, h) = reader
+        .into_dimensions()
+        .map_err(|e| format!("读取图片尺寸失败: {}", e))?;
+
+    let scale_factor =
+        crate::utils::screen::ScreenUtils::get_scale_factor_at_point(app, target_x, target_y);
+
     Ok(((w as f64 / scale_factor).round() as u32, (h as f64 / scale_factor).round() as u32))
 }
 
@@ -454,6 +482,54 @@ mod tests {
     static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
     fn lock_serial() -> std::sync::MutexGuard<'static, ()> {
         SERIAL.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    // C1(贴图 scale 用错屏):x/y 与 center 分支的图片逻辑尺寸必须按目标
+    // 坐标所在显示器 scale 折算(get_scale_factor_at_point),不能用光标屏
+    // scale——两屏 scale 不同时 inner_size(logical)+set_position(physical)
+    // 混用导致物理尺寸错误。preview 分支在光标屏布局,继续用光标屏 scale。
+    #[test]
+    fn x_y_branch_reads_logical_size_by_target_monitor_scale() {
+        let src = std::fs::read_to_string(format!(
+            "{}/src/windows/pin_image_window/pin_image_window.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读取贴图窗口源码失败");
+        let stripped: String = src
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = stripped
+            .find("pub async fn pin_image_from_file")
+            .expect("缺 pin_image_from_file");
+        let rest = &stripped[start..];
+        let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(stripped.len());
+        let body = &stripped[start..end];
+        // x/y 分支(非 preview、非 physical coords)必须走按目标坐标折算的变体
+        let x_y_pos = body
+            .find("else if let (Some(px), Some(py)) = (x, y)")
+            .expect("缺 x/y 分支");
+        let x_y_seg = &body[x_y_pos..];
+        assert!(
+            x_y_seg.contains("read_image_logical_size_at(&file_path, &app, px, py)"),
+            "x/y 分支必须按目标坐标所在显示器 scale 折算逻辑尺寸"
+        );
+        // 变体函数体内必须用 get_scale_factor_at_point(目标屏),而非光标屏
+        let fn_pos = stripped
+            .find("fn read_image_logical_size_at")
+            .expect("缺 read_image_logical_size_at");
+        let fn_rest = &stripped[fn_pos..];
+        let fn_end = fn_rest.find("\n}\n").map(|i| fn_pos + i).unwrap_or(stripped.len());
+        let fn_body = &stripped[fn_pos..fn_end];
+        assert!(
+            fn_body.contains("get_scale_factor_at_point(app, target_x, target_y)"),
+            "read_image_logical_size_at 必须按目标坐标所在屏 scale 折算"
+        );
+        assert!(
+            !fn_body.contains("get_monitor_at_cursor"),
+            "read_image_logical_size_at 不得用光标屏 scale"
+        );
     }
 
     #[test]
