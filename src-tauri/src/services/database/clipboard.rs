@@ -857,6 +857,10 @@ pub fn limit_clipboard_history(max_count: u64) -> Result<(), String> {
     if max_count >= 999999 {
         return Ok(());
     }
+    // B8 边界:max_count=0 时 NOT IN (... LIMIT 0) 是空允许集,会把全部历史
+    // (含置顶项)清空。前端输入框有 min=25 归一,但命令/升级/导入等直接
+    // 调用路径可能传 0,这里统一兜底:0 视为 1,至少保留一条最近记录。
+    let max_count = max_count.max(1);
     
     let (images_to_delete, deleted_ids): (Vec<String>, Vec<i64>) = with_connection(|conn| {
         let sql_ids = "SELECT image_id FROM clipboard WHERE id NOT IN (SELECT id FROM clipboard ORDER BY is_pinned DESC, item_order DESC, updated_at DESC LIMIT ?1) AND image_id IS NOT NULL AND image_id <> ''";
@@ -1207,6 +1211,23 @@ pub fn toggle_pin_clipboard_item(id: i64) -> Result<bool, String> {
             Ok(false)
         }
     })
+}
+
+#[cfg(test)]
+mod limit_zero_guard {
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+    // B8 边界护栏:limit_clipboard_history 对 max_count=0 必须兜底,
+    // 否则 NOT IN (... LIMIT 0) 空允许集把全部历史(含置顶)清空。
+    #[test]
+    fn limit_zero_clamps_to_one_not_empty_allowlist() {
+        let src = strip_line_comments(&source_file("src/services/database/clipboard.rs"));
+        let body = fn_body(&src, "limit_clipboard_history");
+        assert!(
+            body.contains("max_count.max(1)"),
+            "max_count=0 必须钳制到至少 1,不得清空全部历史"
+        );
+    }
 }
 
 #[cfg(test)]
