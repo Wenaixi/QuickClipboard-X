@@ -204,6 +204,29 @@ pub fn received_files_dir() -> Result<PathBuf, String> {
     Ok(crate::services::get_data_directory()?.join("sync_transfer_files"))
 }
 
+// B7:清理接收目录残留的半写 .qcpart 临时文件——发送端中断/接收端进程崩溃
+// 时 prepare_received_file 创建的临时文件不会走到 rename/remove,下次启动
+// 服务前清扫,避免堆积占用磁盘。
+pub fn sweep_orphan_qcpart_files() -> Result<usize, String> {
+    let dir = received_files_dir()?;
+    if !dir.exists() {
+        return Ok(0);
+    }
+    let mut removed = 0;
+    for entry in std::fs::read_dir(&dir).map_err(|e| format!("读取接收文件目录失败: {}", e))? {
+        let entry = entry.map_err(|e| format!("读取接收文件目录项失败: {}", e))?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.ends_with(".qcpart") {
+            let _ = std::fs::remove_file(entry.path());
+            removed += 1;
+        }
+    }
+    if removed > 0 {
+        eprintln!("[LAN] 已清理 {} 个残留 .qcpart 临时文件", removed);
+    }
+    Ok(removed)
+}
+
 pub fn is_received_file_internal(path: &Path) -> bool {
     path.file_name()
         .and_then(|value| value.to_str())
@@ -319,4 +342,79 @@ fn is_valid_image_id(image_id: &str) -> bool {
         && image_id
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+}
+
+#[cfg(test)]
+mod tests {
+    // B7 护栏:启动清扫函数必须存在且只清 .qcpart,不动 index.json 与正常文件。
+    #[test]
+    fn sweep_orphan_qcpart_files_is_defined_and_targeted() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/sync_transfer/lan/files.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读 files.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = stripped
+            .find("pub fn sweep_orphan_qcpart_files")
+            .expect("必须有 sweep_orphan_qcpart_files 清理函数");
+        let rest = &stripped[start..];
+        let end = rest
+            .find("\nfn ")
+            .or_else(|| rest.find("\n#["))
+            .map(|i| start + i)
+            .unwrap_or(stripped.len());
+        let body = &stripped[start..end];
+        assert!(
+            body.contains(".qcpart"),
+            "清扫函数必须按 .qcpart 后缀识别半写临时文件"
+        );
+        assert!(
+            body.contains("ends_with(\".qcpart\")"),
+            "清扫函数必须 ends_with .qcpart,不得误删 index.json 或正常文件"
+        );
+        assert!(
+            body.contains("remove_file"),
+            "清扫函数必须实际删除文件"
+        );
+    }
+
+    // B7 护栏:http_server::start 必须在监听前调用清扫函数。
+    #[test]
+    fn http_server_start_sweeps_orphan_qcpart_first() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/sync_transfer/lan/http_server.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读 http_server.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = stripped
+            .find("pub async fn start")
+            .expect("缺 http_server start");
+        let rest = &stripped[start..];
+        let stop_pos = rest
+            .find("pub async fn stop")
+            .expect("缺 http_server stop");
+        // B7:以 stop 函数开头为界,取完整 start 函数体,不用固定字符窗口
+        // (函数内注释剥除后行数不固定,魔数窗口会误切到监听行之外)。
+        let body = &stripped[start..start + stop_pos];
+        let sweep_pos = body
+            .find("sweep_orphan_qcpart_files()")
+            .expect("start 必须调用 .qcpart 清扫函数");
+        let listen_pos = body
+            .find("TcpListener::bind")
+            .expect("start 必须绑定监听");
+        assert!(
+            sweep_pos < listen_pos,
+            "清扫必须早于监听,否则新会话接收期间残留文件仍在"
+        );
+    }
 }
