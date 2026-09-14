@@ -86,6 +86,10 @@ pub fn unregister_navigation_hotkeys() {
 }
 
 // 输入框获得焦点时暂停执行粘贴快捷键，避免全局 Enter 抢占输入法组合提交。
+// A2:挂起必须同时跳过 Enter 与方向类导航键(默认 ArrowUp/Down/Left/Right)
+// ——仅挂 Enter 时,方向键仍在 OS 层被 RegisterHotKey 截走,webview 收不到
+// keydown,搜索框内光标无法左右移动/框选/IME 候选方向选择(快捷键回环只修
+// 了一半)。方向键在挂起期间不注册,恢复后经 reload 重新注册。
 pub fn suspend_execute_item_hotkey() {
     if EXECUTE_ITEM_HOTKEY_SUSPENDED.swap(true, Ordering::SeqCst) {
         return;
@@ -193,10 +197,17 @@ fn register_navigation_hotkeys_from_settings_locked() -> Result<(), String> {
             continue;
         }
 
-        if config.id == "navigation_execute_item"
-            && EXECUTE_ITEM_HOTKEY_SUSPENDED.load(Ordering::SeqCst)
-        {
-            continue;
+        if EXECUTE_ITEM_HOTKEY_SUSPENDED.load(Ordering::SeqCst) {
+            // A2:挂起期间 Enter 与方向类导航键一并跳过注册——仅跳过 Enter 时
+            // 方向键仍全局注册截走 webview keydown,搜索框内光标/IME 无法方向选择
+            match config.id {
+                "navigation_execute_item"
+                | "navigation_navigate_up"
+                | "navigation_navigate_down"
+                | "navigation_tab_left"
+                | "navigation_tab_right" => continue,
+                _ => {}
+            }
         }
 
         let shortcut = match parse_shortcut(&config.shortcut) {
@@ -948,6 +959,33 @@ mod tests {
             b.find("NAVIGATION_HOTKEYS_DESIRED.store(true").is_some(),
             "enable 必须照常设置期望状态"
         );
+    }
+
+    // A2(方向键回环):输入框聚焦挂起导航键时,必须连方向类导航键(默认
+    // ArrowUp/Down/Left/Right)一并跳过注册——仅跳过 Enter 时方向键仍在 OS 层
+    // 被 RegisterHotKey 截走,webview 收不到 keydown,搜索框内光标无法左右
+    // 移动/框选/IME 候选方向选择。
+    #[test]
+    fn input_suspension_skips_direction_keys_too() {
+        let src = strip_line_comments(&navigation_source());
+        let b = fn_body(&src, "register_navigation_hotkeys_from_settings_locked");
+        let suspended_pos = b
+            .find("EXECUTE_ITEM_HOTKEY_SUSPENDED.load")
+            .expect("注册循环必须检查挂起状态");
+        let suspend_segment = &b[suspended_pos..];
+        for id in [
+            "navigation_execute_item",
+            "navigation_navigate_up",
+            "navigation_navigate_down",
+            "navigation_tab_left",
+            "navigation_tab_right",
+        ] {
+            assert!(
+                suspend_segment.contains(id),
+                "挂起分支必须跳过 {} 的注册,否则方向键被 RegisterHotKey 截走",
+                id
+            );
+        }
     }
 
     // A7(归属检查):导航键注册失败清理前必须检查组合键是否属于其他条目
