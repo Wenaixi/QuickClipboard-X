@@ -10,7 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "withGlobalTauri": true,
+    "withGlobalTauri": false,
     "windows": [
       {
         "label": "main",
@@ -50,7 +50,7 @@
       }
     ],
     "security": {
-      "csp": null,
+      "csp": "default-src 'self'; img-src 'self' data: blob: asset: http: https:; style-src 'self' 'unsafe-inline'; media-src 'self' data: blob: asset:; font-src 'self' data: asset:; connect-src 'self' ipc: http://ipc.localhost asset: https: http:",
       "capabilities": [
         "default",
         "settings",
@@ -69,7 +69,9 @@
         "enable": true,
         "scope": {
           "allow": [
-            "**"
+            "$APPDATA/**",
+            "$RESOURCE/**",
+            "$HOME/**"
           ]
         }
       }
