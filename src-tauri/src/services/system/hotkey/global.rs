@@ -705,7 +705,9 @@ pub fn register_number_shortcuts(modifier: &str) -> Result<(), String> {
 // 判断组合键是否已属于"本次 reload 的其他条目"——数字快捷键注册失败时,
 // 命中的组合键可能是刚注册成功的用户自定义热键(RELOAD 顺序用户条目在前),
 // 若直接探测注销会误杀用户热键。是则跳过清理,仅记录失败状态。
-fn belongs_to_other_shortcut(shortcut: &Shortcut) -> bool {
+// pub(super):navigation.rs 注册失败清理也需要同款归属检查(导航键可能与
+// 用户条目/本批成功键同组合键,直接 safe_unregister 会误摘对方)。
+pub(super) fn belongs_to_other_shortcut(shortcut: &Shortcut) -> bool {
     let registered = REGISTERED_SHORTCUTS.lock();
     registered.iter().any(|(_, s)| {
         parse_shortcut(s).map(|registered_shortcut| registered_shortcut == *shortcut).unwrap_or(false)

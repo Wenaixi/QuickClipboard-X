@@ -242,7 +242,12 @@ fn register_navigation_hotkeys_from_settings_locked() -> Result<(), String> {
                 );
                 // 插件可能在 Err 前部分写入 Windows 层，主动探测并注销清理，
                 // 避免残留吞键的"幽灵热键"。与 global.rs register_shortcut 同款。
-                super::global::safe_unregister(&app, shortcut);
+                // A7: 清理前必须检查命中的组合键是否属于其他条目——用户条目
+                // 先注册成功、导航键后注册失败时,直接探测注销会误摘用户热键;
+                // 属于其他条目则跳过清理,仅记录失败状态,由用户配置侧处理冲突。
+                if !super::global::belongs_to_other_shortcut(&shortcut) {
+                    super::global::safe_unregister(&app, shortcut);
+                }
                 // F7: 注册失败必须写 SHORTCUT_STATUS 状态表——前端 navigation tab
                 // 的 ShortcutInput 靠 backendId 查 getBackendError 展示冲突/失败，
                 // 不写则用户配置错误时前端静默无提示。key 用导航 config id，
@@ -906,6 +911,25 @@ mod tests {
         assert!(
             b.find("NAVIGATION_HOTKEYS_DESIRED.store(true").is_some(),
             "enable 必须照常设置期望状态"
+        );
+    }
+
+    // A7(归属检查):导航键注册失败清理前必须检查组合键是否属于其他条目
+    // (global 的 REGISTERED_SHORTCUTS 用户条目先注册成功、导航键后注册失败
+    // 时,直接 safe_unregister 会误摘用户热键)。belongs 检查必须早于清理。
+    #[test]
+    fn navigation_failure_checks_ownership_before_cleanup() {
+        let src = strip_line_comments(&navigation_source());
+        let b = fn_body(&src, "register_navigation_hotkeys_from_settings_locked");
+        let belongs_pos = b
+            .find("belongs_to_other_shortcut(&shortcut)")
+            .expect("注册失败清理前必须检查组合键是否属于其他条目");
+        let unregister_pos = b
+            .find("safe_unregister(&app, shortcut)")
+            .expect("注册失败路径必须调 safe_unregister 清理幽灵热键");
+        assert!(
+            belongs_pos < unregister_pos,
+            "归属检查必须早于清理调用,否则误摘用户热键"
         );
     }
 }
