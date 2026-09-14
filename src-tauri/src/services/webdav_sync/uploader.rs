@@ -312,6 +312,15 @@ async fn upload_images(client: &WebdavClient, records: &[CloudRecord]) -> Result
     for record in records {
         collect_image_ids(&mut image_ids, record.image_id.as_deref());
     }
+    // 与 downloader 侧对称的重扫:本批 records 之外,历史/收藏表里仍引用
+    // 但从未上传(或曾上传失败)的图片也要补传。若只依赖本批 records,
+    // 缺文件/上传失败的图片会永久保持缺失,而同步报告还记 success。
+    for meta in crate::services::database::webdav_list_history_record_metas()? {
+        collect_image_ids(&mut image_ids, meta.image_id.as_deref());
+    }
+    for meta in crate::services::database::webdav_list_favorite_record_metas()? {
+        collect_image_ids(&mut image_ids, meta.image_id.as_deref());
+    }
 
     if image_ids.is_empty() {
         return Ok(());
@@ -394,5 +403,26 @@ mod tests {
         collect_image_ids(&mut out, Some(""));
         collect_image_ids(&mut out, Some("   ,  "));
         assert!(out.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod image_rescan_guards {
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+    // upload_images 必须从历史/收藏 metas 全量重扫图片 ID,不能只依赖
+    // 本批 records——否则缺文件/失败上传的图片永久缺失,同步报告还记 success。
+    #[test]
+    fn upload_images_rescans_history_and_favorite_metas() {
+        let src = strip_line_comments(&source_file("src/services/webdav_sync/uploader.rs"));
+        let body = fn_body(&src, "upload_images");
+        assert!(
+            body.contains("webdav_list_history_record_metas"),
+            "必须全量扫历史表 image_id 补传"
+        );
+        assert!(
+            body.contains("webdav_list_favorite_record_metas"),
+            "必须全量扫收藏表 image_id 补传"
+        );
     }
 }
