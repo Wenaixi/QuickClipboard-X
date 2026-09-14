@@ -123,6 +123,13 @@ fn hash_clipboard_content(content: &RsClipboardContent) -> String {
             }
         }
         RsClipboardContent::Other(format_name, data) => {
+            // 与 capture::calculate_hash 同口径:主内容哈希优先。
+            // 粘贴文本的 payload 是 Other(CF_UNICODETEXT, raw_data),
+            // 只哈希 format+data 会与捕获侧(convert 后 Text 内容哈希)失配,
+            // 导致自粘贴 fast-path 失效、重复项落到 find_duplicate_item 兜底。
+            // raw_data 是 UTF-16/ANSI 字节,直接摘主文本不现实,这里让
+            // set_last_hash_contents 侧按"粘贴内容"进 Text/files 走简哈希,
+            // Other 仅作为无处安放时的回退,几乎不会命中。
             hasher.update(format_name.as_bytes());
             hasher.update([0u8]);
             hasher.update(data);
@@ -145,13 +152,43 @@ pub fn clear_last_content_cache() {
 }
 
 // 预设粘贴后的内容哈希缓存（多格式）
+// 只按主内容口径哈希(payload 各元素与 capture::calculate_hash 同判据),
+// 粘贴写入后系统捕获得到的 Text/Files/纯图 主内容哈希能与预置相等,
+// 自粘贴才会被 fast-path 去重掉。
 pub fn set_last_hash_contents(contents: &[RsClipboardContent]) {
     let hashes = contents
         .iter()
-        .map(hash_clipboard_content)
+        .map(|c| match c {
+            // payload 的 Other 可能是 CF_UNICODETEXT 等编码字节,没法还原主文本;
+            // 但纯文本粘贴时 build_plain_text_payload 优先用 Text 形态,只有带
+            // 其他格式时才 Other。这里 Text/Rtf/Html 直接哈希文本,Files 哈希
+            // 路径,与捕获侧主内容哈希对齐。
+            RsClipboardContent::Text(text)
+            | RsClipboardContent::Rtf(text)
+            | RsClipboardContent::Html(text) => hash_plain_text(text),
+            RsClipboardContent::Files(files) => {
+                let mut hasher = sha2::Sha256::new();
+                use sha2::Digest;
+                for file in files {
+                    let normalized = crate::services::normalize_path_for_hash(file);
+                    hasher.update(normalized.as_bytes());
+                    hasher.update([0u8]);
+                }
+                format!("{:x}", hasher.finalize())
+            }
+            other => hash_clipboard_content(other),
+        })
         .collect::<Vec<_>>();
     let mut last_hashes = LAST_CONTENT_HASHES.lock();
     *last_hashes = hashes;
+}
+
+// 纯文本简哈希(与 set_last_hash_text 同口径)
+fn hash_plain_text(text: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(text.as_bytes());
+    format!("{:x}", hasher.finalize())
 }
 
 // 剪贴板监听管理器

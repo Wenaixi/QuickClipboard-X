@@ -169,25 +169,24 @@ impl ClipboardContent {
     }
 
     // 计算内容哈希值
+    // 用主内容简哈希(与 monitor 侧 set_last_hash_text/file/files 同口径),
+    // 这样粘贴后预置的哈希能命中捕获侧去重:
+    // Text/RichText→sha256(text), Files→sha256(normalize 路径串联),
+    // 纯图(被收敛成 Files)也按路径——粘贴时 resolve_item_image_path 返回的
+    // 就是本地缓存 png 路径,两侧 normalize 后一致。
     pub fn calculate_hash(&self) -> String {
         use sha2::{Digest, Sha256};
 
         let mut hasher = Sha256::new();
 
-        if !self.raw_formats.is_empty() {
-            for raw in &self.raw_formats {
-                hasher.update(raw.format_name.as_bytes());
-                hasher.update([0u8]);
-                hasher.update(&raw.raw_data);
-                hasher.update([0u8]);
-            }
-            return format!("{:x}", hasher.finalize());
-        }
-
         match &self.content_type {
             ContentType::Text | ContentType::RichText => {
                 if let Some(text) = &self.text {
-                    hasher.update(text.as_bytes());
+                    return format!("{:x}", {
+                        let mut h = Sha256::new();
+                        h.update(text.as_bytes());
+                        h.finalize()
+                    });
                 }
             }
             ContentType::Files => {
@@ -196,8 +195,17 @@ impl ClipboardContent {
                         let normalized = crate::services::normalize_path_for_hash(file);
                         hasher.update(normalized.as_bytes());
                     }
+                    return format!("{:x}", hasher.finalize());
                 }
             }
+        }
+
+        // 主内容缺失时的回退:raw_formats 全量串联(保底,很少走到)
+        for raw in &self.raw_formats {
+            hasher.update(raw.format_name.as_bytes());
+            hasher.update([0u8]);
+            hasher.update(&raw.raw_data);
+            hasher.update([0u8]);
         }
 
         format!("{:x}", hasher.finalize())
@@ -380,4 +388,32 @@ fn is_supported_raw_format(format_name: &str) -> bool {
         format_name,
         "CF_HDROP" | "CF_TEXT" | "CF_UNICODETEXT" | "HTML Format" | "Rich Text Format"
     )
+}
+
+#[cfg(test)]
+mod hash_guards {
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+    // 主内容简哈希必须优先于 raw_formats 全量串联,否则粘贴后预置的
+    // 简哈希与捕获侧全量哈希失配,自粘贴去重 fast-path 失效。
+    #[test]
+    fn calculate_hash_prioritizes_primary_content_over_raw_formats() {
+        let src = strip_line_comments(&source_file("src/services/clipboard/capture.rs"));
+        let body = fn_body(&src, "calculate_hash");
+        let text_start = body.find("ContentType::Text | ContentType::RichText");
+        let files_start = body.find("ContentType::Files");
+        let raw_start = body.find("raw_formats");
+        assert!(
+            text_start.is_some() && files_start.is_some() && raw_start.is_some(),
+            "calculate_hash 必须同时包含主内容与 raw_formats 回退分支"
+        );
+        assert!(
+            text_start.unwrap() < raw_start.unwrap(),
+            "主内容(Text)分支必须先于 raw_formats 回退,否则粘贴预置简哈希命中不了"
+        );
+        assert!(
+            files_start.unwrap() < raw_start.unwrap(),
+            "主内容(Files)分支必须先于 raw_formats 回退"
+        );
+    }
 }
