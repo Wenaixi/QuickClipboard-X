@@ -53,7 +53,18 @@ pub fn enable_navigation_hotkeys() {
     let _guard = NAVIGATION_SYNC_LOCK.lock();
     let _lifecycle_guard = NAVIGATION_HOTKEYS_LIFECYCLE_LOCK.lock();
     NAVIGATION_HOTKEYS_DESIRED.store(true, Ordering::SeqCst);
-    sync_navigation_hotkeys_for_foreground_locked();
+    // A2: 窗口显示启用导航键时,输入框聚焦期间的旧挂起已无意义(焦点必然
+    // 已离开旧输入框)。swap(false) 取回旧值:若残留挂起则强制 reload 重新
+    // 注册被跳过的 execute-item 键;否则走原 sync 路径,已注册则不空转。
+    // 否则 useInputFocus 的 blur 恢复守卫拦掉 restoreLastFocus 时 SUSPENDED
+    // 残留 true,而 suspend 只跳过 execute-item 单独注销(REGISTERED 仍
+    // true),sync 不触发 reload,重开后 Enter 粘贴热键静默失效。
+    let was_suspended = EXECUTE_ITEM_HOTKEY_SUSPENDED.swap(false, Ordering::SeqCst);
+    if was_suspended {
+        reload_navigation_hotkeys_from_settings_locked();
+    } else {
+        sync_navigation_hotkeys_for_foreground_locked();
+    }
 }
 
 pub fn disable_navigation_hotkeys() {
@@ -870,5 +881,31 @@ mod tests {
             .map(|i| check_pos + i)
             .expect("注销不彻底时必须取消重新注册并返回错误");
         assert!(check_pos < err_pos, "检查必须早于返回错误");
+    }
+
+    // A2(快捷键回环):enable_navigation_hotkeys 必须复位残留的
+    // EXECUTE_ITEM_HOTKEY_SUSPENDED 并强制 reload——输入框聚焦期间窗口被
+    // 隐藏(useInputFocus 的 blur 恢复守卫会因 activeElement 仍是 input 拦掉
+    // restoreLastFocus),SUSPENDED 残留 true,而 suspend 是跳过 execute-item
+    // 单独注销(REGISTERED 仍为 true),sync 不会触发 reload,重开后 Enter
+    // 粘贴热键静默失效。窗口显示启用导航键时焦点必然已离开旧输入框,复位安全。
+    #[test]
+    fn enable_navigation_hotkeys_recovers_stuck_execute_item_suspension() {
+        let src = strip_line_comments(&navigation_source());
+        let b = fn_body(&src, "enable_navigation_hotkeys");
+        let swap_pos = b
+            .find("EXECUTE_ITEM_HOTKEY_SUSPENDED.swap(false")
+            .expect("enable 必须复位残留的执行热键挂起状态(SUSPENDED.swap(false))");
+        let reload_pos = b
+            .find("reload_navigation_hotkeys_from_settings_locked()")
+            .expect("复位后必须强制 reload 重新注册被跳过的 execute-item 键");
+        assert!(
+            swap_pos < reload_pos,
+            "reload 必须晚于复位,否则读到旧挂起值仍跳过 execute-item"
+        );
+        assert!(
+            b.find("NAVIGATION_HOTKEYS_DESIRED.store(true").is_some(),
+            "enable 必须照常设置期望状态"
+        );
     }
 }
