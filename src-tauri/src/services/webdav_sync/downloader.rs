@@ -219,17 +219,33 @@ async fn download_images(client: &WebdavClient, image_ids: HashSet<String>) -> R
     std::fs::create_dir_all(&images_dir).map_err(|e| e.to_string())?;
 
     for image_id in image_ids {
+        // 已存在且内容完好的本地 png 跳过(校验 PNG 魔数,半写/损坏文件视为缺失重下)
         let path = images_dir.join(format!("{}.png", image_id));
         if path.exists() {
-            continue;
+            if let Ok(bytes) = std::fs::read(&path) {
+                if is_png_bytes(&bytes) {
+                    continue;
+                }
+            }
+            // 存在但损坏:删除后走重下
+            let _ = std::fs::remove_file(&path);
         }
         let Some(bytes) = client.get_bytes(&format!("files/{}.png", image_id)).await? else {
             continue;
         };
-        std::fs::write(path, bytes).map_err(|e| e.to_string())?;
+        if is_png_bytes(&bytes) {
+            std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+        } else {
+            eprintln!("[WebDAV同步] 跳过非 PNG 内容: {}", image_id);
+        }
     }
 
     Ok(())
+}
+
+// 检查是否为有效 PNG 魔数(8 字节签名)
+fn is_png_bytes(bytes: &[u8]) -> bool {
+    bytes.len() >= 8 && bytes[..8] == [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]
 }
 
 fn collect_record_image_ids(records: &[CloudRecord]) -> HashSet<String> {
@@ -289,5 +305,14 @@ mod tests {
         collect_image_ids(&mut out, Some(""));
         collect_image_ids(&mut out, Some("   ,  "));
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn is_png_bytes_rejects_truncated_and_non_png() {
+        assert!(super::is_png_bytes(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3]));
+        assert!(!super::is_png_bytes(&[0x89, b'P', b'N', b'G']), "短于 8 字节不是 png");
+        assert!(!super::is_png_bytes(&[]));
+        assert!(!super::is_png_bytes(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0B]), "魔数末尾错");
+        assert!(!super::is_png_bytes(&b"hello world"[..]));
     }
 }

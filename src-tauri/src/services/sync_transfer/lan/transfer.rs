@@ -83,6 +83,10 @@ pub async fn send_file_to_peer_with_progress(
         .find(|peer| peer.device_id == device_id)
         .ok_or_else(|| "未找到已配对设备".to_string())?;
     let (file_name, path, size) = super::files::outgoing_file_info(file_path)?;
+    // 与接收端 512MB 上限对称:超大文件直接本地拒绝,避免半途失败
+    if size > super::files::MAX_DIRECT_TRANSFER_FILE_SIZE {
+        return Err("文件超过 512MB，第一版直传暂不支持超大文件".to_string());
+    }
     let reporter = progress.map(|callback| {
         FileTransferProgressReporter::new(
             transfer_id.unwrap_or_else(|| format!("{}:{}", device_id, file_path)),

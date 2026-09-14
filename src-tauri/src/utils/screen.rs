@@ -387,15 +387,17 @@ impl ScreenUtils {
 
         if overlapping_monitors.len() > 1 {
             let (vx, vy, vw, vh) = Self::get_virtual_screen_size_by_app(app)?;
-            let constrained_x = x.max(vx).min(vx + vw - width);
-            let constrained_y = y.max(vy).min(vy + vh - height);
+            // 窗口宽高大于虚拟屏时,min 上限小于 max 下限会产生反向钳位把窗口推到屏外,
+            // 用 .max(下界) 兜底保证至少有一个可见的屏幕位置
+            let constrained_x = x.max(vx).min(vx + vw - width).max(vx);
+            let constrained_y = y.max(vy).min(vy + vh - height).max(vy);
             Ok((constrained_x, constrained_y))
         } else if overlapping_monitors.len() == 1 {
             let (mx, my, mw, mh, _) = overlapping_monitors[0];
             let monitor_right = mx + mw;
             let monitor_bottom = my + mh;
-            let constrained_x = x.max(*mx).min(monitor_right - width);
-            let constrained_y = y.max(*my).min(monitor_bottom - height);
+            let constrained_x = x.max(*mx).min(monitor_right - width).max(*mx);
+            let constrained_y = y.max(*my).min(monitor_bottom - height).max(*my);
             Ok((constrained_x, constrained_y))
         } else {
             let mut best_x = x;
@@ -405,8 +407,8 @@ impl ScreenUtils {
             for (mx, my, mw, mh, _) in &monitors {
                 let monitor_right = mx + mw;
                 let monitor_bottom = my + mh;
-                let clamped_x = x.max(*mx).min(monitor_right - width);
-                let clamped_y = y.max(*my).min(monitor_bottom - height);
+                let clamped_x = x.max(*mx).min(monitor_right - width).max(*mx);
+                let clamped_y = y.max(*my).min(monitor_bottom - height).max(*my);
                 let distance = ((clamped_x - x).pow(2) + (clamped_y - y).pow(2)) as f64;
 
                 if distance < min_distance {
@@ -458,6 +460,25 @@ mod tests {
         let resolved = resolve_visible_window_rect(window, &work_areas, MIN_VISIBLE_RESTORE_MARGIN);
 
         assert_eq!(resolved, Some(rect(0, 0, 360, 520)));
+    }
+
+    // 约束函数是纯计算:窗口宽高大于可用区域时不得被反向钳位推到屏外,
+    // 必须兜底到区域左上(至少一个可见屏幕位置)。
+    fn constrained_like(monitor_left: i32, monitor_top: i32, monitor_w: i32, monitor_h: i32, x: i32, y: i32, w: i32, h: i32) -> (i32, i32) {
+        let cx = x.max(monitor_left).min(monitor_left + monitor_w - w).max(monitor_left);
+        let cy = y.max(monitor_top).min(monitor_top + monitor_h - h).max(monitor_top);
+        (cx, cy)
+    }
+
+    #[test]
+    fn constrain_does_not_throw_window_offscreen_when_larger_than_work_area() {
+        // 窗口(1000x600)大于工作区(400x300),旧实现 .max().min() 会反向钳位出负坐标,
+        // 兜底 .max(monitor_left/top) 必须保证坐标落在工作区左上边界内
+        let (cx, cy) = constrained_like(0, 0, 400, 300, 100, 100, 1000, 600);
+        assert_eq!((cx, cy), (0, 0), "窗口大于工作区时坐标不得为负(屏外)");
+
+        let (cx2, cy2) = constrained_like(200, 300, 400, 300, 1000, 1000, 800, 400);
+        assert_eq!((cx2, cy2), (200, 300), "多屏/负坐标工作区下同样兜底到工作区左上");
     }
 
     #[test]

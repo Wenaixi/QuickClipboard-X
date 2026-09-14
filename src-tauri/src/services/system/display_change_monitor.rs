@@ -6,7 +6,7 @@ mod windows_display_change_monitor {
     use std::mem::size_of;
     use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
     use std::thread;
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, Instant};
     use windows::core::{w, PCWSTR};
     use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -21,7 +21,8 @@ mod windows_display_change_monitor {
     static DISPLAY_MONITOR_ACTIVE: AtomicBool = AtomicBool::new(false);
     static DISPLAY_MONITOR_THREAD_ID: AtomicU32 = AtomicU32::new(0);
     static DISPLAY_REFRESH_VERSION: AtomicU64 = AtomicU64::new(0);
-    static DISPLAY_REFRESH_LAST_RUN_MS: Lazy<Mutex<u64>> = Lazy::new(|| Mutex::new(0));
+    // 节流时间基准:用单调时钟(Instant),不随系统墙钟回拨/调整漂移
+    static DISPLAY_REFRESH_LAST_RUN: Lazy<Mutex<Instant>> = Lazy::new(|| Mutex::new(Instant::now()));
 
     const DISPLAY_REFRESH_DELAY_MS: u64 = 450;
     const DISPLAY_REFRESH_THROTTLE_MS: u64 = 150;
@@ -142,10 +143,10 @@ mod windows_display_change_monitor {
     }
 
     fn schedule_hidden_snap_refresh() {
-        let now_ms = current_unix_ms();
+        let now = Instant::now();
         {
-            let last_run_ms = DISPLAY_REFRESH_LAST_RUN_MS.lock();
-            if now_ms.saturating_sub(*last_run_ms) < DISPLAY_REFRESH_THROTTLE_MS {
+            let last_run = DISPLAY_REFRESH_LAST_RUN.lock();
+            if now.duration_since(*last_run) < Duration::from_millis(DISPLAY_REFRESH_THROTTLE_MS) {
                 return;
             }
         }
@@ -161,7 +162,7 @@ mod windows_display_change_monitor {
 
             input_common::run_on_main_thread(|| {
                 handle_display_change_impl();
-                *DISPLAY_REFRESH_LAST_RUN_MS.lock() = current_unix_ms();
+                *DISPLAY_REFRESH_LAST_RUN.lock() = Instant::now();
             });
         });
     }
@@ -178,13 +179,6 @@ mod windows_display_change_monitor {
             Ok(false) => {}
             Err(_) => {}
         }
-    }
-
-    fn current_unix_ms() -> u64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64
     }
 }
 

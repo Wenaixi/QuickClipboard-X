@@ -170,7 +170,12 @@ pub async fn stop() {
 async fn handle_client(mut stream: tokio::net::TcpStream, remote_addr: std::net::SocketAddr, app: AppHandle) -> Result<(), String> {
     let mut request = read_request(&mut stream).await?;
     let response = if request.method == "PUT" && request.path.starts_with(TRANSFER_FILES_PREFIX) {
-        receive_transfer_file_stream(&request, &mut stream, &app).await
+        // 直传路径同样受 512MB 上限约束(与普通 PUT 的 read_request_body 一致)
+        if request.content_length > MAX_REQUEST_BODY_SIZE {
+            json_response(413, serde_json::json!({ "message": "请求体超过 512MB，第一版直传暂不支持超大文件" }))
+        } else {
+            receive_transfer_file_stream(&request, &mut stream, &app).await
+        }
     } else {
         read_request_body(&mut request, &mut stream, MAX_REQUEST_BODY_SIZE).await?;
         match (request.method.as_str(), request.path.as_str()) {
