@@ -617,7 +617,13 @@ mod windows_raw_input {
                 std::thread::sleep(std::time::Duration::from_millis(50));
                 input_common::run_on_main_thread(|| {
                     if let Some(app) = input_common::try_get_app_handle() {
-                        let _ = crate::windows::quickpaste::hide_quickpaste_window(&app);
+                        // A4: 50ms 延迟期间用户可能再次唤出 quickpaste(新会话),
+                        // 此时旧 hide 请求若直接 hide 会把新窗口立即误隐藏。
+                        // 重查窗口可见性:若期间被重开,放弃本次延迟 hide,
+                        // 由新会话的显式隐藏流程接管。
+                        if crate::windows::quickpaste::is_visible() {
+                            let _ = crate::windows::quickpaste::hide_quickpaste_window(&app);
+                        }
                     }
                 });
             });
@@ -902,6 +908,48 @@ pub(crate) use windows_raw_input::{
     start_quickpaste_secondary_key_hold,
     start_raw_input_if_needed,
 };
+
+#[cfg(target_os = "windows")]
+mod windows_raw_input_tests {
+    // §10.3 源码护栏(A4 会话重检):延迟隐藏线程的回调必须重查 quickpaste
+    // 窗口仍可见后才 hide,否则 50ms 延迟期间窗口被重开时新窗口被立即误隐藏。
+    #[test]
+    fn delayed_hide_guard_rechecks_visibility_before_hide() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/system/raw_input.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 raw_input.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        // 提取 handle_quickpaste_hide_request_impl 函数体(到闭合 } 为止)
+        let start = stripped
+            .find("fn handle_quickpaste_hide_request_impl")
+            .expect("缺 handle_quickpaste_hide_request_impl");
+        let rest = &stripped[start..];
+        let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(stripped.len());
+        let body = &stripped[start..end];
+        // 延迟线程回调(50ms sleep 之后)必须先重查 is_visible 再 hide
+        let sleep_pos = body
+            .find("sleep(std::time::Duration::from_millis(50))")
+            .expect("延迟隐藏必须 sleep 50ms");
+        let recheck_pos = body[sleep_pos..]
+            .find("crate::windows::quickpaste::is_visible()")
+            .map(|i| sleep_pos + i)
+            .expect("延迟回调必须重查 quickpaste 可见性");
+        let hide_pos = body[sleep_pos..]
+            .find("hide_quickpaste_window(&app)")
+            .map(|i| sleep_pos + i)
+            .expect("延迟回调必须调 hide_quickpaste_window");
+        assert!(
+            recheck_pos < hide_pos,
+            "延迟 hide 回调必须先重查可见性再隐藏,避免 50ms 延迟期间重开的窗口被误隐藏"
+        );
+    }
+}
 
 #[cfg(not(target_os = "windows"))]
 pub(crate) fn start_raw_input_if_needed() {}
