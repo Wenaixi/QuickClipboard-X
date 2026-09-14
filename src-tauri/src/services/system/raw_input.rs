@@ -388,6 +388,13 @@ mod windows_raw_input {
         QUICKPASTE_HIDE_TRIGGERED.store(false, Ordering::SeqCst);
     }
 
+    // B10:仅复位"本会话已触发隐藏"标记,不动键盘模式的任何状态。
+    // show_quickpaste_window 显示路径调用:上次会话该标记残留为 true 时,
+    // 本次会话松开修饰键的隐藏判断会被跳过,便捷粘贴窗口卡住不关。
+    pub(crate) fn reset_quickpaste_hide_triggered() {
+        QUICKPASTE_HIDE_TRIGGERED.store(false, Ordering::SeqCst);
+    }
+
     pub(crate) fn start_quickpaste_secondary_key_hold() {
         if !QUICKPASTE_KEYBOARD_MODE_ENABLED.load(Ordering::SeqCst) {
             return;
@@ -905,6 +912,7 @@ pub(crate) use windows_raw_input::{
     enable_quickpaste_keyboard_mode,
     get_physical_modifier_keys_state,
     guard_tray_click_region,
+    reset_quickpaste_hide_triggered,
     start_quickpaste_secondary_key_hold,
     start_raw_input_if_needed,
 };
@@ -947,6 +955,86 @@ mod windows_raw_input_tests {
         assert!(
             recheck_pos < hide_pos,
             "延迟 hide 回调必须先重查可见性再隐藏,避免 50ms 延迟期间重开的窗口被误隐藏"
+        );
+    }
+
+    // B10 护栏:显示路径必须复位 QUICKPASTE_HIDE_TRIGGERED,否则上次会话
+    // 残留的标记会让本次会话松开修饰键时跳过隐藏,窗口卡住。
+    #[test]
+    fn show_quickpaste_resets_hide_triggered_flag() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/windows/quickpaste/manager.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 manager.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = stripped
+            .find("pub fn show_quickpaste_window")
+            .expect("缺 show_quickpaste_window");
+        let rest = &stripped[start..];
+        let end = rest.find("\nfn ").map(|i| start + i).unwrap_or(stripped.len());
+        let body = &stripped[start..end];
+        assert!(
+            body.contains("reset_quickpaste_hide_triggered()"),
+            "显示窗口路径必须调用 reset_quickpaste_hide_triggered 复位隐藏触发标记"
+        );
+        let reset_pos = body
+            .find("reset_quickpaste_hide_triggered()")
+            .expect("显示路径必须复位标记");
+        let show_pos = body
+            .find("window.show()")
+            .expect("显示路径应调 window.show");
+        assert!(
+            reset_pos < show_pos,
+            "复位必须在显示窗口之前完成,避免窗口显示期间隐藏判断被跳过"
+        );
+    }
+
+    // B10 护栏:复位函数只复位标记,不得改动键盘模式其他状态。
+    #[test]
+    fn reset_hide_triggered_only_touches_flag() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/system/raw_input.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 raw_input.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = stripped
+            .find("pub(crate) fn reset_quickpaste_hide_triggered")
+            .expect("缺 reset_quickpaste_hide_triggered");
+        // 模块内函数闭合花括号有缩进,不能用顶层 \n}\n 锚;花括号配对扫描,
+        // 与缩进无关,精确截到本函数末尾的 }。
+        let mut depth = 0i32;
+        let mut end = stripped.len();
+        for (idx, ch) in stripped[start..].char_indices() {
+            match ch {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = start + idx + 1;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let body = &stripped[start..end];
+        assert!(
+            body.contains("QUICKPASTE_HIDE_TRIGGERED.store(false"),
+            "复位函数必须把标记写回 false"
+        );
+        assert!(
+            !body.contains("QUICKPASTE_KEYBOARD_MODE_ENABLED"),
+            "复位函数不得改动键盘模式开关"
         );
     }
 }

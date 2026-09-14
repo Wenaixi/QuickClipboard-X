@@ -1,7 +1,9 @@
 use tauri::{AppHandle, Manager, Emitter, WebviewUrl, WebviewWindowBuilder};
 use super::state::set_visible;
 use crate::utils::positioning::center_at_cursor;
-use crate::services::system::raw_input::{enable_quickpaste_keyboard_mode, disable_quickpaste_keyboard_mode};
+use crate::services::system::raw_input::{
+    enable_quickpaste_keyboard_mode, disable_quickpaste_keyboard_mode, reset_quickpaste_hide_triggered,
+};
 
 fn create_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
     let settings = crate::get_settings();
@@ -51,6 +53,11 @@ pub fn show_quickpaste_window(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     }
     let _ = crate::services::system::save_current_focus(app.clone());
+
+    // B10:显示窗口时复位"已触发过隐藏"标记——上次便捷粘贴会话在修饰键松开
+    // 路径已把 QUICKPASTE_HIDE_TRIGGERED 置位,若从不复位,本次会话快结束时
+    // 判断会因标记仍为 true 而跳过隐藏窗口,便捷粘贴窗口卡住不关。
+    reset_quickpaste_hide_triggered();
 
     let window = get_or_create_window(app)?;
     center_at_cursor(&window)?;
