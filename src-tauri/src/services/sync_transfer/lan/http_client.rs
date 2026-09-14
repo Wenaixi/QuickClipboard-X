@@ -15,6 +15,12 @@ const TRANSFER_CONNECT_TIMEOUT_SECS: u64 = 10;
 const IMAGE_REQUEST_MAX_ATTEMPTS: usize = 3;
 const IMAGE_REQUEST_RETRY_DELAYS_MS: [u64; 2] = [300, 800];
 
+// 直传客户端整体请求超时:覆盖发送请求体(读本地文件流)与接收响应全程。
+// 此前 build_transfer_client 只设 connect_timeout,发送端卡在流式写一半或
+// 读响应挂起时没有兜底,断网/死固件下传输任务永久占住任务与连接。
+// 5 分钟窗口内必须走完一个直传请求;超过视为网络异常由上层重试/报错。
+const TRANSFER_REQUEST_TIMEOUT_SECS: u64 = 300;
+
 fn build_client() -> reqwest::Client {
     reqwest::Client::builder()
         .no_proxy()
@@ -28,6 +34,7 @@ fn build_transfer_client() -> reqwest::Client {
     reqwest::Client::builder()
         .no_proxy()
         .connect_timeout(Duration::from_secs(TRANSFER_CONNECT_TIMEOUT_SECS))
+        .timeout(Duration::from_secs(TRANSFER_REQUEST_TIMEOUT_SECS))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new())
 }
@@ -485,4 +492,53 @@ pub async fn peer_image_exists(peer: &super::peer_store::PairedPeer, image_id: &
         return Ok(true);
     }
     Err("探测局域网图片失败: 多次重试后仍无法连接".to_string())
+}
+
+#[cfg(test)]
+mod transfer_timeout_guards {
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+    // 直传客户端必须设整体请求超时:此前只有 connect_timeout,
+    // 发送端卡在流式写一半/读响应挂起时没有任何兜底。
+    #[test]
+    fn transfer_client_sets_overall_request_timeout() {
+        let src = strip_line_comments(&source_file("src/services/sync_transfer/lan/http_client.rs"));
+        let body = fn_body(&src, "build_transfer_client");
+        assert!(
+            body.contains("TRANSFER_REQUEST_TIMEOUT_SECS"),
+            "直传客户端必须设置整体请求超时"
+        );
+    }
+
+    // serve 侧流式读(请求头/请求体/直传内容)与写响应必须套 IO 超时,
+    // 否则对端半开连接/死固件会永久挂住处理任务。
+    #[test]
+    fn server_side_streaming_io_has_timeout() {
+        let src = strip_line_comments(&source_file("src/services/sync_transfer/lan/http_server.rs"));
+        for function in [
+            "read_request",
+            "read_request_body",
+            "copy_exact_to_file",
+            "write_response",
+        ] {
+            let body = fn_body(&src, function);
+            assert!(
+                body.contains("tokio::time::timeout"),
+                "{} 必须对 IO 读写套超时",
+                function
+            );
+        }
+    }
+
+    // WebDAV 客户端必须设整体请求超时:此前 Client::new() 零超时,
+    // 同步/上传任务断网即永久挂起。
+    #[test]
+    fn webdav_client_sets_overall_request_timeout() {
+        let src = strip_line_comments(&source_file("src/services/webdav_sync/webdav_client.rs"));
+        let body = fn_body(&src, "new");
+        assert!(
+            body.contains("WEBDAV_REQUEST_TIMEOUT_SECS"),
+            "WebDAV 客户端必须设置整体请求超时"
+        );
+    }
 }

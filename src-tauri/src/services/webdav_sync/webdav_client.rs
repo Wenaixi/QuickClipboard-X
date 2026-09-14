@@ -7,6 +7,7 @@ use reqwest::{Body, Client, Method, StatusCode};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashSet;
+use std::time::Duration;
 use tokio::io::DuplexStream;
 use tokio_util::io::ReaderStream;
 
@@ -14,6 +15,11 @@ use super::crypto::{self, WebdavCryptoContext};
 use super::types::{SyncCollection, WebdavConfig};
 
 const WEBDAV_NETWORK_ERROR: &str = "无法连接 WebDAV 服务，请检查地址、网络或服务器状态";
+
+// 单个网络请求整体超时上限:覆盖 DNS/连接/请求发送/响应接收全程。
+// 此前 Client::new() 无任何超时,断网或死固件下同步任务会永久挂起;
+// 给大文件上传/下载留 10 分钟余量,普通同步请求远用不完。
+const WEBDAV_REQUEST_TIMEOUT_SECS: u64 = 600;
 
 #[derive(Clone)]
 pub struct WebdavClient {
@@ -42,8 +48,13 @@ impl WebdavClient {
         } else {
             format!("{}/{}", url, root)
         };
+        let client = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(30))
+            .timeout(Duration::from_secs(WEBDAV_REQUEST_TIMEOUT_SECS))
+            .build()
+            .map_err(|e| format!("初始化 WebDAV 客户端失败: {}", e))?;
         Ok(Self {
-            client: Client::new(),
+            client,
             config,
             base_url,
             crypto: Arc::new(Mutex::new(None)),

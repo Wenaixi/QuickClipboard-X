@@ -7,6 +7,11 @@ use uuid::Uuid;
 
 use super::pairing::PairingConfirmResponse;
 
+// 单次连接读/写的最长等待时间。serve 侧所有流式读写(read_request /
+// read_request_body / copy_exact_to_file / write_response)都套这个上限,
+// 对端断线或死固件卡在写一半时,任务能自己超时退出而不是永久挂起。
+const CONNECTION_IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
 const HEADER_LIMIT: usize = 64 * 1024;
 const HELLO_PATH: &str = "/qc-sync/hello";
 const PAIRING_CONFIRM_PATH: &str = "/qc-sync/pairing/confirm";
@@ -536,8 +541,9 @@ async fn copy_exact_to_file(
     let mut buffer = vec![0u8; FILE_TRANSFER_BUFFER_SIZE];
     while remaining > 0 {
         let read_len = remaining.min(buffer.len());
-        let read = stream.read(&mut buffer[..read_len])
+        let read = tokio::time::timeout(CONNECTION_IO_TIMEOUT, stream.read(&mut buffer[..read_len]))
             .await
+            .map_err(|_| "读取局域网传输内容超时".to_string())?
             .map_err(|e| format!("读取局域网传输内容失败: {}", e))?;
         if read == 0 {
             return Err("局域网文件传输连接提前关闭".to_string());
@@ -600,7 +606,10 @@ async fn read_request(stream: &mut tokio::net::TcpStream) -> Result<HttpRequest,
         if buffer.len() > HEADER_LIMIT {
             return Err("请求头过大".to_string());
         }
-        let read = stream.read(&mut chunk).await.map_err(|e| e.to_string())?;
+        let read = tokio::time::timeout(CONNECTION_IO_TIMEOUT, stream.read(&mut chunk))
+            .await
+            .map_err(|_| "读取请求头超时".to_string())?
+            .map_err(|e| e.to_string())?;
         if read == 0 {
             return Err("连接已关闭".to_string());
         }
@@ -679,7 +688,10 @@ async fn read_request_body(
     if request.content_length > request.body.len() {
         let remaining = request.content_length - request.body.len();
         let mut extra = vec![0u8; remaining];
-        stream.read_exact(&mut extra).await.map_err(|e| e.to_string())?;
+        tokio::time::timeout(CONNECTION_IO_TIMEOUT, stream.read_exact(&mut extra))
+            .await
+            .map_err(|_| "读取请求体超时".to_string())?
+            .map_err(|e| e.to_string())?;
         request.body.extend_from_slice(&extra);
     }
     if request.body.len() > request.content_length {
@@ -722,7 +734,16 @@ async fn write_response(stream: &mut tokio::net::TcpStream, response: HttpRespon
         response.content_type,
         response.body.len()
     );
-    stream.write_all(header.as_bytes()).await.map_err(|e| e.to_string())?;
-    stream.write_all(&response.body).await.map_err(|e| e.to_string())?;
-    stream.flush().await.map_err(|e| e.to_string())
+    tokio::time::timeout(CONNECTION_IO_TIMEOUT, stream.write_all(header.as_bytes()))
+        .await
+        .map_err(|_| "写入响应头超时".to_string())?
+        .map_err(|e| e.to_string())?;
+    tokio::time::timeout(CONNECTION_IO_TIMEOUT, stream.write_all(&response.body))
+        .await
+        .map_err(|_| "写入响应体超时".to_string())?
+        .map_err(|e| e.to_string())?;
+    tokio::time::timeout(CONNECTION_IO_TIMEOUT, stream.flush())
+        .await
+        .map_err(|_| "刷新响应超时".to_string())?
+        .map_err(|e| e.to_string())
 }
