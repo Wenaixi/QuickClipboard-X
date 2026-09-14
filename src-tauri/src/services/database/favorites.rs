@@ -356,13 +356,14 @@ pub fn query_favorites(params: FavoritesQueryParams) -> Result<PaginatedResult<F
     let search_keyword = params.search.clone();
     
     with_connection(|conn| {
+        // B6: where_clauses 改 Vec<String>,不再 Box::leak 泄漏字符串
         let mut where_clauses = vec![];
         let mut count_params: Vec<Box<dyn rusqlite::ToSql>> = vec![];
         let mut query_params: Vec<Box<dyn rusqlite::ToSql>> = vec![];
 
         if let Some(ref group_name) = params.group_name {
             if group_name != "全部" {
-                where_clauses.push("group_name = ?");
+                where_clauses.push("group_name = ?".to_string());
                 count_params.push(Box::new(group_name.clone()));
                 query_params.push(Box::new(group_name.clone()));
             }
@@ -370,7 +371,7 @@ pub fn query_favorites(params: FavoritesQueryParams) -> Result<PaginatedResult<F
 
         if let Some(ref search_query) = search_keyword {
             if !search_query.is_empty() {
-                where_clauses.push("(title LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\' OR html_content LIKE ? ESCAPE '\\')");
+                where_clauses.push("(title LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\' OR html_content LIKE ? ESCAPE '\\')".to_string());
                 let search_pattern = super::like_pattern(search_query);
                 count_params.push(Box::new(search_pattern.clone()));
                 count_params.push(Box::new(search_pattern.clone()));
@@ -386,7 +387,7 @@ pub fn query_favorites(params: FavoritesQueryParams) -> Result<PaginatedResult<F
             if !types.is_empty() && content_type != "all" {
                 // 与搜索词路径一致:转义 %/_/\ + ESCAPE,避免 content_type 含通配符时误匹配(F 系列安全修复)
                 let clauses = types.iter().map(|_| "content_type LIKE ? ESCAPE '\\'").collect::<Vec<_>>().join(" OR ");
-                where_clauses.push(Box::leak(format!("({})", clauses).into_boxed_str()));
+                where_clauses.push(format!("({})", clauses));
                 for content_type in types {
                     let pattern = super::like_pattern(content_type);
                     count_params.push(Box::new(pattern.clone()));
@@ -397,7 +398,7 @@ pub fn query_favorites(params: FavoritesQueryParams) -> Result<PaginatedResult<F
         if let Some(ref paste_status) = params.paste_status {
             let statuses: Vec<_> = paste_status.split(',').map(str::trim).filter(|status| *status == "pasted" || *status == "unpasted").collect();
             if statuses.len() == 1 {
-                where_clauses.push(if statuses[0] == "pasted" { "paste_count > 0" } else { "paste_count = 0" });
+                where_clauses.push(if statuses[0] == "pasted" { "paste_count > 0".to_string() } else { "paste_count = 0".to_string() });
             }
         }
 
@@ -1077,6 +1078,43 @@ mod content_type_like_tests {
         assert!(
             !has_raw_format,
             "content_type 不得再用 format!(\"%{{}}%\") 裸拼"
+        );
+    }
+
+    /// B6 护栏:where_clauses 必须是 Vec<String>,禁止 Box::leak 泄漏字符串。
+    #[test]
+    fn query_favorites_where_clauses_are_strings_not_leaked() {
+        let source = fs::read_to_string(format!(
+            "{}/src/services/database/favorites.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读 favorites.rs");
+        let body: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = body
+            .find("pub fn query_favorites")
+            .expect("找不到 query_favorites");
+        let after = &body[start..];
+        let end = after
+            .find("\npub fn ")
+            .or_else(|| after.find("\nfn "))
+            .map(|i| start + i)
+            .unwrap_or(body.len());
+        let fn_body = &body[start..end.min(start + 3000)];
+        assert!(
+            fn_body.contains("let mut where_clauses = vec![];"),
+            "where_clauses 必须用 Vec 收集"
+        );
+        assert!(
+            !fn_body.contains("Box::leak"),
+            "where_clauses 禁止 Box::leak 泄漏字符串,改为 Vec<String>"
+        );
+        assert!(
+            fn_body.contains("where_clauses.join(\" AND \")"),
+            "where_clauses 必须以 AND 拼接"
         );
     }
 }

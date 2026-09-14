@@ -181,23 +181,24 @@ pub fn query_clipboard_items(params: QueryParams) -> Result<PaginatedResult<Clip
         || params.paste_status.as_ref().map(|s| s.split(',').any(|v| v.trim() == "pasted" || v.trim() == "unpasted")).unwrap_or(false);
     
     with_connection(|conn| {
+        // B6: where_clauses 改 Vec<String>,不再 Box::leak 泄漏字符串
         let mut where_clauses = vec![];
         let mut query_params: Vec<Box<dyn rusqlite::ToSql>> = vec![];
-        
+
         if let Some(ref search) = search_keyword {
             if !search.trim().is_empty() {
-                where_clauses.push("content LIKE ? ESCAPE '\\'");
+                where_clauses.push("content LIKE ? ESCAPE '\\'".to_string());
                 let search_pattern = super::like_pattern(search);
                 query_params.push(Box::new(search_pattern));
             }
         }
-        
+
         if let Some(ref content_type) = params.content_type {
             let types: Vec<_> = content_type.split(',').map(str::trim).filter(|t| !t.is_empty()).collect();
             if !types.is_empty() && content_type != "all" {
                 // 与搜索词路径一致:转义 %/_/\ + ESCAPE,避免 content_type 含通配符时误匹配(F 系列安全修复)
                 let clauses = types.iter().map(|_| "content_type LIKE ? ESCAPE '\\'").collect::<Vec<_>>().join(" OR ");
-                where_clauses.push(Box::leak(format!("({})", clauses).into_boxed_str()));
+                where_clauses.push(format!("({})", clauses));
                 for content_type in types {
                     let pattern = if content_type == "text" { super::like_pattern("text") } else { super::like_pattern(content_type) };
                     query_params.push(Box::new(pattern));
@@ -207,7 +208,7 @@ pub fn query_clipboard_items(params: QueryParams) -> Result<PaginatedResult<Clip
         if let Some(ref paste_status) = params.paste_status {
             let statuses: Vec<_> = paste_status.split(',').map(str::trim).filter(|status| *status == "pasted" || *status == "unpasted").collect();
             if statuses.len() == 1 {
-                where_clauses.push(if statuses[0] == "pasted" { "paste_count > 0" } else { "paste_count = 0" });
+                where_clauses.push(if statuses[0] == "pasted" { "paste_count > 0".to_string() } else { "paste_count = 0".to_string() });
             }
         }
         
@@ -1257,6 +1258,43 @@ mod content_type_like_tests {
         assert!(
             !has_raw_format,
             "content_type 不得再用 format!(\"%{{}}%\") 裸拼"
+        );
+    }
+
+    /// B6 护栏:where_clauses 必须是 Vec<String>,禁止 Box::leak 泄漏字符串。
+    #[test]
+    fn query_clipboard_where_clauses_are_strings_not_leaked() {
+        let source = fs::read_to_string(format!(
+            "{}/src/services/database/clipboard.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读 clipboard.rs");
+        let body: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = body
+            .find("pub fn query_clipboard_items")
+            .expect("找不到 query_clipboard_items");
+        let after = &body[start..];
+        let end = after
+            .find("\npub fn ")
+            .or_else(|| after.find("\nfn "))
+            .map(|i| start + i)
+            .unwrap_or(body.len());
+        let fn_body = &body[start..end.min(start + 2500)];
+        assert!(
+            fn_body.contains("let mut where_clauses = vec![];"),
+            "where_clauses 必须用 Vec 收集"
+        );
+        assert!(
+            !fn_body.contains("Box::leak"),
+            "where_clauses 禁止 Box::leak 泄漏字符串,改为 Vec<String>"
+        );
+        assert!(
+            fn_body.contains("where_clauses.join(\" AND \")"),
+            "where_clauses 必须以 AND 拼接"
         );
     }
 }
