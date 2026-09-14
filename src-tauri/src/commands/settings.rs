@@ -170,11 +170,12 @@ pub fn save_settings(mut settings: AppSettings, app: tauri::AppHandle) -> Result
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 let _ = crate::quickpaste::init_quickpaste_window(&app_clone);
             });
-        } else if let Some(window) = app.get_webview_window("quickpaste") {
-            let _ = window.close();
+        } else if let Some(_window) = app.get_webview_window("quickpaste") {
+            // 关闭 quickpaste 必须走唯一正确入口:disable 键盘模式 + hide + set_visible(false),
+            // 直接 window.close() 会让 QUICKPASTE_VISIBLE/键盘模式残留,热键后续永远走 next 分支不重建
+            let _ = crate::windows::quickpaste::hide_quickpaste_window(&app);
         }
     }
-
     if show_tray_icon_changed {
         if let Some(tray) = app.tray_by_id("main-tray") {
             if let Err(e) = tray.set_visible(settings.show_tray_icon) {
@@ -601,6 +602,30 @@ mod tests {
             disable_pos > update_pos,
             "set_edge_hide_enabled 体内 handle_disable_edge_hide 必须在 update_settings 之后,\
              违反 §6 铁律 5(形态刷新落地新值之后)"
+        );
+    }
+
+    // 快捷粘贴关闭路径护栏:quickpaste_enabled 改回 false 时必须走
+    // hide_quickpaste_window(唯一正确入口:disable 键盘模式 + hide + set_visible(false)),
+    // 禁止直接 window.close()。否则 QUICKPASTE_VISIBLE 与键盘模式残留 true,
+    // 之后热键恒走"重建"分支、永远不再显示(快捷键 finding A1)。
+    // 断言目标:save_settings 函数体(从定义到文件尾闭块)内
+    // 必须调用 hide_quickpaste_window,且剥注释后不得出现裸 window.close()。
+    #[test]
+    fn disabling_quickpaste_hides_through_hide_quickpaste_window() {
+        let source = settings_source();
+        let start = source
+            .find("pub fn save_settings")
+            .expect("找不到 save_settings 定义");
+        let branch = &source[start..];
+        assert!(
+            branch.contains("hide_quickpaste_window(&app)"),
+            "关闭 quickpaste 必须调用 hide_quickpaste_window(&app)"
+        );
+        // 负向断言:用拼接字符串,避免断言参数自引用误命中(§10.4 注释/自指陷阱)
+        assert!(
+            !strip_line_comments(branch).contains(&format!("{}close()", format!("let _ = window."))),
+            "关闭 quickpaste 禁止直接 close 窗口,必须走 hide_quickpaste_window"
         );
     }
 }
