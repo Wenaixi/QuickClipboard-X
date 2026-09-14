@@ -52,7 +52,9 @@ pub fn stop_focus_listener() {
 #[cfg(windows)]
 pub fn refresh_excluded_hwnds(app_handle: &tauri::AppHandle) {
     let mut excluded = Vec::new();
-    for label in ["main", "context-menu", "preview"] {
+    // A3:排除列表必须覆盖全部自身窗口——缺 quickpaste 时便捷粘贴窗口的聚焦
+    // 事件不被过滤,可被记为 LAST_FOCUS_HWND,恢复焦点时把焦点设回隐藏窗口。
+    for label in ["main", "context-menu", "preview", "quickpaste"] {
         if let Some(win) = app_handle.get_webview_window(label) {
             if let Ok(hwnd) = win.hwnd() {
                 excluded.push(hwnd.0 as isize);
@@ -87,12 +89,20 @@ pub fn restore_last_focus() -> Result<(), String> {
     #[cfg(windows)]
     {
         use windows::Win32::Foundation::HWND;
-        use windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
+        use windows::Win32::UI::WindowsAndMessaging::{IsWindow, SetForegroundWindow};
         use std::ffi::c_void;
-        
+
         if let Some(hwnd_val) = *LAST_FOCUS_HWND.lock() {
-            unsafe {
-                let _ = SetForegroundWindow(HWND(hwnd_val as *mut c_void));
+            // A3:恢复前校验句柄仍有效——主窗口销毁重建后旧 hwnd 已失效,
+            // 直接 SetForegroundWindow 到无效句柄静默失败,焦点归还被吞。
+            // windows crate 的 IsWindow 接收 Option<HWND>,None 表示无效。
+            let valid = unsafe { IsWindow(Some(HWND(hwnd_val as *mut c_void))) };
+            if valid.as_bool() {
+                unsafe {
+                    let _ = SetForegroundWindow(HWND(hwnd_val as *mut c_void));
+                }
+            } else {
+                *LAST_FOCUS_HWND.lock() = None;
             }
         }
         crate::hotkey::resume_execute_item_hotkey();
@@ -298,6 +308,12 @@ unsafe extern "system" fn focus_callback(
 
 #[cfg(test)]
 mod tests {
+    use super::super::hotkey::test_utils::{fn_body, strip_line_comments};
+
+    fn focus_source() -> String {
+        super::super::hotkey::test_utils::source_file("src/services/system/focus.rs")
+    }
+
     // §10.3 源码护栏：前台应用信息查询里的 OpenProcess 必须配对 CloseHandle。
     #[test]
     fn foreground_app_info_closes_process_handles() {
@@ -318,6 +334,43 @@ mod tests {
         assert!(
             close_count >= open_count,
             "OpenProcess 调用必须配对 CloseHandle，当前 open={open_count} close={close_count}"
+        );
+    }
+
+    // A3(焦点污染):排除列表必须覆盖全部自身窗口——缺失 quickpaste 时便捷
+    // 粘贴窗口可被记为上次焦点,恢复时把焦点设回隐藏窗口。护栏断言 label 数组
+    // 同时含 quickpaste 与 main/context-menu/preview。
+    #[test]
+    fn excluded_hwnds_cover_all_own_windows_including_quickpaste() {
+        let src = strip_line_comments(&focus_source());
+        let b = fn_body(&src, "refresh_excluded_hwnds");
+        for label in ["main", "context-menu", "preview", "quickpaste"] {
+            assert!(
+                b.contains(label),
+                "排除列表必须覆盖 {} 窗口,否则其聚焦事件污染 LAST_FOCUS_HWND",
+                label
+            );
+        }
+    }
+
+    // A3(焦点归还):restore_last_focus 设置焦点前必须校验句柄仍有效——
+    // 主窗口销毁重建后旧 hwnd 失效,直接 SetForegroundWindow 静默失败;
+    // 无效时清空记录,避免把焦点设回已销毁/隐藏窗口。
+    #[test]
+    fn restore_last_focus_guards_against_invalid_hwnd() {
+        let src = strip_line_comments(&focus_source());
+        let b = fn_body(&src, "restore_last_focus");
+        let set_pos = b
+            .find("SetForegroundWindow(")
+            .expect("restore_last_focus 必须设置前台窗口");
+        // 有效性校验必须发生在 SetForegroundWindow 之前(顺序不变量)
+        assert!(
+            b[..set_pos].contains("IsWindow("),
+            "SetForegroundWindow 前必须校验 hwnd 有效性"
+        );
+        assert!(
+            b.contains("LAST_FOCUS_HWND.lock() = None"),
+            "无效句柄必须清空 LAST_FOCUS_HWND 记录"
         );
     }
 
