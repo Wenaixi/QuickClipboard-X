@@ -69,13 +69,21 @@ mod windows_raw_input {
             return None;
         }
 
-        Some((
-            CTRL_DOWN.load(Ordering::Relaxed),
-            SHIFT_DOWN.load(Ordering::Relaxed),
-            ALT_DOWN.load(Ordering::Relaxed),
-            LWIN_DOWN.load(Ordering::Relaxed),
-            RWIN_DOWN.load(Ordering::Relaxed),
-        ))
+        // 直接读物理按键实时状态,而非用 CTRL_DOWN/SHIFT_DOWN 等 tracker:
+        // 粘贴注入键(PASTE_INPUT_MARKER)走 SendInput,raw_input 在 marker
+        // 分支直接 return,不更新 tracker;若恢复依赖 tracker,注入键的合成
+        // keyup 不会反映到 tracker 里,快速连按粘贴后 Ctrl/Shift/Win 会
+        // 被记成"仍按下",直到下一次真实物理按键才纠正(粘滞修饰键)。
+        // GetAsyncKeyState 读的是真实物理/合成按键的当前状态,注入键本就
+        // 没有改变物理键,直接读物理态即可消除漂移。
+        unsafe {
+            let ctrl = (GetAsyncKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000) != 0;
+            let shift = (GetAsyncKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000) != 0;
+            let alt = (GetAsyncKeyState(VK_MENU.0 as i32) as u16 & 0x8000) != 0;
+            let lwin = (GetAsyncKeyState(VK_LWIN.0 as i32) as u16 & 0x8000) != 0;
+            let rwin = (GetAsyncKeyState(VK_RWIN.0 as i32) as u16 & 0x8000) != 0;
+            Some((ctrl, shift, alt, lwin, rwin))
+        }
     }
 
     pub(crate) fn guard_tray_click_region(x: i32, y: i32, width: u32, height: u32) {
@@ -1037,6 +1045,33 @@ mod windows_raw_input_tests {
             "复位函数不得改动键盘模式开关"
         );
     }
+
+    // 恢复物理修饰键必须读实时按键状态,禁止读 tracker:
+    // tracker 会被 PASTE_INPUT_MARKER 分支的早退跳过低层修饰键 keyup,
+    // 快速连按粘贴后 Ctrl/Shift/Win 被记成"仍按下"(粘滞修饰键)。
+    #[test]
+    fn physical_restore_reads_live_key_state_not_trackers() {
+        use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+        let src = strip_line_comments(&source_file("src/services/system/raw_input.rs"));
+        let body = fn_body(&src, "get_physical_modifier_keys_state");
+        assert!(
+            body.contains("GetAsyncKeyState(VK_CONTROL"),
+            "必须用 GetAsyncKeyState 读实时物理状态"
+        );
+        assert!(
+            body.contains("GetAsyncKeyState(VK_MENU"),
+            "必须包含 Alt(VK_MENU) 实时读取"
+        );
+        assert!(
+            !body.contains("CTRL_DOWN.load"),
+            "禁止回退到 tracker——tracker 会被注入键的 marker 早退污染"
+        );
+        assert!(
+            !body.contains("SHIFT_DOWN.load"),
+            "禁止回退到 tracker——tracker 会被注入键的 marker 早退污染"
+        );
+    }
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -1053,3 +1088,4 @@ pub(crate) fn start_quickpaste_secondary_key_hold() {}
 
 #[cfg(not(target_os = "windows"))]
 pub(crate) fn guard_tray_click_region(_x: i32, _y: i32, _width: u32, _height: u32) {}
+
