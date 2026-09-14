@@ -277,6 +277,26 @@ pub fn reset_all_data() -> Result<String, String> {
     Ok(default_dir.to_string_lossy().to_string())
 }
 
+// zip 条目名安全检查:拒绝目录穿越、根相对/绝对路径与盘符路径,
+// 保证 join 到 temp_root 后仍在其下,杜绝 zip-slip 写出任意文件。
+// 返回可安全 join 的相对路径;不合法返回 None(该条目整体跳过)。
+fn safe_zip_entry_name(name: &str) -> Option<&str> {
+    if name.is_empty() {
+        return None;
+    }
+    if name.contains("..") {
+        return None;
+    }
+    if name.starts_with('/') || name.starts_with('\\') {
+        return None;
+    }
+    // Windows 盘符形式(C:、C:/ 等)与 UNC 都含冒号,一律拒绝
+    if name.contains(':') {
+        return None;
+    }
+    Some(name)
+}
+
 pub fn import_data_zip(zip_path: PathBuf, mode: &str) -> Result<String, String> {
     if !zip_path.exists() {
         return Err("导入文件不存在".into());
@@ -289,7 +309,7 @@ pub fn import_data_zip(zip_path: PathBuf, mode: &str) -> Result<String, String> 
     for i in 0..archive.len() {
         let mut f = archive.by_index(i).map_err(|e| e.to_string())?;
         let name = f.name().to_string();
-        if name.contains("..") { continue; }
+        if safe_zip_entry_name(&name).is_none() { continue; }
         let out_path = temp_root.join(&name);
         if f.is_dir() {
             fs::create_dir_all(&out_path).map_err(|e| e.to_string())?;
@@ -1155,4 +1175,42 @@ pub fn export_data_zip(target_path: PathBuf) -> Result<PathBuf, String> {
     }
 
     Ok(target_path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::safe_zip_entry_name;
+
+    #[test]
+    fn safe_zip_entry_name_allows_normal_relative_paths() {
+        for name in [
+            "quickclipboard.db",
+            "clipboard_images/a1b2c3.png",
+            "settings.json",
+            "image_library/dir/icon.png",
+        ] {
+            assert_eq!(safe_zip_entry_name(name), Some(name), "合法路径被拒: {}", name);
+        }
+    }
+
+    #[test]
+    fn safe_zip_entry_name_rejects_traversal_and_absolute() {
+        for name in [
+            "../escape.db",
+            "a/../../b.png",
+            "/etc/passwd",
+            "\\windows\\system32\\x",
+            "C:\\users\\me\\y.png",
+            "C:/users/me/y.png",
+            "C:evil.png",
+            "\\\\server\\share\\z",
+        ] {
+            assert_eq!(safe_zip_entry_name(name), None, "危险路径被放行: {:?}", name);
+        }
+    }
+
+    #[test]
+    fn safe_zip_entry_name_rejects_empty() {
+        assert_eq!(safe_zip_entry_name(""), None);
+    }
 }
