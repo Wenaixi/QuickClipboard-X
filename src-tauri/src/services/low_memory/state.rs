@@ -53,6 +53,11 @@ pub fn try_start_exit_low_memory() -> bool {
     !EXITING_LOW_MEMORY.swap(true, Ordering::SeqCst)
 }
 
+// 退出低占用模式是否进行中(init 已置位、finish 未复位)
+pub fn is_exiting_low_memory() -> bool {
+    EXITING_LOW_MEMORY.load(Ordering::SeqCst)
+}
+
 // 完成退出低占用模式
 pub fn finish_exit_low_memory() {
     EXITING_LOW_MEMORY.store(false, Ordering::SeqCst);

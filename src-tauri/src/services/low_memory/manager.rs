@@ -10,6 +10,7 @@ use super::state::{
     try_mark_auto_manager_started,
     try_start_exit_low_memory,
     finish_exit_low_memory,
+    is_exiting_low_memory,
 };
 
 // 需要销毁的 WebView 窗口列表
@@ -47,6 +48,13 @@ static AUTO_LOW_MEMORY_LOG_STATE: Lazy<Mutex<Option<AutoLowMemoryLogState>>> =
 pub fn enter_low_memory_mode(app: &AppHandle) -> Result<(), String> {
     if is_low_memory_mode() {
         return Ok(());
+    }
+
+    // B7 互斥缺口:退出流程(init 置位 EXITING_LOW_MEMORY → 重建 webview →
+    // finish 复位)进行中,若此处直接进入,会摧毁/改写刚重建的主窗口形态。
+    // 之前只有 try_start_exit_low_memory 防「并发退出」,没有防「退出中进入」。
+    if super::state::is_exiting_low_memory() {
+        return Err("正在退出低占用模式，请稍后再试".to_string());
     }
 
     let _ = super::hide_panel();
@@ -485,6 +493,26 @@ mod tests {
         assert!(
             body.contains("recreate_main_window(app)"),
             "必须重建主窗口"
+        );
+    }
+
+    // B7 互斥护栏:退出低占用模式进行中(EXITING_LOW_MEMORY 置位)不得再次进入。
+    // 此前只有 try_start_exit_low_memory 防「并发退出」,没有防「退出中进入」——
+    // exit 流程重建主窗口期间被 enter 击穿,会摧毁/改写刚建好的窗口形态。
+    #[test]
+    fn enter_low_memory_blocks_while_exit_in_flight() {
+        let src = strip_line_comments(&manager_source());
+        let body = crate::services::system::hotkey::test_utils::fn_body(&src, "enter_low_memory_mode");
+        assert!(
+            body.contains("is_exiting_low_memory"),
+            "进入低占用模式必须检查退出流程是否进行中"
+        );
+        let state_src = strip_line_comments(
+            &crate::services::system::hotkey::test_utils::source_file("src/services/low_memory/state.rs"),
+        );
+        assert!(
+            state_src.contains("pub fn is_exiting_low_memory"),
+            "state.rs 必须提供退出进行中查询能力"
         );
     }
 
