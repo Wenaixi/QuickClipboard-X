@@ -233,7 +233,8 @@
     "text": "Text",
     "image": "Image",
     "file": "File",
-    "link": "Link"
+    "link": "Link",
+    "unpasted": "Not pasted"
   },
   "search": {
     "placeholder": "Search clipboard..."

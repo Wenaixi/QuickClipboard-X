@@ -1,0 +1,61 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const tabNav = readFileSync(join(here, './TabNavigation.jsx'), 'utf8');
+const app = readFileSync(join(here, '../App.jsx'), 'utf8');
+// 剥行注释,避免注释字面误命中(与 Rust 侧 §10.4 陷阱同构)
+const strip = (src) =>
+  src
+    .split('\n')
+    .filter((line) => !line.trimStart().startsWith('//'))
+    .join('\n');
+
+test('TabNavigation 不得残留未声明的 compactFilters 引用(merge 咬掉参数却保留引用,白屏根因)', () => {
+  const code = strip(tabNav);
+  assert.doesNotMatch(code, /isCompactFiltersLayout/, 'compactFilters 无参数、无使用点,死引用必须删除');
+});
+
+test('TabNavigation 必须声明 filterCollapseTimerRef(折叠定时器是本地过滤折叠交互的必需 ref)', () => {
+  const code = strip(tabNav);
+  assert.match(code, /const filterCollapseTimerRef = useRef\(null\)/, 'merge 咬掉 useRef 声明但保留 6 处引用');
+});
+
+test('TabNavigation 必须定义 handleFilterAreaMouseLeave(mouseleave 折叠回调,handleControlsContainerMouseLeave 仍调用)', () => {
+  const code = strip(tabNav);
+  assert.match(code, /const handleFilterAreaMouseLeave = \(event\) =>/, 'merge 咬掉定义但调用点保留');
+});
+
+test('TabNavigation 必须定义粘贴状态过滤(pasteFilters 数组 + 两个选中集合 + 两个 handler)', () => {
+  const code = strip(tabNav);
+  assert.match(code, /const pasteFilters = \[/, '上游 v0.5 新增的未粘贴/已粘贴过滤数组必须接入');
+  assert.match(code, /id: 'unpasted'/, '未粘贴过滤项');
+  assert.match(code, /id: 'pasted'/, '已粘贴过滤项');
+  assert.match(code, /const selectedFilters = /, '普通类型过滤选中集合');
+  assert.match(code, /const isFilterSelected = /, '普通类型选中判断');
+  assert.match(code, /const selectedPasteFilters = /, '粘贴状态选中集合');
+  assert.match(code, /const isPasteFilterSelected = /, '粘贴状态选中判断');
+  assert.match(code, /const handleFilterChange = /, '普通类型切换 handler');
+  assert.match(code, /const handlePasteFilterChange = /, '粘贴状态切换 handler');
+});
+
+test('TabNavigation sidebar 分支必须渲染合并的 filters+pasteFilters(否则粘贴过滤按钮全部缺失)', () => {
+  const code = strip(tabNav);
+  assert.match(code, /\[\.\.\.filters, \.\.\.pasteFilters\]\.map/, 'sidebar 必须合并渲染两类过滤器');
+});
+
+test('App.jsx 必须接线粘贴状态过滤全链路(否则 TabNavigation 切换的过滤不会生效)', () => {
+  const code = strip(app);
+  assert.match(code, /pasteFilter=\{pasteFilter\}/, 'TabNavigation 必须收到 pasteFilter');
+  assert.match(code, /onPasteFilterChange=\{setPasteFilter\}/, 'TabNavigation 必须收到 onPasteFilterChange');
+  assert.match(code, /<ClipboardTab[^>]*pasteFilter=\{pasteFilter\}/, 'ClipboardTab 必须收到 pasteFilter(消费端)');
+  assert.match(code, /<FavoritesTab[^>]*pasteFilter=\{pasteFilter\}/, 'FavoritesTab 必须收到 pasteFilter(消费端)');
+});
+
+test('App.jsx 不得残留 isCompactFilters 死链路(merge 咬掉消费方后已是无人接线的死状态)', () => {
+  const code = strip(app);
+  assert.doesNotMatch(code, /isCompactFilters/, 'isCompactFilters state/mediaQuery/监听必须整体删除');
+});

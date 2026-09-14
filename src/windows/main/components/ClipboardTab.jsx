@@ -3,6 +3,7 @@ import { useSnapshot } from 'valtio';
 import { listen } from '@tauri-apps/api/event';
 import { clipboardStore, refreshClipboardHistory } from '@shared/store/clipboardStore';
 import { settingsStore } from '@shared/store/settingsStore';
+import { navigationStore } from '@shared/store/navigationStore';
 import ClipboardList from './ClipboardList';
 import FloatingToolbar from './FloatingToolbar';
 

@@ -233,7 +233,8 @@
     "text": "文本",
     "image": "图片",
     "file": "文件",
-    "link": "链接"
+    "link": "链接",
+    "unpasted": "未粘贴"
   },
   "search": {
     "placeholder": "搜索剪贴板内容..."

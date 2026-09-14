@@ -89,7 +89,6 @@ function TabNavigation({
   const uiAnimationEnabled = settings.uiAnimationEnabled !== false;
   const visibleOptionalTabs = normalizeVisibleOptionalTabs(settings.visibleOptionalTabs);
   const isSidebarLayout = navigationMode === 'sidebar';
-  const isCompactFiltersLayout = compactFilters && !isSidebarLayout;
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isGroupsPanelOpen, setIsGroupsPanelOpen] = useState(false);
   const [isGroupButtonRevealed, setIsGroupButtonRevealed] = useState(false);
@@ -108,6 +107,7 @@ function TabNavigation({
   const [collapsedVisibleFilterCount, setCollapsedVisibleFilterCount] = useState(4);
   const [sidebarFixedWidth, setSidebarFixedWidth] = useState(null);
   const sidebarTabsMainRef = useRef(null);
+  const filterCollapseTimerRef = useRef(null);
 
   const allTabs = [{
     id: 'clipboard',
@@ -158,6 +158,21 @@ function TabNavigation({
     label: t('filter.link') || '链接',
     icon: "ti ti-link"
   }];
+
+  // 粘贴状态过滤(上游 v0.5 新功能,6dd9fa12 合并时定义被咬掉,引用残留):
+  const pasteFilters = [{ id: 'unpasted', label: '未粘贴', icon: 'ti ti-clipboard-x' }, {
+    id: 'pasted', label: '已粘贴', icon: 'ti ti-clipboard-check'
+  }];
+  const selectedFilters = String(contentFilter || 'all')
+    .split(',')
+    .map(value => value.trim())
+    .filter(value => FILTER_IDS.includes(value));
+  const isFilterSelected = id => selectedFilters.includes(id);
+  const selectedPasteFilters = String(pasteFilter || 'all')
+    .split(',')
+    .map(value => value.trim())
+    .filter(value => pasteFilters.some(filter => filter.id === value));
+  const isPasteFilterSelected = id => selectedPasteFilters.includes(id);
 
   const isFilterAutoExpanded = collapsedVisibleFilterCount >= 5;
   const expandableFilters = filters.slice(collapsedVisibleFilterCount);
@@ -399,6 +414,13 @@ function TabNavigation({
     onEmojiModeChange(id);
   };
 
+  const handleFilterChange = id => {
+    const nextFilters = isFilterSelected(id)
+      ? selectedFilters.filter(filterId => filterId !== id)
+      : [...selectedFilters, id];
+    onFilterChange(nextFilters.join(',') || 'all');
+  };
+
   // 分组按钮边缘悬停弹出:鼠标移到顶栏最右边缘时按钮滑出,离开后收回。
   // 按钮本身悬停(或面板打开)时保持显示,避免闪烁。
   const handleGroupRevealMouseMove = (event) => {
@@ -459,6 +481,23 @@ function TabNavigation({
       filterCollapseTimerRef.current = null;
     }
     setIsFilterExpanded(true);
+  };
+
+  const handleFilterAreaMouseLeave = (event) => {
+    if (isFilterAutoExpanded) {
+      return;
+    }
+    const nextTarget = event?.relatedTarget;
+    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+      return;
+    }
+    if (filterCollapseTimerRef.current) {
+      clearTimeout(filterCollapseTimerRef.current);
+    }
+    filterCollapseTimerRef.current = setTimeout(() => {
+      setIsFilterExpanded(false);
+      filterCollapseTimerRef.current = null;
+    }, 180);
   };
 
   const handlePasteFilterChange = id => {
@@ -560,7 +599,7 @@ function TabNavigation({
                           emojiModesRef.current[mode.id] = el;
                         }
                       }))
-                : filters.map(filter => renderSidebarButton({
+                : [...filters, ...pasteFilters].map(filter => renderSidebarButton({
                     id: filter.id,
                     label: filter.label,
                     icon: filter.icon,
@@ -812,6 +851,22 @@ function TabNavigation({
                         </div>
                     </div>
                   )}
+
+                  <div className="flex items-center gap-1 shrink-0 min-w-0" onMouseEnter={handleFilterAreaMouseEnter}>
+                    {pasteFilters.map(filter => (
+                      <FilterButton
+                        key={filter.id}
+                        id={filter.id}
+                        label={filter.label}
+                        icon={filter.icon}
+                        isActive={isPasteFilterSelected(filter.id)}
+                        onClick={handlePasteFilterChange}
+                        buttonRef={el => {
+                          filtersRef.current[filter.id] = el;
+                        }}
+                      />
+                    ))}
+                  </div>
 
                   <div
                     className={`overflow-visible shrink-0 ${uiAnimationEnabled ? 'transition-all duration-300 ease-out' : ''}`}

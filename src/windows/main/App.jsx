@@ -42,8 +42,6 @@ const TAB_NAVIGATION_MODE = {
   SIDEBAR: 'sidebar'
 };
 const SIDEBAR_TABS_MEDIA_QUERY = '(min-width: 550px)';
-const COMPACT_TITLE_BAR_MEDIA_QUERY = '(max-width: 299px)';
-const COMPACT_FILTERS_MEDIA_QUERY = '(max-width: 299px)';
 const WEBDAV_TOAST_CONFIG = {
   size: TOAST_SIZES.EXTRA_SMALL,
   position: TOAST_POSITIONS.BOTTOM_RIGHT
@@ -51,14 +49,6 @@ const WEBDAV_TOAST_CONFIG = {
 
 function getIsSidebarTabsLayout() {
   return typeof window !== 'undefined' && window.matchMedia(SIDEBAR_TABS_MEDIA_QUERY).matches;
-}
-
-function getIsCompactTitleBar() {
-  return typeof window !== 'undefined' && window.matchMedia(COMPACT_TITLE_BAR_MEDIA_QUERY).matches;
-}
-
-function getIsCompactFilters() {
-  return typeof window !== 'undefined' && window.matchMedia(COMPACT_FILTERS_MEDIA_QUERY).matches;
 }
 
 function App() {
@@ -86,8 +76,6 @@ function App() {
   const [emojiMode, setEmojiMode] = useState('emoji'); // 'emoji' | 'symbols' | 'images'
   const [updateBannerState, setUpdateBannerState] = useState(null);
   const [isSidebarTabsLayout, setIsSidebarTabsLayout] = useState(getIsSidebarTabsLayout);
-  const [isCompactTitleBar, setIsCompactTitleBar] = useState(getIsCompactTitleBar);
-  const [isCompactFilters, setIsCompactFilters] = useState(getIsCompactFilters);
   const clipboardTabRef = useRef(null);
   const favoritesTabRef = useRef(null);
   const emojiTabRef = useRef(null);
@@ -151,37 +139,27 @@ function App() {
   // 窗口动画
   useWindowAnimation();
 
-  // 仅在跨越布局断点时更新，避免缩放期间持续重渲染整个主窗口。
+  // 仅在跨越布局断点时更新,避免缩放期间持续重渲染整个主窗口(compactFilters
+  // 专属于 TabNavigation 顶部导航,合并后已无消费方,此前的 isCompactFilters
+  // 状态、media query 与监听整体随 6dd9fa12 合并被清除)。
   useEffect(() => {
     const mediaQuery = window.matchMedia(SIDEBAR_TABS_MEDIA_QUERY);
-    const compactTitleBarMediaQuery = window.matchMedia(COMPACT_TITLE_BAR_MEDIA_QUERY);
-    const compactFiltersMediaQuery = window.matchMedia(COMPACT_FILTERS_MEDIA_QUERY);
     const updateLayoutMode = () => {
       setIsSidebarTabsLayout(mediaQuery.matches);
-      setIsCompactTitleBar(compactTitleBarMediaQuery.matches);
-      setIsCompactFilters(compactFiltersMediaQuery.matches);
     };
 
     updateLayoutMode();
     if (typeof mediaQuery.addEventListener === 'function') {
       mediaQuery.addEventListener('change', updateLayoutMode);
-      compactTitleBarMediaQuery.addEventListener('change', updateLayoutMode);
-      compactFiltersMediaQuery.addEventListener('change', updateLayoutMode);
     } else {
       mediaQuery.addListener(updateLayoutMode);
-      compactTitleBarMediaQuery.addListener(updateLayoutMode);
-      compactFiltersMediaQuery.addListener(updateLayoutMode);
     }
 
     return () => {
       if (typeof mediaQuery.removeEventListener === 'function') {
         mediaQuery.removeEventListener('change', updateLayoutMode);
-        compactTitleBarMediaQuery.removeEventListener('change', updateLayoutMode);
-        compactFiltersMediaQuery.removeEventListener('change', updateLayoutMode);
       } else {
         mediaQuery.removeListener(updateLayoutMode);
-        compactTitleBarMediaQuery.removeListener(updateLayoutMode);
-        compactFiltersMediaQuery.removeListener(updateLayoutMode);
       }
     };
   }, []);
@@ -635,10 +613,10 @@ function App() {
     bg-qc-surface
   `.trim().replace(/\s+/g, ' ');
   const TitleBarComponent = <TitleBar ref={searchRef} searchQuery={searchQuery} onSearchChange={setSearchQuery} searchPlaceholder={t('search.placeholder')} position={settings.titleBarPosition} activeTab={activeTab} updateBannerState={updateBannerState} onSearchFocusChange={setIsSearchFocused} />;
-  const TabNavigationComponent = <TabNavigation ref={tabNavigationRef} activeTab={activeTab} onTabChange={setActiveTab} contentFilter={contentFilter} onFilterChange={setContentFilter} emojiMode={emojiMode} onEmojiModeChange={handleEmojiModeChange} onGroupChange={handleGroupChange} groupsPopupRef={groupsPopupRef} navigationMode={tabNavigationMode} />;
+  const TabNavigationComponent = <TabNavigation ref={tabNavigationRef} activeTab={activeTab} onTabChange={setActiveTab} contentFilter={contentFilter} onFilterChange={setContentFilter} pasteFilter={pasteFilter} onPasteFilterChange={setPasteFilter} emojiMode={emojiMode} onEmojiModeChange={handleEmojiModeChange} onGroupChange={handleGroupChange} groupsPopupRef={groupsPopupRef} navigationMode={tabNavigationMode} />;
   const ContentComponent = <div ref={contentDragRef} className="main-content-area flex-1 min-h-0 overflow-hidden relative pb-[8px] bg-qc-surface transition-colors duration-500">
-      {activeTab === 'clipboard' && <ClipboardTab ref={clipboardTabRef} contentFilter={contentFilter} searchQuery={searchQuery} />}
-      {activeTab === 'favorites' && <FavoritesTab ref={favoritesTabRef} contentFilter={contentFilter} searchQuery={searchQuery} />}
+      {activeTab === 'clipboard' && <ClipboardTab ref={clipboardTabRef} contentFilter={contentFilter} pasteFilter={pasteFilter} searchQuery={searchQuery} />}
+      {activeTab === 'favorites' && <FavoritesTab ref={favoritesTabRef} contentFilter={contentFilter} pasteFilter={pasteFilter} searchQuery={searchQuery} />}
       {activeTab === 'emoji' && <Suspense fallback={null}><EmojiTab ref={emojiTabRef} emojiMode={emojiMode} onEmojiModeChange={handleEmojiModeChange} onSwitchTab={handleEmojiSwitchTab} searchQuery={searchQuery} /></Suspense>}
     </div>;
   const ActionBarComponent = <MultiSelectActionBar activeTab={activeTab} />;
