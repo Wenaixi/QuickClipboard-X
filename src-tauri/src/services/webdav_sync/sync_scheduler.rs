@@ -20,6 +20,10 @@ static AUTO_PUSH_PENDING: AtomicBool = AtomicBool::new(false);
 static WINDOW_SHOW_PULL_RUNNING: AtomicBool = AtomicBool::new(false);
 static WINDOW_SHOW_PULL_LAST_AT_MS: AtomicU64 = AtomicU64::new(0);
 static START_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+// B9:全局同步事务串行锁——手动上传/自动推送/调度拉取/窗口显示拉取共用,
+// 防止并发事务在本地数据库快照与已上传签名上交错 RMW 互相覆盖。
+// 放在 upload_selected_parts 与 download_raw 两个事务汇聚点(两者无嵌套调用,不会死锁)。
+pub(super) static SYNC_TX_LOCK: Lazy<tokio::sync::Mutex<()>> = Lazy::new(|| tokio::sync::Mutex::new(()));
 static APP_HANDLE: Lazy<Mutex<Option<AppHandle>>> = Lazy::new(|| Mutex::new(None));
 static LAST_REPORT: Lazy<Mutex<Option<WebdavSyncReportEvent>>> = Lazy::new(|| Mutex::new(None));
 static LAST_UPLOADED_SIGNATURE: Lazy<Mutex<WebdavLocalSyncSignature>> =
@@ -94,6 +98,8 @@ pub fn start() {
         RUNNING.store(false, Ordering::SeqCst);
     });
 }
+
+
 
 pub fn notify_local_change(app: AppHandle, reason: &'static str) {
     let settings = crate::services::get_settings();
@@ -198,6 +204,8 @@ async fn upload_changed_parts() -> Result<Option<SyncReport>, String> {
 }
 
 pub async fn upload_selected_parts(force_all: bool) -> Result<Option<SyncReport>, String> {
+    // B9:持有全局同步锁,手动上传不得与自动推送/调度拉取交错
+    let _tx_guard = SYNC_TX_LOCK.lock().await;
     load_uploaded_signature();
     let settings = crate::services::get_settings();
     let signature = crate::services::database::webdav_local_sync_parts_signature()?;
@@ -315,5 +323,80 @@ fn emit_main_window_refresh(app_handle: &AppHandle, report: &SyncReport) {
 
     if crate::windows::main_window::is_main_window_visible_for_updates() {
         let _ = crate::commands::window::emit_main_window_refresh_needed_event(app_handle);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // B9 护栏:同步事务锁必须存在,且上传事务入口必须先持锁。
+    #[test]
+    fn upload_transaction_acquires_global_sync_lock_first() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/webdav_sync/sync_scheduler.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读 sync_scheduler.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = stripped
+            .find("pub async fn upload_selected_parts")
+            .expect("缺 upload_selected_parts");
+        let rest = &stripped[start..];
+        let end = rest
+            .find("\nfn ")
+            .or_else(|| rest.find("\n#["))
+            .map(|i| start + i)
+            .unwrap_or(stripped.len());
+        let body = &stripped[start..end];
+        let lock_pos = body
+            .find("SYNC_TX_LOCK.lock().await")
+            .expect("upload_selected_parts 必须先持有 SYNC_TX_LOCK");
+        let sig_pos = body
+            .find("load_uploaded_signature()")
+            .expect("upload_selected_parts 应调用 load_uploaded_signature");
+        assert!(
+            lock_pos < sig_pos,
+            "B9:锁必须早于快照读取,否则并发 RMW 仍可交错"
+        );
+    }
+
+    // B9 护栏:下载事务入口 download_raw 必须持同一把全局同步锁。
+    #[test]
+    fn download_transaction_acquires_global_sync_lock_first() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/webdav_sync/mod.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读 webdav_sync/mod.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = stripped
+            .find("pub(super) async fn download_raw")
+            .expect("缺 download_raw");
+        let rest = &stripped[start..];
+        let end = rest
+            .find("\nfn ")
+            .or_else(|| rest.find("\n#["))
+            .map(|i| start + i)
+            .unwrap_or(stripped.len());
+        let body = &stripped[start..end];
+        let lock_pos = body
+            .find("SYNC_TX_LOCK.lock().await")
+            .expect("download_raw 必须先持有 SYNC_TX_LOCK");
+        let client_pos = body
+            .find("build_client()")
+            .expect("download_raw 应构建 WebDAV 客户端");
+        assert!(
+            lock_pos < client_pos,
+            "B9:锁必须早于客户端构建,否则下载可与上传交错"
+        );
     }
 }
