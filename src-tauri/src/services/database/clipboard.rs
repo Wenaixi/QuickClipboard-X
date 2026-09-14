@@ -880,22 +880,53 @@ pub fn limit_clipboard_history(max_count: u64) -> Result<(), String> {
         }
         drop(stmt);
 
+        // B3:裁剪删除必须写 tombstone——先收集待删记录的 (id, uuid),
+        // 删除超出上限的记录若不通知云端/peers,切换设备会把已裁剪内容拉回,
+        // 且另一端删除也无法传播删除语义。
+        let mut tombstone_ids = Vec::new();
         let mut delete_ids_stmt = conn.prepare(
-            "SELECT id FROM clipboard WHERE id NOT IN (
+            "SELECT id, uuid FROM clipboard WHERE id NOT IN (
                 SELECT id FROM clipboard ORDER BY is_pinned DESC, item_order DESC, updated_at DESC LIMIT ?1
             )",
         )?;
-        let deleted_ids = delete_ids_stmt
-            .query_map(params![max_count], |row| row.get::<_, i64>(0))?
-            .filter_map(|r| r.ok())
-            .collect::<Vec<_>>();
+        let mut delete_iter = delete_ids_stmt.query_map(params![max_count], |row| {
+            let id: i64 = row.get(0)?;
+            let uuid: Option<String> = row.get(1)?;
+            Ok((id, uuid))
+        })?;
+        let mut deleted_ids = Vec::new();
+        while let Some(Ok((id, uuid_opt))) = delete_iter.next() {
+            deleted_ids.push(id);
+            tombstone_ids.push(
+                uuid_opt
+                    .filter(|value| !value.trim().is_empty())
+                    .unwrap_or_else(|| id.to_string()),
+            );
+        }
+        drop(delete_iter);
+        drop(delete_ids_stmt);
 
-        conn.execute(
+        // tombstone + DELETE 包同一事务,避免崩溃时只写墓碑不删记录
+        // (本地幽灵删除)或只删记录不写墓碑(云端残留)。
+        let tx = conn.unchecked_transaction()?;
+        let deleted_at = chrono::Local::now().timestamp();
+        let local_device_id = crate::services::sync_transfer::device_id();
+        for tombstone_id in &tombstone_ids {
+            super::tombstones::record_sync_tombstone_in_conn(
+                &tx,
+                super::tombstones::COLLECTION_HISTORY,
+                tombstone_id,
+                &local_device_id,
+                deleted_at,
+            )?;
+        }
+        tx.execute(
             "DELETE FROM clipboard WHERE id NOT IN (
                 SELECT id FROM clipboard ORDER BY is_pinned DESC, item_order DESC, updated_at DESC LIMIT ?1
             )",
             params![max_count],
         )?;
+        tx.commit()?;
 
         let mut to_delete = Vec::new();
         for iid in set.into_iter() {
@@ -1269,6 +1300,25 @@ mod upsert_null_uuid_guard {
         assert!(
             update_seg.contains("CAST(id AS TEXT) = ?15"),
             "UPDATE 分支 WHERE 必须覆盖 NULL uuid 行"
+        );
+    }
+}
+
+#[cfg(test)]
+mod limit_tombstone_guard {
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+    // B3(裁剪不写 tombstone):limit_clipboard_history 删除超出上限的记录
+    // 必须写 tombstone(collection=history,item_id=uuid 兜底 id)——否则云端/
+    // peers 不知道这些记录已删,切换设备把已裁剪内容拉回,且另一端删除无法
+    // 传播删除语义。裁剪是常态路径,不写墓碑等于删除永不扩散。
+    #[test]
+    fn limit_clipboard_history_writes_tombstones_for_deleted() {
+        let src = strip_line_comments(&source_file("src/services/database/clipboard.rs"));
+        let body = fn_body(&src, "limit_clipboard_history");
+        assert!(
+            body.contains("record_sync_tombstone_in_conn"),
+            "裁剪删除必须写 tombstone,否则云端/peers 永久残留被裁剪记录"
         );
     }
 }
