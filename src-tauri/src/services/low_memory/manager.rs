@@ -366,9 +366,9 @@ fn recreate_main_window(app: &AppHandle) -> Result<(), String> {
     crate::input_monitor::update_main_window(window.clone());
 
     #[cfg(windows)]
-    if let Ok(hwnd) = window.hwnd() {
-        crate::services::system::focus::add_excluded_hwnd(hwnd.0 as isize);
-    }
+    // A5:重建主窗口后按当前全部自身窗口重建排除列表,替换 add_excluded_hwnd
+    // 的只增不减——旧 hwnd 已销毁,OS 复用其值后会把无关窗口当自身窗口。
+    crate::services::system::focus::refresh_excluded_hwnds(app);
 
     crate::init_edge_monitor(window.clone());
 
@@ -485,6 +485,25 @@ mod tests {
         assert!(
             body.contains("recreate_main_window(app)"),
             "必须重建主窗口"
+        );
+    }
+
+    // A5:退出低占用模式重建主窗口后,必须按当前全部自身窗口整体重建
+    // 排除列表(refresh_excluded_hwnds),不得退回 add_excluded_hwnd 的只增
+    // 不减——旧 hwnd 销毁后 OS 会复用其句柄值,若旧值仍留在 EXCLUDED_HWNDS,
+    // 无关窗口的聚焦事件会被误过滤,导航键/悬浮行为错乱。
+    #[test]
+    fn recreate_main_window_refreshes_excluded_hwnds() {
+        let src = strip_line_comments(&manager_source());
+        let body =
+            crate::services::system::hotkey::test_utils::fn_body(&src, "recreate_main_window");
+        assert!(
+            body.contains("refresh_excluded_hwnds(app)"),
+            "重建主窗口后必须整体重建自身窗口排除列表"
+        );
+        assert!(
+            !body.contains("add_excluded_hwnd("),
+            "重建路径不得用 add_excluded_hwnd 只增不减——旧 hwnd 销毁后列表残留,OS 复用其值会误过滤无关窗口"
         );
     }
 }

@@ -24,24 +24,16 @@ pub fn start_focus_listener(app_handle: tauri::AppHandle) {
         if LISTENER_RUNNING.swap(true, Ordering::SeqCst) {
             return;
         }
-        
-        let mut excluded = Vec::new();
-        for label in ["main", "context-menu", "preview"] {
-            if let Some(win) = app_handle.get_webview_window(label) {
-                if let Ok(hwnd) = win.hwnd() {
-                    excluded.push(hwnd.0 as isize);
-                }
-            }
-        }
-        *EXCLUDED_HWNDS.lock() = excluded;
+
+        refresh_excluded_hwnds(&app_handle);
 
         crate::services::system::hotkey::sync_hotkeys_for_foreground();
-        
+
         std::thread::spawn(|| {
             start_win_event_hook();
         });
     }
-    
+
     #[cfg(not(windows))]
     {
         let _ = app_handle;
@@ -51,6 +43,23 @@ pub fn start_focus_listener(app_handle: tauri::AppHandle) {
 // 停止焦点变化监听器
 pub fn stop_focus_listener() {
     LISTENER_RUNNING.store(false, Ordering::SeqCst);
+}
+
+// A5:按窗口标签整体重建"自身窗口排除列表",替换 add_excluded_hwnd 的只增
+// 不减——低内存模式退出重建主窗口时旧 hwnd 已销毁,若仍留在列表里,OS 复用
+// 该 hwnd 值后会把无关窗口当自身窗口,其聚焦事件被误过滤。重建保证列表
+// 始终只含现存自身窗口,且不随重建次数无限增长。
+#[cfg(windows)]
+pub fn refresh_excluded_hwnds(app_handle: &tauri::AppHandle) {
+    let mut excluded = Vec::new();
+    for label in ["main", "context-menu", "preview"] {
+        if let Some(win) = app_handle.get_webview_window(label) {
+            if let Ok(hwnd) = win.hwnd() {
+                excluded.push(hwnd.0 as isize);
+            }
+        }
+    }
+    *EXCLUDED_HWNDS.lock() = excluded;
 }
 
 #[cfg(windows)]
