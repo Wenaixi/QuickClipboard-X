@@ -494,7 +494,7 @@ pub fn query_favorites(params: FavoritesQueryParams) -> Result<PaginatedResult<F
     })
 }
 
-// 按逗号拆分图片ID
+// 按逗号拆分图片ID,丢弃空段
 fn split_image_ids(s: &str) -> Vec<String> {
     s.split(',')
         .map(|x| x.trim())
@@ -522,12 +522,15 @@ fn is_image_id_referenced(conn: &rusqlite::Connection, image_id: &str) -> Result
     Ok(q("clipboard")? || q("favorites")?)
 }
 
-// 删除图片文件
+// 删除图片文件。id 需先通过白名单校验,否则恶意 `../` 会被拒之门外
 fn delete_image_files(image_ids: Vec<String>) -> Result<(), String> {
     if image_ids.is_empty() { return Ok(()); }
     let data_dir = crate::services::get_data_directory()?;
     let images_dir = data_dir.join("clipboard_images");
     for iid in image_ids {
+        if !crate::services::webdav_sync::image_id::is_valid_image_id(&iid) {
+            continue;
+        }
         let p = images_dir.join(format!("{}.png", iid));
         if p.exists() {
             let _ = std::fs::remove_file(&p);

@@ -2,6 +2,7 @@ pub mod chunk_manager;
 pub mod cloud_files;
 pub mod crypto;
 pub mod downloader;
+pub mod image_id; // 剪贴板图片 ID 白名单校验(webdav 同步下载/上传共用)
 pub mod groups_sync;
 pub mod index_manager;
 pub mod local_state;

@@ -366,6 +366,33 @@ async fn save_image_file_index(client: &WebdavClient, index: &ImageFileIndex) ->
 fn collect_image_ids(out: &mut HashSet<String>, raw: Option<&str>) {
     let Some(raw) = raw else { return; };
     for item in raw.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
-        out.insert(item.to_string());
+        if super::image_id::is_valid_image_id(item) {
+            out.insert(item.to_string());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::collect_image_ids;
+    use std::collections::HashSet;
+
+    #[test]
+    fn collect_image_ids_filters_path_traversal() {
+        let mut out = HashSet::new();
+        collect_image_ids(&mut out, Some("../evil.png,ok_1,..\\..\\x.png,img-2"));
+        assert!(out.contains("ok_1"), "合法 id 必须保留");
+        assert!(out.contains("img-2"), "合法 id 必须保留");
+        assert!(!out.contains("../evil.png"), "../ 不得进入集合");
+        assert!(!out.contains("..\\..\\x.png"), "反斜杠穿越不得进入集合");
+    }
+
+    #[test]
+    fn collect_image_ids_none_and_empty_are_noop() {
+        let mut out = HashSet::new();
+        collect_image_ids(&mut out, None);
+        collect_image_ids(&mut out, Some(""));
+        collect_image_ids(&mut out, Some("   ,  "));
+        assert!(out.is_empty());
     }
 }

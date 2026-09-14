@@ -408,6 +408,7 @@ fn push_split_image_ids(output: &mut Vec<String>, image_ids: Option<String>) {
                 .split(',')
                 .map(|value| value.trim())
                 .filter(|value| !value.is_empty())
+                .filter(|value| crate::services::webdav_sync::image_id::is_valid_image_id(value))
                 .map(|value| value.to_string()),
         );
     }
