@@ -226,6 +226,12 @@ fn normalize_image_content(item: &ClipboardItem) -> Result<String, String> {
         .or_else(|| item.content.strip_prefix("image:"))
         .ok_or_else(|| format!("无法获取图片数据: {}", item.id))?;
 
+    // 与 paste_handler 同款白名单,image_id 来自同步远端记录,不可信,
+    // 直接拼进 `{image_id}.png` 路径必须过滤目录穿越段。
+    if !crate::services::webdav_sync::image_id::is_valid_image_id(image_id) {
+        return Err(format!("图片 ID 不合法,已拒绝访问: {}", item.id));
+    }
+
     let image_path = crate::services::get_data_directory()?
         .join("clipboard_images")
         .join(format!("{}.png", image_id));
@@ -357,6 +363,7 @@ fn escape_html(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
 
     #[test]
     fn rejects_mixed_file_and_text_merge() {
@@ -422,5 +429,15 @@ mod tests {
             }
             _ => panic!("期望得到富文本合并结果"),
         }
+    }
+
+    #[test]
+    fn normalize_image_content_whitelists_image_id() {
+        let src = strip_line_comments(&source_file("src/services/paste/merge.rs"));
+        let body = fn_body(&src, "normalize_image_content");
+        assert!(
+            body.contains("is_valid_image_id(image_id)"),
+            "normalize_image_content 必须白名单校验 image_id"
+        );
     }
 }

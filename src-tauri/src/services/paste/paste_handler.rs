@@ -470,6 +470,13 @@ fn resolve_item_image_path(item: &ClipboardItem) -> Result<String, String> {
         .and_then(|ids| ids.split(',').map(|s| s.trim()).find(|s| !s.is_empty()))
         .ok_or_else(|| "当前条目没有可用的图片缓存".to_string())?;
 
+    // 路径白名单:image_id 会直接拼进 `{image_id}.png` 路径,必须过滤
+    // 掉 `..` 等目录穿越段。image_id 可能来自 LAN/WebDAV 同步的远端记录
+    // (clipboard.rs upsert_history_records 原文写库不校验),不可信任。
+    if !crate::services::webdav_sync::image_id::is_valid_image_id(image_id) {
+        return Err(format!("图片 ID 不合法,已拒绝访问: {}", image_id));
+    }
+
     let image_path = crate::services::get_data_directory()?
         .join("clipboard_images")
         .join(format!("{}.png", image_id));
@@ -537,6 +544,11 @@ fn convert_legacy_image_format(item: &ClipboardItem) -> Result<String, String> {
         .or_else(|| item.content.strip_prefix("image:"))
         .ok_or("无法获取图片ID")?;
 
+    // 与 resolve_item_image_path 同款白名单,image_id 不可信,防目录穿越。
+    if !crate::services::webdav_sync::image_id::is_valid_image_id(image_id) {
+        return Err(format!("图片 ID 不合法,已拒绝访问: {}", image_id));
+    }
+
     let image_path = get_data_directory()?
         .join("clipboard_images")
         .join(format!("{}.png", image_id));
@@ -584,4 +596,35 @@ fn update_item_content(
         }
         Ok(())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+    fn paste_source() -> String {
+        strip_line_comments(&source_file("src/services/paste/paste_handler.rs"))
+    }
+
+    // white-list 必须同时覆盖 resolve_item_image_path 与 convert_legacy_image_format
+    #[test]
+    fn image_id_whitelist_covers_image_path_readers() {
+        let src = paste_source();
+        let resolve = fn_body(&src, "resolve_item_image_path");
+        assert!(
+            resolve.contains("is_valid_image_id(image_id)"),
+            "resolve_item_image_path 必须白名单校验 image_id"
+        );
+        let convert = fn_body(&src, "convert_legacy_image_format");
+        assert!(
+            convert.contains("is_valid_image_id(image_id)"),
+            "convert_legacy_image_format 必须白名单校验 image_id"
+        );
+        assert_eq!(
+            resolve.matches("join(\"clipboard_images\")").count(),
+            1,
+            "resolve 体只允许一处拼路径"
+        );
+    }
 }
