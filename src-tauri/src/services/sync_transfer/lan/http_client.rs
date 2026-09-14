@@ -451,3 +451,38 @@ fn encode_path_segment(raw: &str) -> String {
         })
         .collect()
 }
+
+// 探测对端是否已有指定图片(差量推送前问一次,避免每次都全量推)
+// 服务端 GET /qc-sync/files/<id>.png 存在=200 / 不存在=404。
+pub async fn peer_image_exists(peer: &super::peer_store::PairedPeer, image_id: &str) -> Result<bool, String> {
+    let client = build_transfer_client();
+    let config = LanHttpClientConfig {
+        base_url: peer.base_url.clone(),
+        peer_token: peer.peer_token.clone(),
+    };
+    let url = format!("{}/qc-sync/files/{}.png", config.base_url.trim_end_matches('/'), image_id);
+    for attempt in 0..IMAGE_REQUEST_MAX_ATTEMPTS {
+        let response = match client
+            .get(&url)
+            .header("Authorization", config.authorization_header())
+            .header("X-Device-Id", super::runtime::device_id())
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(e) if should_retry_transport_error(&e) && attempt + 1 < IMAGE_REQUEST_MAX_ATTEMPTS => {
+                wait_before_image_retry(attempt).await;
+                continue;
+            }
+            Err(e) => return Err(format!("探测局域网图片失败: {}", e)),
+        };
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(false);
+        }
+        if !response.status().is_success() {
+            return Err(format!("探测局域网图片失败: {}", response.status()));
+        }
+        return Ok(true);
+    }
+    Err("探测局域网图片失败: 多次重试后仍无法连接".to_string())
+}

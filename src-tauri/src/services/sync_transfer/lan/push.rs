@@ -211,7 +211,23 @@ async fn push_images_best_effort_by_ids(
     let mut sent = 0usize;
     let mut failed = 0usize;
     let mut missing = 0usize;
+    let mut skipped = 0usize;
     for image_id in image_ids {
+        // 差量推送:对端已有该图则跳过,避免 idle/repeat 同步反复全量重推
+        // (此前 !image_task_started && report.pushed==0 时会推全部引用图,
+        // 带宽随记录量线性增长)。
+        match super::http_client::peer_image_exists(peer, &image_id).await {
+            Ok(true) => {
+                skipped += 1;
+                continue;
+            }
+            Ok(false) => {}
+            Err(e) => {
+                failed += 1;
+                eprintln!("[局域网同步] 探测对端图片失败 image_id={} 错误={}", image_id, e);
+                continue;
+            }
+        }
         let Some(bytes) = (match super::files::read_image_file(&image_id) {
             Ok(bytes) => bytes,
             Err(e) => {
@@ -232,11 +248,48 @@ async fn push_images_best_effort_by_ids(
         }
     }
     eprintln!(
-        "[局域网同步] 后台推送图片完成 collection={} peer={} success={} missing={} failed={}",
+        "[局域网同步] 后台推送图片完成 collection={} peer={} success={} skipped={} missing={} failed={}",
         collection,
         peer.device_name,
         sent,
+        skipped,
         missing,
         failed
     );
+}
+
+#[cfg(test)]
+mod image_delta_guards {
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+    // 图片推送必须逐张探测对端是否存在,不能无脑全量推:
+    // 否则 idle/repeat 同步(无新记录)也会把全部引用图片重推一遍,
+    // LAN 带宽随历史记录量线性增长。
+    #[test]
+    fn push_images_probes_peer_before_sending() {
+        let src = strip_line_comments(&source_file("src/services/sync_transfer/lan/push.rs"));
+        let body = fn_body(&src, "push_images_best_effort_by_ids");
+        assert!(
+            body.contains("peer_image_exists"),
+            "推送前必须探测对端是否已有该图片"
+        );
+        assert!(
+            body.contains("skipped += 1"),
+            "对端已有时必须跳过,不得重复推送"
+        );
+    }
+
+    #[test]
+    fn peer_image_exists_probe_uses_head_or_get() {
+        let src = strip_line_comments(&source_file("src/services/sync_transfer/lan/http_client.rs"));
+        let body = fn_body(&src, "peer_image_exists");
+        assert!(
+            body.contains("NOT_FOUND"),
+            "探测必须识别 404 = 对端无此图片"
+        );
+        assert!(
+            body.contains(".send()") && body.contains(".await"),
+            "探测必须真正发请求"
+        );
+    }
 }

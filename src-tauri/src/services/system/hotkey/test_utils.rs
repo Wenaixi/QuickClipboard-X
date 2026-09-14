@@ -30,6 +30,10 @@ pub fn fn_body<'a>(src: &'a str, name: &str) -> &'a str {
     let markers = [
         format!("pub fn {name}("),
         format!("pub fn {name}<"),
+        format!("pub async fn {name}("),
+        format!("pub async fn {name}<"),
+        format!("async fn {name}("),
+        format!("async fn {name}<"),
         format!("fn {name}("),
         format!("fn {name}<"),
     ];
