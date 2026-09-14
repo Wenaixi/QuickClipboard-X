@@ -1184,5 +1184,22 @@ mod tests {
             );
         }
     }
+
+    // A6 护栏:unregister_shortcut 注销时必须先探测再调 safe_unregister,
+    // 且不得把探测改成无条件注销——裸 UnregisterHotKey 空跑会让内部表与
+    // Windows 层脱节,残留吞键的幽灵热键。
+    #[test]
+    fn unregister_shortcut_probes_before_unregister() {
+        let src = strip_line_comments(&global_source());
+        let b = fn_body(&src, "unregister_shortcut");
+        assert!(
+            b.find("safe_unregister(&app, shortcut);").is_some(),
+            "unregister_shortcut 必须调 safe_unregister 探测后注销"
+        );
+        assert!(
+            !b.find("let _ = app.global_shortcut().unregister(shortcut);").is_some(),
+            "不得绕过探测直接裸注销"
+        );
+    }
 }
 
