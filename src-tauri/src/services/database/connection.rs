@@ -437,7 +437,7 @@ fn dedupe_clipboard_uuid(conn: &Connection) {
     for (uuid, keep_updated_at) in dup {
         conn.execute(
             "UPDATE clipboard SET uuid = NULL
-             WHERE uuid = ?1 AND (updated_at < ?2 OR (updated_at = ?2 AND id <
+             WHERE uuid = ?1 AND (updated_at < ?2 OR (updated_at = ?2 AND id >
                (SELECT MIN(id) FROM clipboard WHERE uuid = ?1 AND updated_at = ?2)))",
             rusqlite::params![uuid, keep_updated_at],
         )
@@ -467,7 +467,7 @@ fn dedupe_favorites_source_clipboard_uuid(conn: &Connection) {
     for (uuid, keep_updated_at) in dup {
         conn.execute(
             "UPDATE favorites SET source_clipboard_uuid = NULL
-             WHERE source_clipboard_uuid = ?1 AND (updated_at < ?2 OR (updated_at = ?2 AND id <
+             WHERE source_clipboard_uuid = ?1 AND (updated_at < ?2 OR (updated_at = ?2 AND id >
                (SELECT MIN(id) FROM favorites WHERE source_clipboard_uuid = ?1 AND updated_at = ?2)))",
             rusqlite::params![uuid, keep_updated_at],
         )
@@ -765,5 +765,85 @@ mod tests {
             [],
         )
         .expect("去重后必须能建收藏来源唯一索引");
+    }
+
+    // r7-db-1(平局决胜):同 updated_at 的重复 uuid 必须走 tiebreak——保留组内
+    // 最小 id 一行,其余置 NULL。旧逻辑 id < MIN(id) 恒假(同组任何行 id 都不
+    // 小于组内最小值),平局组所有行 uuid 均不置 NULL,CREATE UNIQUE INDEX 直接
+    // 失败应用无法启动;id > MIN(id) 才能把非最小行清掉。反证:SQL 改回 id <
+    // 此测试 FAILED(去重后 2 行仍含 uuid,索引创建报错)。
+    #[test]
+    fn dedupe_clipboard_uuid_breaks_tie_keeps_min_id_then_index_creates() {
+        let conn = mem();
+        conn.execute_batch(
+            "CREATE TABLE clipboard (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT NOT NULL,
+                uuid TEXT,
+                updated_at INTEGER NOT NULL
+            )",
+        )
+        .unwrap();
+        // 两行同 uuid、同 updated_at(秒级精度平局)
+        for (id, uuid, updated_at) in [(1i64, Some("dup"), 100i64), (2, Some("dup"), 100)] {
+            conn.execute(
+                "INSERT INTO clipboard (id, content, uuid, updated_at)
+                 VALUES (?1, 'c', ?2, ?3)",
+                rusqlite::params![id, uuid, updated_at],
+            )
+            .unwrap();
+        }
+        dedupe_clipboard_uuid(&conn);
+        let kept: i64 = conn
+            .query_row("SELECT COUNT(*) FROM clipboard WHERE uuid = 'dup'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(kept, 1, "同秒平局组必须只保留一行");
+        let kept_id: i64 = conn
+            .query_row("SELECT id FROM clipboard WHERE uuid = 'dup'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(kept_id, 1, "平局时必须保留组内最小 id");
+        conn.execute(
+            "CREATE UNIQUE INDEX idx_test ON clipboard(uuid) WHERE uuid IS NOT NULL AND uuid <> ''",
+            [],
+        )
+        .expect("平局去重后必须能建 uuid 部分唯一索引");
+    }
+
+    // r7-db-1(平局决胜,收藏来源):favorites.source_clipboard_uuid 同秒平局同款
+    // tiebreak,保留最小 id(收藏 id 为 TEXT,按行序即最小 rowid)。
+    #[test]
+    fn dedupe_favorites_source_uuid_breaks_tie_keeps_min_id_then_index_creates() {
+        let conn = mem();
+        conn.execute_batch(
+            "CREATE TABLE favorites (
+                id TEXT PRIMARY KEY,
+                source_clipboard_uuid TEXT,
+                updated_at INTEGER NOT NULL
+            )",
+        )
+        .unwrap();
+        for (id, uuid, updated_at) in [("a", Some("src1"), 100i64), ("b", Some("src1"), 100)] {
+            conn.execute(
+                "INSERT INTO favorites (id, source_clipboard_uuid, updated_at)
+                 VALUES (?1, ?2, ?3)",
+                rusqlite::params![id, uuid, updated_at],
+            )
+            .unwrap();
+        }
+        dedupe_favorites_source_clipboard_uuid(&conn);
+        let kept: i64 = conn
+            .query_row("SELECT COUNT(*) FROM favorites WHERE source_clipboard_uuid = 'src1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(kept, 1, "同秒平局组必须只保留一行");
+        let kept_id: String = conn
+            .query_row("SELECT id FROM favorites WHERE source_clipboard_uuid = 'src1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(kept_id, "a", "平局时必须保留最小行");
+        conn.execute(
+            "CREATE UNIQUE INDEX idx_test ON favorites(source_clipboard_uuid)
+             WHERE source_clipboard_uuid IS NOT NULL AND source_clipboard_uuid <> ''",
+            [],
+        )
+        .expect("平局去重后必须能建收藏来源唯一索引");
     }
 }
