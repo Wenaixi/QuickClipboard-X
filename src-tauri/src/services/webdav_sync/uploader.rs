@@ -121,9 +121,8 @@ pub async fn upload_parts(
     }
 
     if settings.webdav_sync_images {
-        upload_images(client, &uploaded_records)
-            .await
-            .map_err(|e| format!("上传图片失败: {}", e))?;
+        // 图片上传错误并入报告而不是中止整批——单张图失败不应丢已推送记录
+        report.errors.extend(upload_images(client, &uploaded_records).await);
     }
 
     Ok(report)
@@ -320,7 +319,8 @@ fn chunk_record_counts(index_entries: &HashMap<String, SyncIndexEntry>) -> BTree
     counts
 }
 
-async fn upload_images(client: &WebdavClient, records: &[CloudRecord]) -> Result<(), String> {
+async fn upload_images(client: &WebdavClient, records: &[CloudRecord]) -> Vec<String> {
+    let mut errors = Vec::new();
     let mut image_ids = HashSet::new();
     for record in records {
         collect_image_ids(&mut image_ids, record.image_id.as_deref());
@@ -328,24 +328,48 @@ async fn upload_images(client: &WebdavClient, records: &[CloudRecord]) -> Result
     // 与 downloader 侧对称的重扫:本批 records 之外,历史/收藏表里仍引用
     // 但从未上传(或曾上传失败)的图片也要补传。若只依赖本批 records,
     // 缺文件/上传失败的图片会永久保持缺失,而同步报告还记 success。
-    for meta in crate::services::database::webdav_list_history_record_metas()? {
+    for meta in match crate::services::database::webdav_list_history_record_metas() {
+        Ok(metas) => metas,
+        Err(e) => {
+            errors.push(format!("扫描历史表图片失败: {}", e));
+            return errors;
+        }
+    } {
         collect_image_ids(&mut image_ids, meta.image_id.as_deref());
     }
-    for meta in crate::services::database::webdav_list_favorite_record_metas()? {
+    for meta in match crate::services::database::webdav_list_favorite_record_metas() {
+        Ok(metas) => metas,
+        Err(e) => {
+            errors.push(format!("扫描收藏表图片失败: {}", e));
+            return errors;
+        }
+    } {
         collect_image_ids(&mut image_ids, meta.image_id.as_deref());
     }
 
     if image_ids.is_empty() {
-        return Ok(());
+        return errors;
     }
 
-    let mut index = load_image_file_index(client).await?;
+    let mut index = match load_image_file_index(client).await {
+        Ok(index) => index,
+        Err(e) => {
+            errors.push(format!("读取图片索引失败: {}", e));
+            return errors;
+        }
+    };
     let mut changed = false;
 
-    let data_dir = crate::services::get_data_directory()?;
+    let data_dir = match crate::services::get_data_directory() {
+        Ok(dir) => dir,
+        Err(e) => {
+            errors.push(format!("获取数据目录失败: {}", e));
+            return errors;
+        }
+    };
     let images_dir = data_dir.join("clipboard_images");
-    for image_id in image_ids {
-        if index.images.contains_key(&image_id) {
+    for image_id in &image_ids {
+        if index.images.contains_key(image_id) {
             continue;
         }
         let path = images_dir.join(format!("{}.png", image_id));
@@ -353,11 +377,17 @@ async fn upload_images(client: &WebdavClient, records: &[CloudRecord]) -> Result
             continue;
         };
         if !changed {
-            client.ensure_files_dir().await?;
+            if let Err(e) = client.ensure_files_dir().await {
+                errors.push(format!("创建文件目录失败: {}", e));
+                return errors;
+            }
         }
-        client.put_bytes(&format!("files/{}.png", image_id), bytes).await?;
+        if let Err(e) = client.put_bytes(&format!("files/{}.png", image_id), bytes).await {
+            errors.push(format!("上传图片 {} 失败: {}", image_id, e));
+            continue;
+        }
         index.images.insert(
-            image_id,
+            image_id.clone(),
             ImageFileIndexEntry {
                 uploaded_at: chrono::Utc::now().timestamp(),
             },
@@ -366,10 +396,12 @@ async fn upload_images(client: &WebdavClient, records: &[CloudRecord]) -> Result
     }
 
     if changed {
-        save_image_file_index(client, &index).await?;
+        if let Err(e) = save_image_file_index(client, &index).await {
+            errors.push(format!("保存图片索引失败: {}", e));
+        }
     }
 
-    Ok(())
+    errors
 }
 
 async fn load_image_file_index(client: &WebdavClient) -> Result<ImageFileIndex, String> {
@@ -491,6 +523,33 @@ mod image_rescan_guards {
         assert!(
             bare_save.is_none(),
             "禁止直接裸 PUT 本地内存 index,必须先 merge_index 合并远端"
+        );
+    }
+
+    // 护栏:图片上传错误必须并入 report.errors,不得用 ? 中止整个同步——
+    // 与 downloader 侧对称。断言 upload_parts 体内图片上传必须唯一以
+    // report.errors.extend 收集形式出现,且不得存在独立的旧版中止调用。
+    #[test]
+    fn image_upload_errors_are_collected_not_abort() {
+        let src = strip_line_comments(&source_file("src/services/webdav_sync/uploader.rs"));
+        let body = fn_body(&src, "upload_parts");
+        // 必须把上传错误收集进报告
+        let collect_pos = body
+            .find("report.errors.extend(upload_images(")
+            .expect("图片上传错误必须 extend 到 report.errors,与下载侧对称");
+        // 唯一的 upload_images 调用必须就是收集表达式自身——若存在独立调用
+        // (位置早于收集表达式),说明又有中止形态混入。
+        let first_call = body
+            .find("upload_images(")
+            .expect("upload_parts 必须调用图片上传");
+        assert!(
+            first_call >= collect_pos,
+            "upload_images 不得在收集表达式外独立调用(? 中止整批)"
+        );
+        // 负向:禁止旧版 .map_err(...)? 中止形态(单张图失败丢已推送记录报告)
+        assert!(
+            !body.contains(".map_err(|e| format!(\"上传图片失败"),
+            "图片上传失败不得用 ? 中止整个同步——应并入 report.errors"
         );
     }
 }
