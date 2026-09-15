@@ -81,8 +81,10 @@ fn build_pin_images_children() -> Vec<CtxMenuItem> {
         children.push(menu_item_with_state("empty", "(暂无贴图)", None, true));
     } else {
         for (idx, (name, path)) in images.iter().take(MAX_PIN_IMAGES_DISPLAY).enumerate() {
-            let display_name = if name.len() > 30 {
-                format!("{}...", &name[..27])
+            // D1:按字符截断而非按字节切片——&name[..27] 在中文/emoji 等
+            // 多字节字符落在边界中间时直接 panic 崩进程。
+            let display_name = if name.chars().count() > 30 {
+                format!("{}...", name.chars().take(27).collect::<String>())
             } else {
                 name.clone()
             };
@@ -310,5 +312,39 @@ fn open_pin_images_folder() {
             let _ = std::fs::create_dir_all(&pin_images_dir);
         }
         let _ = tauri_plugin_opener::open_path(&pin_images_dir, None::<&str>);
+    }
+}
+
+#[cfg(test)]
+mod display_name_guard {
+    // D1(托盘字节切片 panic):贴图文件名超过 30 字符时按字符截断
+    // (chars().take(27)),不得用 &name[..27] 字节切片——中文/emoji
+    // 多字节字符落在边界中间时 String 切片 panic 崩进程。
+    #[test]
+    fn pin_image_display_name_truncates_by_chars_not_bytes() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/windows/tray/menu.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读 menu.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = stripped
+            .find("build_pin_images_children")
+            .expect("缺 build_pin_images_children");
+        let rest = &stripped[start..];
+        let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(stripped.len());
+        let body = &stripped[start..end];
+        assert!(
+            body.contains("name.chars().take(27).collect::<String>()"),
+            "截断必须按字符 take(27),禁止字节切片 &name[..27]"
+        );
+        assert!(
+            !body.contains("&name[..27]"),
+            "禁止字节下标切片 &name[..27](多字节字符边界 panic)"
+        );
     }
 }
