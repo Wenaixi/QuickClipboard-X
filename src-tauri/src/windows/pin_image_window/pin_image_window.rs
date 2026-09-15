@@ -342,12 +342,15 @@ pub async fn save_pin_image_as(app: AppHandle, window: WebviewWindow) -> Result<
 // 流程(pin_image_from_file 预览分支)await create_pin_image_window 期间,并发的
 // close_image_preview 可移除刚 insert 的 PinImageData 并关旧窗,建窗完成新窗
 // show 后其前端 get_pin_image_data 读 map 为空返回 Err,预览窗空屏+穿透残留。
-// 该函数是同步 fn,阻塞持有锁极短,不会拖慢建窗流程。
+// r7-window F1:本函数是同步 fn,取锁必须用 blocking_lock()——tokio::sync::Mutex
+// 的 .lock() 返回一个 future,在同步 fn 里从不被 poll,锁实际从未获取,串行化
+// 形同虚设。blocking_lock 是 tokio Mutex 提供的同步获取方式,与 pin_image_from_file
+// 预览分支的 .lock().await 共用同一把锁,阻塞持有时间极短,不会拖慢建窗流程。
 #[tauri::command]
 pub fn close_image_preview(app: AppHandle) -> Result<(), String> {
     let label = "image-preview";
     let _preview_guard = if app.get_webview_window(label).is_some() {
-        Some(PREVIEW_WINDOW_LOCK.get_or_init(|| tokio::sync::Mutex::new(())).lock())
+        Some(PREVIEW_WINDOW_LOCK.get_or_init(|| tokio::sync::Mutex::new(())).blocking_lock())
     } else {
         None
     };
@@ -683,6 +686,16 @@ mod tests {
         assert!(
             !close_body[..lock_pos].contains("lock_pin_data().remove(label)"),
             "取锁必须早于数据移除"
+        );
+        // 负向(剥注释后):同步 fn 里不得出现裸 .lock()——tokio Mutex 的 lock()
+        // 返回 future,同步 fn 从不 poll,锁形同未获取。必须 .blocking_lock()。
+        assert!(
+            !close_body.contains(").lock()"),
+            "close_image_preview 同步 fn 必须用 blocking_lock,裸 lock() 从不被 poll"
+        );
+        assert!(
+            close_body.contains(".blocking_lock()"),
+            "close_image_preview 必须用 .blocking_lock() 同步获取预览锁"
         );
     }
 }
