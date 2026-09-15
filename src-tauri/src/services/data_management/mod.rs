@@ -292,6 +292,11 @@ pub fn reset_all_data() -> Result<String, String> {
         if image_library.exists() { let _ = fs::remove_dir_all(&image_library); }
         let app_icons = dir.join("app_icons");
         if app_icons.exists() { let _ = fs::remove_dir_all(&app_icons); }
+        // r6-db-2:重置所有数据必须清 pin_images——与 D3/M2 已修的"备份/替换导入/
+        // 合并"目录清单对齐。此前遗漏:重置后贴图文件残留磁盘,与"全部清空"
+        // 语义不符,且下次重置的备份里不会有这份残留(旧备份才有)。
+        let pin_images = dir.join("pin_images");
+        if pin_images.exists() { let _ = fs::remove_dir_all(&pin_images); }
         for name in ["quickclipboard.db", "quickclipboard.db-shm", "quickclipboard.db-wal"] {
             let p = dir.join(name);
             if p.exists() { let _ = fs::remove_file(&p); }
@@ -603,6 +608,10 @@ fn merge_database(src_db: &Path) -> Result<(), String> {
         reorder_clipboard_by_time(&tx);
         tx.commit()?;
 
+        // r6-db-1:无论成败都必须拆离 importdb——M1 修过"失败时 DETACH 不执行"使
+        // importdb 残留 ATTACH 在全局连接上,下次 merge_database 再 ATTACH 撞
+        // "already in use",后续所有 merge 永久失败。事务已包 commit(成功=DETACH 前
+        // 已落盘;失败=tx Drop 回滚),DETACH 与事务成败解耦,独立无条件执行。
         let _ = conn.execute("DETACH DATABASE importdb", []);
         Ok(())
     })?;
@@ -870,7 +879,7 @@ fn merge_clipboard_from_importdb(
 
     let mut query_stmt = conn.prepare(&select_sql)?;
     let mut insert_stmt = conn.prepare(
-        "INSERT INTO clipboard
+        "INSERT OR IGNORE INTO clipboard
          (content, html_content, content_type, image_id, is_pinned, paste_count, source_app, source_icon_hash, char_count, uuid, source_device_id, is_remote, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
     )?;
