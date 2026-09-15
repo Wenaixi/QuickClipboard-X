@@ -197,8 +197,19 @@ pub fn get_foreground_app_info() -> Option<ForegroundAppInfo> {
             }
 
             let hwnd_val = hwnd.0 as isize;
+            let mut title_buf = [0u16; 512];
+            let title_len = GetWindowTextW(hwnd, &mut title_buf);
+            let window_title = if title_len > 0 {
+                String::from_utf16_lossy(&title_buf[..title_len as usize])
+            } else {
+                String::new()
+            };
+
             if let Some((cached_hwnd, cached_info)) = LAST_FOREGROUND_CACHE.lock().clone() {
-                if cached_hwnd == hwnd_val {
+                // 缓存只在句柄与标题都未变化时有效——浏览器切标签等场景
+                // 句柄不变但标题变,若只按句柄命中会返回旧标题,标题 wildcard
+                // 过滤规则随之失效/误判。
+                if cached_hwnd == hwnd_val && cached_info.window_title == window_title {
                     return Some(cached_info);
                 }
             }
@@ -208,14 +219,6 @@ pub fn get_foreground_app_info() -> Option<ForegroundAppInfo> {
             if pid == 0 {
                 return None;
             }
-
-            let mut title_buf = [0u16; 512];
-            let title_len = GetWindowTextW(hwnd, &mut title_buf);
-            let window_title = if title_len > 0 {
-                String::from_utf16_lossy(&title_buf[..title_len as usize])
-            } else {
-                String::new()
-            };
 
             let mut process_path = String::new();
             let mut process_name = String::new();
@@ -622,6 +625,36 @@ mod tests {
         assert!(
             helper.contains("name.starts_with(\"社区交流\")"),
             "社区交流窗口(标题:社区交流 - QuickClipboard)必须按前缀过滤"
+        );
+    }
+
+    // 源码护栏:get_foreground_app_info 的前台信息缓存必须同时校验句柄
+    // 与标题——浏览器切标签/文件另存为重命名等场景句柄不变但标题变化,
+    // 只按句柄命中会返回旧标题,标题 wildcard 过滤规则失效/误判。
+    #[test]
+    fn foreground_cache_validates_title_as_well_as_hwnd() {
+        let src = strip_line_comments(&focus_source());
+        let b = fn_body(&src, "get_foreground_app_info");
+        let title_read = b
+            .find("GetWindowTextW(hwnd")
+            .expect("必须读取前台窗口标题");
+        let cache_hit = b[title_read..]
+            .find("cached_info.window_title == window_title")
+            .map(|i| title_read + i)
+            .expect("缓存命中必须同时校验标题");
+        assert!(
+            title_read < cache_hit,
+            "缓存命中校验必须在读取标题之后"
+        );
+        let cache_write = b
+            .find("LAST_FOREGROUND_CACHE.lock() = Some(")
+            .expect("必须更新缓存");
+        let cached_hwnd_cond = b[..cache_write]
+            .rfind("cached_hwnd == hwnd_val")
+            .expect("缓存匹配仍须校验句柄");
+        assert!(
+            cached_hwnd_cond < cache_hit,
+            "缓存命中必须同时校验句柄与标题"
         );
     }
 
