@@ -62,6 +62,7 @@ pub fn refresh_excluded_hwnds(app_handle: &tauri::AppHandle) {
         "context-menu",
         crate::windows::preview_window::PREVIEW_WINDOW_LABEL,
         "quickpaste",
+        "community",
     ] {
         if let Some(win) = app_handle.get_webview_window(label) {
             if let Ok(hwnd) = win.hwnd() {
@@ -332,6 +333,7 @@ fn is_ignored_foreground_window(class_name: &str, name: &str) -> bool {
         || name == "收件盒"
         || name == "便捷粘贴"
         || name.starts_with("文件盒")
+        || name.starts_with("社区交流")
         || name == "更新"
         || name == "拖放接收层"
 }
@@ -420,7 +422,13 @@ mod tests {
     fn excluded_hwnds_cover_all_own_windows_including_quickpaste() {
         let src = strip_line_comments(&focus_source());
         let b = fn_body(&src, "refresh_excluded_hwnds");
-        for label in ["main", "context-menu", "PREVIEW_WINDOW_LABEL", "quickpaste"] {
+        for label in [
+            "main",
+            "context-menu",
+            "PREVIEW_WINDOW_LABEL",
+            "quickpaste",
+            "community",
+        ] {
             assert!(
                 b.contains(label),
                 "排除列表必须覆盖 {} 窗口,否则其聚焦事件污染 LAST_FOCUS_HWND",
@@ -599,17 +607,21 @@ mod tests {
             .expect("菜单窗口条件必须存在");
         let text_editor_pos = helper
             .find("name.starts_with(\"文本编辑器\")")
-            .expect("文本编辑器标题过滤必须存在(hk4)");
+            .expect("文本编辑器标题过滤必须存在");
         let drop_pos = helper
             .find("name == \"拖放接收层\"")
-            .expect("拖放接收层标题过滤必须存在(hk4)");
+            .expect("拖放接收层标题过滤必须存在");
         assert!(
             settings_pos < menu_pos,
-            "设置窗口过滤必须早于菜单条件(hk4 抽 helper 后仍在)"
+            "设置窗口过滤必须早于菜单条件"
         );
         assert!(
             text_editor_pos < drop_pos,
-            "hk4 补齐的自身窗口过滤项必须在 helper 内"
+            "补齐的自身窗口过滤项必须在 helper 内"
+        );
+        assert!(
+            helper.contains("name.starts_with(\"社区交流\")"),
+            "社区交流窗口(标题:社区交流 - QuickClipboard)必须按前缀过滤"
         );
     }
 
