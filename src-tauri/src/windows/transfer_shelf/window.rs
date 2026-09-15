@@ -78,6 +78,12 @@ pub fn create_shelf_window(
     }
     bind_window_events(&window);
 
+    // 新窗口加入自身窗口排除列表:文件盒标题可被 rename_shelf 改成任意名,
+    // 标题过滤(name.starts_with("文件盒"))随之失效,只能靠 hwnd 排除列表
+    // 兜底——重命名后聚焦该窗口若不排除,LAST_FOCUS_HWND 会被污染。
+    #[cfg(windows)]
+    crate::services::system::focus::refresh_excluded_hwnds(app);
+
     let _ = window.unminimize();
     let _ = window.show();
     if focus {

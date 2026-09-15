@@ -69,6 +69,16 @@ pub fn refresh_excluded_hwnds(app_handle: &tauri::AppHandle) {
             }
         }
     }
+    // 文件盒窗口按 transfer-shelf-{id} 动态标签创建,rename_shelf 允许任意
+    // 名称,重命名后标题过滤(name.starts_with("文件盒"))失效,只能按标签
+    // 前缀枚举进排除列表,否则其聚焦事件污染 LAST_FOCUS_HWND。
+    for (label, win) in app_handle.webview_windows() {
+        if label.starts_with(crate::windows::transfer_shelf::LABEL_PREFIX) {
+            if let Ok(hwnd) = win.hwnd() {
+                excluded.push(hwnd.0 as isize);
+            }
+        }
+    }
     *EXCLUDED_HWNDS.lock() = excluded;
 }
 
@@ -417,6 +427,14 @@ mod tests {
                 label
             );
         }
+        assert!(
+            b.contains("starts_with(crate::windows::transfer_shelf::LABEL_PREFIX)"),
+            "排除列表必须按标签前缀覆盖文件盒窗口,标题可被重命名标题过滤失效"
+        );
+        assert!(
+            b.contains("webview_windows()"),
+            "必须遍历全部 webview 窗口取文件盒窗口"
+        );
     }
 
     // 焦点未归还仍挂起执行键:restore_last_focus 必须在焦点成功归还外部
@@ -592,6 +610,24 @@ mod tests {
         assert!(
             text_editor_pos < drop_pos,
             "hk4 补齐的自身窗口过滤项必须在 helper 内"
+        );
+    }
+
+    // 文件盒窗口标题可被 rename_shelf 改成任意名,标题过滤
+    // (name.starts_with("文件盒"))随之失效,只能按 transfer-shelf-{id} 标签
+    // 前缀枚举进排除列表——否则重命名后聚焦文件盒污染 LAST_FOCUS_HWND,
+    // 恢复焦点把焦点设回隐藏的文件盒窗口。
+    #[test]
+    fn excluded_hwnds_cover_transfer_shelf_windows_by_label_prefix() {
+        let src = strip_line_comments(&focus_source());
+        let body = fn_body(&src, "refresh_excluded_hwnds");
+        assert!(
+            body.contains("starts_with(crate::windows::transfer_shelf::LABEL_PREFIX)"),
+            "排除列表必须按 transfer-shelf 标签前缀枚举文件盒窗口"
+        );
+        assert!(
+            body.contains("webview_windows()"),
+            "必须遍历全部 webview 窗口取文件盒窗口"
         );
     }
 }
