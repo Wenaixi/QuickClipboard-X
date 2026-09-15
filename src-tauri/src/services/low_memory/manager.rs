@@ -16,11 +16,15 @@ use super::state::{
 // 需要销毁的 WebView 窗口列表
 const WEBVIEW_LABELS: &[&str] = &[
     "main",
-    "quickpaste", 
+    "quickpaste",
     "context-menu",
     "settings",
     "text-editor",
     "updater",
+    "receive-box",
+    "community",
+    "drop-proxy",
+    "preview-window",
 ];
 
 const AUTO_LOW_MEMORY_WINDOW_LABELS: &[&str] = &[
@@ -29,6 +33,9 @@ const AUTO_LOW_MEMORY_WINDOW_LABELS: &[&str] = &[
     "updater",
     "preview-window",
     "context-menu",
+    "receive-box",
+    "community",
+    "drop-proxy",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -228,6 +235,17 @@ fn collect_visible_windows_for_auto_low_memory(app: &AppHandle) -> Vec<String> {
         }
     }
 
+    // 文件盒窗口是 transfer-shelf-{id} 动态标签,静态表枚举不到——开着时
+    // 若不被视为"相关窗口",空闲计时不会因它暂停,会带着文件盒自动进入低
+    // 占用,与 destroy_all_webviews 的前缀销毁不对称。
+    for (label, window) in app.webview_windows() {
+        if label.starts_with(crate::windows::transfer_shelf::LABEL_PREFIX)
+            && window.is_visible().unwrap_or(false)
+        {
+            visible_windows.push(label);
+        }
+    }
+
     visible_windows
 }
 
@@ -274,7 +292,12 @@ fn log_auto_low_memory_state(next_state: AutoLowMemoryLogState) {
 // 销毁所有 WebView 窗口
 fn destroy_all_webviews(app: &AppHandle) {
     for (label, window) in app.webview_windows() {
-        if label.starts_with("pin-image-") {
+        // pin-image-{uuid} 与 transfer-shelf-{id} 都是动态标签,静态数组
+        // 枚举不到,必须按前缀遍历销毁——否则文件盒窗口开着时进入低占用,
+        // 该窗口残留,退出后主窗口重建完成但文件盒仍在,与自动检测不对称。
+        if label.starts_with("pin-image-")
+            || label.starts_with(crate::windows::transfer_shelf::LABEL_PREFIX)
+        {
             let _ = window.destroy();
         }
     }
@@ -577,6 +600,62 @@ mod tests {
         assert!(
             !body.contains("add_excluded_hwnd("),
             "重建路径不得用 add_excluded_hwnd 只增不减——旧 hwnd 销毁后列表残留,OS 复用其值会误过滤无关窗口"
+        );
+    }
+
+    // 源码护栏:进入低占用销毁全部分窗口时,必须覆盖收发盒/社区/拖放代理/
+    // 预览窗口与全部 transfer-shelf-{id} 文件盒——静态数组枚举不到动态
+    // 标签,漏掉它们会让窗口开着时仍自动进入低占用、进入后又销毁不了,
+    // 与自动检测的可见性扫描不对称。标签断言限生产代码域,避免测试自身的
+    // 字符串字面量误命中。
+    #[test]
+    fn destroy_all_webviews_covers_constant_and_dynamic_labels() {
+        let src = strip_line_comments(&manager_source());
+        let prod = &src[..src.find("#[cfg(test)]").unwrap_or(src.len())];
+        let body = crate::services::system::hotkey::test_utils::fn_body(&src, "destroy_all_webviews");
+        for label in [
+            "receive-box",
+            "community",
+            "drop-proxy",
+            "preview-window",
+        ] {
+            assert!(
+                prod.contains(label),
+                "销毁相关表必须覆盖 {} 窗口,否则开着时进入低占用该窗口残留",
+                label
+            );
+        }
+        assert!(
+            body.contains("starts_with(\"pin-image-\")")
+                && body.contains("starts_with(crate::windows::transfer_shelf::LABEL_PREFIX)"),
+            "动态标签窗口(贴图/文件盒)必须按前缀遍历销毁"
+        );
+    }
+
+    // 源码护栏:自动低占用检测的可见窗口扫描必须与销毁列表对称——收发盒/
+    // 社区/拖放代理开着时仍会开始空闲计时;文件盒其实开着但静态表扫不到,
+    // 空闲计时仍照走,带着文件盒自动进入低占用。护栏断言动态 transfer-shelf
+    // 前缀窗口也要纳入可见性扫描。标签断言限生产代码域。
+    #[test]
+    fn collect_visible_windows_checks_constant_and_dynamic_labels() {
+        let src = strip_line_comments(&manager_source());
+        let prod = &src[..src.find("#[cfg(test)]").unwrap_or(src.len())];
+        let body = crate::services::system::hotkey::test_utils::fn_body(&src, "collect_visible_windows_for_auto_low_memory");
+        for label in [
+            "receive-box",
+            "community",
+            "drop-proxy",
+            "preview-window",
+        ] {
+            assert!(
+                prod.contains(label),
+                "自动检测相关表必须覆盖 {} 窗口,否则开着时仍开始空闲计时",
+                label
+            );
+        }
+        assert!(
+            body.contains("starts_with(crate::windows::transfer_shelf::LABEL_PREFIX)"),
+            "自动检测必须把 transfer-shelf 前缀的文件盒窗口纳入可见性扫描"
         );
     }
 }
