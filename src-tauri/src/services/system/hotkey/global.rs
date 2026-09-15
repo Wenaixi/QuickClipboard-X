@@ -352,11 +352,23 @@ pub fn register_quickpaste_hotkey(shortcut_str: &str) -> Result<(), String> {
                     let _ = window.emit("quickpaste-hide", ());
                 }
 
+                // r8-hk-1:非键盘模式松开热键的延迟隐藏与键盘模式(A4)同款会话
+                // 守卫——先置 QUICKPASTE_HIDE_TRIGGERED 标记,延迟回调用 swap(false)
+                // 一次性判定是否仍应隐藏。否则 50ms 内用户重新唤出(show 路径
+                // manager.rs 已 reset 标记)时,旧 hide 请求会把新会话窗口误关闭。
+                crate::services::system::raw_input::mark_quickpaste_hide_triggered();
+
                 let app_clone = app.clone();
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_millis(50));
-                    if let Err(e) = crate::windows::quickpaste::hide_quickpaste_window(&app_clone) {
-                        eprintln!("隐藏便捷粘贴窗口失败: {}", e);
+                    // A4 同款:不能以 is_visible() 作前置条件——重开后窗口重新可见,
+                    // 反而误关新窗口;标记已被 show 路径复位则放弃本次隐藏。
+                    if crate::services::system::raw_input::take_quickpaste_hide_triggered() {
+                        if let Err(e) =
+                            crate::windows::quickpaste::hide_quickpaste_window(&app_clone)
+                        {
+                            eprintln!("隐藏便捷粘贴窗口失败: {}", e);
+                        }
                     }
                 });
             }

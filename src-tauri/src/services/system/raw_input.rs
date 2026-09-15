@@ -403,6 +403,19 @@ mod windows_raw_input {
         QUICKPASTE_HIDE_TRIGGERED.store(false, Ordering::SeqCst);
     }
 
+    // r8-hk-1:非键盘模式(global.rs 快捷键 Released 路径)发起延迟隐藏请求时
+    // 先置位隐藏触发标记,与键盘模式 A4 共用同一枚原子——show 路径复用
+    // reset_quickpaste_hide_triggered 复位,延迟回调由 take_ 消费。
+    pub(crate) fn mark_quickpaste_hide_triggered() {
+        QUICKPASTE_HIDE_TRIGGERED.store(true, Ordering::SeqCst);
+    }
+
+    // r8-hk-1:一次性判定"应否执行隐藏"——swap(false) 取走标记:若期间有
+    // 新会话 show 路径复位过(值 false)则放弃,否则消费并执行隐藏。
+    pub(crate) fn take_quickpaste_hide_triggered() -> bool {
+        QUICKPASTE_HIDE_TRIGGERED.swap(false, Ordering::SeqCst)
+    }
+
     pub(crate) fn start_quickpaste_secondary_key_hold() {
         if !QUICKPASTE_KEYBOARD_MODE_ENABLED.load(Ordering::SeqCst) {
             return;
@@ -923,9 +936,11 @@ pub(crate) use windows_raw_input::{
     enable_quickpaste_keyboard_mode,
     get_physical_modifier_keys_state,
     guard_tray_click_region,
+    mark_quickpaste_hide_triggered,
     reset_quickpaste_hide_triggered,
     start_quickpaste_secondary_key_hold,
     start_raw_input_if_needed,
+    take_quickpaste_hide_triggered,
 };
 
 #[cfg(target_os = "windows")]
@@ -1054,6 +1069,64 @@ mod windows_raw_input_tests {
         assert!(
             !body.contains("QUICKPASTE_KEYBOARD_MODE_ENABLED"),
             "复位函数不得改动键盘模式开关"
+        );
+    }
+
+    // r8-hk-1 护栏:非键盘模式延迟隐藏路径必须与键盘模式 A4 同款会话守卫——
+    // 发起隐藏请求时置位标记(mark),延迟回调用 swap(false) 一次性判定(take),
+    // 且 take 必须先于 hide_quickpaste_window;禁止以 is_visible() 作前置条件。
+    #[test]
+    fn released_path_delayed_hide_uses_session_guard() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/system/hotkey/global.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 global.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = stripped
+            .find("pub fn register_quickpaste_hotkey")
+            .expect("缺 register_quickpaste_hotkey");
+        let rest = &stripped[start..];
+        let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(stripped.len());
+        let body = &stripped[start..end];
+
+        // Released 分支(快捷方式松开)必须置位标记
+        let released_pos = body
+            .find("ShortcutState::Released")
+            .expect("快捷键 Released 分支必须存在");
+        let mark_pos = body[released_pos..]
+            .find("mark_quickpaste_hide_triggered()")
+            .map(|i| released_pos + i)
+            .expect("Released 分支必须先置位隐藏触发标记(mark)");
+        // 置位必须在 50ms 延迟 spawn 之前
+        let sleep_pos = body[mark_pos..]
+            .find("sleep(std::time::Duration::from_millis(50))")
+            .map(|i| mark_pos + i)
+            .expect("延迟隐藏必须 sleep 50ms");
+        assert!(
+            mark_pos < sleep_pos,
+            "隐藏触发标记置位必须先于延迟隐藏线程 spawn"
+        );
+        // 延迟回调用 swap(false) 一次性判定(take)且先于 hide_quickpaste_window
+        let take_pos = body[sleep_pos..]
+            .find("take_quickpaste_hide_triggered()")
+            .map(|i| sleep_pos + i)
+            .expect("延迟回调必须用 take(swap(false)) 一次性判定隐藏触发标记");
+        let hide_pos = body[sleep_pos..]
+            .find("hide_quickpaste_window(&app_clone)")
+            .map(|i| sleep_pos + i)
+            .expect("延迟回调必须调 hide_quickpaste_window");
+        assert!(
+            take_pos < hide_pos,
+            "延迟 hide 回调必须先判定隐藏标记再隐藏"
+        );
+        assert!(
+            !body[sleep_pos..hide_pos].contains("quickpaste::is_visible()"),
+            "延迟回调禁止以 is_visible() 作为 hide 前置条件(重开后可见,会把新窗口误隐藏)"
         );
     }
 

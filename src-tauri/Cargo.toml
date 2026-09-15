@@ -128,3 +128,10 @@ strip = "debuginfo"
 debug = false
 incremental = false
 overflow-checks = false
+
+# r8-ci-1:CI 编译提速——release 构建分离:开发调试走 CI 统一 release 大构,
+# 本地/CI 单测走 --lib --no-default-features 的默认 dev profile(无 LTO、不
+# 出代码、4 分钟内完成)。此处保留 fat LTO 的 release 构建面向最终产物。
+[profile.dev]
+incremental = true
+debug = true
