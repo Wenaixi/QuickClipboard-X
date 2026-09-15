@@ -1,6 +1,6 @@
 // 源码文本护栏测试共享工具:strip_line_comments / fn_body / source_file
 // 在 hotkey.rs、hotkey/global.rs、hotkey/navigation.rs、low_memory/manager.rs
-// 各有一份逐字相同副本,finding 7 抽取到此共享模块,各测试模块 import 复用。
+// 各有一份逐字相同副本,抽取到此共享模块,各测试模块 import 复用。
 // 仅 #[cfg(test)] 编译,模块声明处(父级)也用 #[cfg(test)] 守卫。
 use std::fs;
 
@@ -90,7 +90,7 @@ pub fn fn_body<'a>(src: &'a str, name: &str) -> &'a str {
 mod tests {
     use super::*;
 
-    // F16: fn_body 必须按花括号深度扫描,不能被嵌套 fn / 内层 match /
+    // fn_body 必须按花括号深度扫描,不能被嵌套 fn / 内层 match /
     // 内层 struct 字面量等场景的 `\n}` 过早截断。
     #[test]
     fn fn_body_handles_nested_function() {
@@ -147,7 +147,7 @@ fn outer() -> Config {
         assert!(body.contains("1 + 1"));
     }
 
-    // F16 兜底:旧实现用首个 `\n}` 截断,嵌套 fn 必截短。
+    // 兜底:旧实现用首个 `\n}` 截断,嵌套 fn 必截短。
     // 新实现按深度扫描,本测试断言旧实现的"截短到内层 }"行为不会再现。
     #[test]
     fn fn_body_does_not_truncate_at_inner_brace() {

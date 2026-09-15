@@ -20,7 +20,7 @@ static AUTO_PUSH_PENDING: AtomicBool = AtomicBool::new(false);
 static WINDOW_SHOW_PULL_RUNNING: AtomicBool = AtomicBool::new(false);
 static WINDOW_SHOW_PULL_LAST_AT_MS: AtomicU64 = AtomicU64::new(0);
 static START_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-// B9:全局同步事务串行锁——手动上传/自动推送/调度拉取/窗口显示拉取共用,
+// 全局同步事务串行锁——手动上传/自动推送/调度拉取/窗口显示拉取共用,
 // 防止并发事务在本地数据库快照与已上传签名上交错 RMW 互相覆盖。
 // 放在 upload_selected_parts 与 download_raw 两个事务汇聚点(两者无嵌套调用,不会死锁)。
 pub(super) static SYNC_TX_LOCK: Lazy<tokio::sync::Mutex<()>> = Lazy::new(|| tokio::sync::Mutex::new(()));
@@ -204,7 +204,7 @@ async fn upload_changed_parts() -> Result<Option<SyncReport>, String> {
 }
 
 pub async fn upload_selected_parts(force_all: bool) -> Result<Option<SyncReport>, String> {
-    // B9:持有全局同步锁,手动上传不得与自动推送/调度拉取交错
+    // 持有全局同步锁,手动上传不得与自动推送/调度拉取交错
     let _tx_guard = SYNC_TX_LOCK.lock().await;
     load_uploaded_signature();
     let settings = crate::services::get_settings();
@@ -330,7 +330,7 @@ fn emit_main_window_refresh(app_handle: &AppHandle, report: &SyncReport) {
 mod tests {
     use super::*;
 
-    // B9 护栏:同步事务锁必须存在,且上传事务入口必须先持锁。
+    // 护栏:同步事务锁必须存在,且上传事务入口必须先持锁。
     #[test]
     fn upload_transaction_acquires_global_sync_lock_first() {
         let source = std::fs::read_to_string(format!(
@@ -365,7 +365,7 @@ mod tests {
         );
     }
 
-    // B9 护栏:下载事务入口 download_raw 必须持同一把全局同步锁。
+    // 护栏:下载事务入口 download_raw 必须持同一把全局同步锁。
     #[test]
     fn download_transaction_acquires_global_sync_lock_first() {
         let source = std::fs::read_to_string(format!(

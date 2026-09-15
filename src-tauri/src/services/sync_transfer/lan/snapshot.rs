@@ -92,7 +92,7 @@ pub fn snapshot() -> Result<LanSyncSnapshot, String> {
 pub fn list_history_records_since(since_updated_at: Option<i64>) -> Result<LanRecordBatch, String> {
     let device_id = super::runtime::device_id();
     let mut records = crate::services::database::webdav_list_history_records(&device_id)?;
-    // r6-sync-1:过滤必须 >=(含等)——拉取端 since 传本地 MAX(updated_at),
+    // 过滤必须 >=(含等)——拉取端 since 传本地 MAX(updated_at),
     // 严格大于会漏掉对端 updated_at 恰好等于该 MAX 的记录(同秒新增/更新),
     // 且本地 MAX 不变时该记录永不补拉。>= 只重传 MAX 那一秒的记录,upsert
     // 幂等(updated_at >= 现存即 skip),changed 计数不受影响,带宽可接受。
@@ -112,7 +112,7 @@ pub fn list_history_records_since(since_updated_at: Option<i64>) -> Result<LanRe
 pub fn list_favorite_records_since(since_updated_at: Option<i64>) -> Result<LanRecordBatch, String> {
     let device_id = super::runtime::device_id();
     let mut records = crate::services::database::webdav_list_favorite_records(&device_id)?;
-    // r6-sync-1:同上,>= 含等过滤,同秒记录不再漏拉。
+    // 同上,>= 含等过滤,同秒记录不再漏拉。
     if let Some(since_updated_at) = since_updated_at {
         records.retain(|record| record.updated_at >= since_updated_at);
     }

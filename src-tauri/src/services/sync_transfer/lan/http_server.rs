@@ -130,7 +130,7 @@ pub fn running_port() -> Option<u16> {
 }
 
 pub async fn start(app: AppHandle, config: LanHttpServerConfig) -> Result<u16, String> {
-    // B7:服务启动前清扫上一会话中断传输残留的半写 .qcpart 临时文件
+    // 服务启动前清扫上一会话中断传输残留的半写 .qcpart 临时文件
     let _ = super::files::sweep_orphan_qcpart_files();
     let mut state = SERVER.lock().await;
     if let Some(server) = state.as_ref() {

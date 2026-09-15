@@ -235,7 +235,7 @@ async fn upload_collection_incremental(
     }
 
     for (chunk_id, records) in new_records_by_chunk {
-        // B1:新 chunk 必须先从远端 load 现有块再内存合并——直接以空块 PUT
+        // 新 chunk 必须先从远端 load 现有块再内存合并——直接以空块 PUT
         // 会整块覆盖对端设备并发写入同一 chunk 的记录(两设备各自推进
         // next_chunk 可指向同一 chunk 号)。load 后对不存在的新块返回空,
         // 对已存在的块则按 uuid 覆盖式合并,保留对端记录。
@@ -255,7 +255,7 @@ async fn upload_collection_incremental(
     }
     index.next_chunk = current_chunk_id;
 
-    // s1:index.json 并发整块覆盖——chunk 有 B1 的"先 load 远端再合并",
+    // index.json 并发整块覆盖——chunk 有"先 load 远端再合并",
     // index 却没有:直接以本地内存 index 裸 PUT 会整块覆盖对端设备并发
     // 写入的条目(next_chunk 也会被拉回旧值,下一轮 A/B 设备可能为同一
     // 个 chunk 编号各写各的)。写前 load 远端按 uuid 合并(本地条目覆盖
@@ -439,7 +439,7 @@ mod image_rescan_guards {
         );
     }
 
-    // B1(并发 chunk 覆盖):新记录落块必须先从远端 load 现有块再内存合并——
+    // 并发 chunk 覆盖:新记录落块必须先从远端 load 现有块再内存合并——
     // 直接 RecordChunk::default() 空块 PUT 会整块覆盖对端设备并发写入同一
     // chunk 的记录。护栏断言新 chunk 分支含 load_chunk 调用,且无空块构造。
     #[test]
@@ -460,7 +460,7 @@ mod image_rescan_guards {
         );
     }
 
-    // s1(index.json 并发整块覆盖):upload_collection_incremental 的 index 写路径
+    // index.json 并发整块覆盖:upload_collection_incremental 的 index 写路径
     // 必须先 merge_index(load 远端合并)再按 has_change 条件 save_index——
     // 直接 save_index(本地内存 index) 会整块覆盖对端设备并发写入的条目,
     // next_chunk 也被拉回旧值。护栏断言:调用 merge_index、has_change 分支内

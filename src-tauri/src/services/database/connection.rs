@@ -334,7 +334,7 @@ fn create_tables(conn: &Connection) -> Result<(), String> {
         [],
     ).map_err(|e| format!("创建内容类型索引失败: {}", e))?;
 
-    // M3(唯一索引遇存量重复数据阻断启动):CREATE UNIQUE INDEX 前必须先去重,
+    // 唯一索引遇存量重复数据阻断启动:CREATE UNIQUE INDEX 前必须先去重,
     // 否则历史数据里已存在的重复行(如旧版本 NULL uuid 同步 bug 真实产生过的
     // 重复 uuid)会让索引创建失败,连带 init_database 失败,应用起不来。
     // 三个去重 helper 与索引一一对应;索引创建失败只告警,绝不阻断启动——
@@ -380,7 +380,7 @@ fn create_tables(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
-// M3 去重 helper:三个 UNIQUE 索引前各查一次重复,就地保留"最新"行。
+// 去重 helper:三个 UNIQUE 索引前各查一次重复,就地保留"最新"行。
 // - clipboard_data(target_kind,target_id,format_name):重复时保留 id 最大的
 //   (后写入的原始格式),其余删除——raw data 以最新一次覆盖语义为准。
 // - clipboard(uuid):partial 索引豁免 NULL/空串,重复时保留 updated_at 最新、
@@ -618,7 +618,7 @@ mod tests {
         rusqlite::Connection::open_in_memory().expect("内存库打开失败")
     }
 
-    // M3(编排护栏):三个 dedupe 调用必须出现在对应 CREATE UNIQUE INDEX 之前。
+    // 编排护栏:三个 dedupe 调用必须出现在对应 CREATE UNIQUE INDEX 之前。
     // 行为测试只调 dedupe 函数本身、不经过 create_tables,注释掉 create_tables
     // 里的 dedupe 调用照样 ok——无法防回归。此护栏读 create_tables 真源码,
     // 按 find() 下标断言"去重先于建索引"的编排,§10.3 铁律反证见红。
@@ -650,7 +650,7 @@ mod tests {
         }
     }
 
-    // M3:clipboard_data 重复 (target_kind,target_id,format_name) 只保留 id 最大
+    // clipboard_data 重复 (target_kind,target_id,format_name) 只保留 id 最大
     // (最新写入),去重后必须能创建 UNIQUE 索引(不去重会 CREATE 失败)。
     #[test]
     fn dedupe_clipboard_data_keeps_latest_then_index_creates() {
@@ -691,7 +691,7 @@ mod tests {
         .expect("去重后必须能建唯一索引");
     }
 
-    // M3:重复 uuid 行保留 updated_at 最新,其余置 NULL(豁免 partial 索引),
+    // 重复 uuid 行保留 updated_at 最新,其余置 NULL(豁免 partial 索引),
     // 去重后必须能建部分唯一索引。
     #[test]
     fn dedupe_clipboard_uuid_keeps_newest_then_index_creates() {
@@ -730,7 +730,7 @@ mod tests {
         .expect("去重后必须能建 uuid 部分唯一索引");
     }
 
-    // M3:favorites.source_clipboard_uuid 重复行去重后同款可建索引。
+    // favorites.source_clipboard_uuid 重复行去重后同款可建索引。
     #[test]
     fn dedupe_favorites_source_uuid_keeps_newest_then_index_creates() {
         let conn = mem();
@@ -767,7 +767,7 @@ mod tests {
         .expect("去重后必须能建收藏来源唯一索引");
     }
 
-    // r7-db-1(平局决胜):同 updated_at 的重复 uuid 必须走 tiebreak——保留组内
+    // 平局决胜:同 updated_at 的重复 uuid 必须走 tiebreak——保留组内
     // 最小 id 一行,其余置 NULL。旧逻辑 id < MIN(id) 恒假(同组任何行 id 都不
     // 小于组内最小值),平局组所有行 uuid 均不置 NULL,CREATE UNIQUE INDEX 直接
     // 失败应用无法启动;id > MIN(id) 才能把非最小行清掉。反证:SQL 改回 id <
@@ -809,7 +809,7 @@ mod tests {
         .expect("平局去重后必须能建 uuid 部分唯一索引");
     }
 
-    // r7-db-1(平局决胜,收藏来源):favorites.source_clipboard_uuid 同秒平局同款
+    // 平局决胜,收藏来源:favorites.source_clipboard_uuid 同秒平局同款
     // tiebreak,保留最小 id(收藏 id 为 TEXT,按行序即最小 rowid)。
     #[test]
     fn dedupe_favorites_source_uuid_breaks_tie_keeps_min_id_then_index_creates() {

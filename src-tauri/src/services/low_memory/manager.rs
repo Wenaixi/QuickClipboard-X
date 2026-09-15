@@ -50,7 +50,7 @@ pub fn enter_low_memory_mode(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    // B7 互斥缺口:退出流程(init 置位 EXITING_LOW_MEMORY → 重建 webview →
+    // 互斥缺口:退出流程(init 置位 EXITING_LOW_MEMORY → 重建 webview →
     // finish 复位)进行中,若此处直接进入,会摧毁/改写刚重建的主窗口形态。
     // 之前只有 try_start_exit_low_memory 防「并发退出」,没有防「退出中进入」。
     if super::state::is_exiting_low_memory() {
@@ -374,7 +374,7 @@ fn recreate_main_window(app: &AppHandle) -> Result<(), String> {
     crate::input_monitor::update_main_window(window.clone());
 
     #[cfg(windows)]
-    // A5:重建主窗口后按当前全部自身窗口重建排除列表,替换 add_excluded_hwnd
+    // 重建主窗口后按当前全部自身窗口重建排除列表,替换 add_excluded_hwnd
     // 的只增不减——旧 hwnd 已销毁,OS 复用其值后会把无关窗口当自身窗口。
     crate::services::system::focus::refresh_excluded_hwnds(app);
 
@@ -395,7 +395,7 @@ mod tests {
         crate::services::system::hotkey::test_utils::source_file("src/services/low_memory/manager.rs")
     }
 
-    // F3: 退出低占用模式重建主窗口必须恢复导航键——进入时
+    // 退出低占用模式重建主窗口必须恢复导航键——进入时
     // enter_low_memory_mode 调了 disable_navigation_keys()，
     // 不恢复则退出后导航键永久失效。
     #[test]
@@ -421,7 +421,7 @@ mod tests {
         );
     }
 
-    // F14: 早返分支 `if let Some(window) = app.get_webview_window("main")`
+    // 早返分支 `if let Some(window) = app.get_webview_window("main")`
     // 必须保留对 enable_navigation_keys() / enable_mouse_monitoring() 的恢复调用。
     // 若两次 enable 写在早返检查之后,主窗口已存在时早返就跳过恢复——
     // 退出低占用模式后导航键/鼠标监控永久失效。与 enter_low_memory_mode 中
@@ -496,7 +496,7 @@ mod tests {
         );
     }
 
-    // B7 互斥护栏:退出低占用模式进行中(EXITING_LOW_MEMORY 置位)不得再次进入。
+    // 互斥护栏:退出低占用模式进行中(EXITING_LOW_MEMORY 置位)不得再次进入。
     // 此前只有 try_start_exit_low_memory 防「并发退出」,没有防「退出中进入」——
     // exit 流程重建主窗口期间被 enter 击穿,会摧毁/改写刚建好的窗口形态。
     #[test]
@@ -516,7 +516,7 @@ mod tests {
         );
     }
 
-    // A5:退出低占用模式重建主窗口后,必须按当前全部自身窗口整体重建
+    // 退出低占用模式重建主窗口后,必须按当前全部自身窗口整体重建
     // 排除列表(refresh_excluded_hwnds),不得退回 add_excluded_hwnd 的只增
     // 不减——旧 hwnd 销毁后 OS 会复用其句柄值,若旧值仍留在 EXCLUDED_HWNDS,
     // 无关窗口的聚焦事件会被误过滤,导航键/悬浮行为错乱。

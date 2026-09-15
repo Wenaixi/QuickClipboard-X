@@ -9,7 +9,7 @@ use tauri::{AppHandle, Listener, Manager, WebviewWindow, WebviewWindowBuilder, S
 static PIN_IMAGE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 static PIN_IMAGE_DATA_MAP: OnceCell<Mutex<HashMap<String, PinImageData>>> = OnceCell::new();
 
-// w7:预览窗口建窗流程串行化锁——固定标签 "image-preview" 下并发请求会交错
+// 预览窗口建窗流程串行化锁——固定标签 "image-preview" 下并发请求会交错
 // close/insert/create,数据与窗口错位(详见 pin_image_from_file 注释)。tokio
 // 锁可跨 await 持有,命令 future 保持 Send;OnceCell 惰性初始化同 PIN_IMAGE_DATA_MAP。
 static PREVIEW_WINDOW_LOCK: OnceCell<tokio::sync::Mutex<()>> = OnceCell::new();
@@ -95,7 +95,7 @@ pub async fn pin_image_from_file(
 
         (logical_w.max(1), logical_h.max(1), img_x - padding, img_y - padding)
     } else if let (Some(px), Some(py)) = (x, y) {
-        // C1:x/y 分支窗口落在指定坐标所在显示器——图片逻辑尺寸必须按该屏
+        // x/y 分支窗口落在指定坐标所在显示器——图片逻辑尺寸必须按该屏
         // scale 折算,否则两屏 scale 不同时 inner_size(logical) 与 set_position
         // (physical) 混用导致物理尺寸错误。
         let (w, h) = if let (Some(w), Some(h)) = (width, height) {
@@ -121,7 +121,7 @@ pub async fn pin_image_from_file(
         format!("pin-image-{}", PIN_IMAGE_COUNTER.fetch_add(1, Ordering::SeqCst))
     };
 
-    // w7:预览窗口整个建窗流程串行化(建窗前就取锁)——固定标签 "image-preview"
+    // 预览窗口整个建窗流程串行化(建窗前就取锁)——固定标签 "image-preview"
     // 下两个并发请求(如预览与真实贴图交错、或 menu hover 连续触发)会交错执行:
     // A 关闭旧窗、A 写入数据、B 关闭 A 新窗、A/B 各自 create 同一标签(第二个
     // WebviewWindowBuilder::build 对已存在 label 抛错或复用),窗口与其数据错位。
@@ -182,7 +182,7 @@ fn read_image_logical_size(file_path: &str, app: &AppHandle) -> Result<(u32, u32
     Ok(((w as f64 / scale_factor).round() as u32, (h as f64 / scale_factor).round() as u32))
 }
 
-// C1:按目标坐标所在显示器折算图片逻辑尺寸——贴图窗口用 inner_size(logical)
+// 按目标坐标所在显示器折算图片逻辑尺寸——贴图窗口用 inner_size(logical)
 // 建窗、set_position(physical) 落位,若目标屏与光标屏 scale 不同,仍按光标屏
 // 折算会让物理尺寸错误(如 100% 屏折出的 1.2x 逻辑尺寸落在 200% 屏上被放大
 // 一倍)。use_physical_coords 分支已用 get_scale_factor_at_point,此变体与之对齐。
@@ -338,11 +338,11 @@ pub async fn save_pin_image_as(app: AppHandle, window: WebviewWindow) -> Result<
 }
 
 // 关闭预览窗口
-// r6-window-2:close/remove 同样纳入 PREVIEW_WINDOW_LOCK 串行化——否则建窗
+// close/remove 同样纳入 PREVIEW_WINDOW_LOCK 串行化——否则建窗
 // 流程(pin_image_from_file 预览分支)await create_pin_image_window 期间,并发的
 // close_image_preview 可移除刚 insert 的 PinImageData 并关旧窗,建窗完成新窗
 // show 后其前端 get_pin_image_data 读 map 为空返回 Err,预览窗空屏+穿透残留。
-// r7-window F1:本函数是同步 fn,取锁必须用 blocking_lock()——tokio::sync::Mutex
+// 本函数是同步 fn,取锁必须用 blocking_lock()——tokio::sync::Mutex
 // 的 .lock() 返回一个 future,在同步 fn 里从不被 poll,锁实际从未获取,串行化
 // 形同虚设。blocking_lock 是 tokio Mutex 提供的同步获取方式,与 pin_image_from_file
 // 预览分支的 .lock().await 共用同一把锁,阻塞持有时间极短,不会拖慢建窗流程。
@@ -397,7 +397,7 @@ pub async fn start_pin_edit_mode(
     _img_width_physical: u32,
     _img_height_physical: u32,
 ) -> Result<(), String> {
-    // w5:贴图编辑功能当前未实现——旧实现是 1s 阻塞桩:注册一次性的
+    // 贴图编辑功能当前未实现——旧实现是 1s 阻塞桩:注册一次性的
     // "pin-edit-ready" 监听 + rx.recv_timeout(1s) 阻塞等待,超时后返回
     // Err,还在 app.once 里残留监听(窗口被前端发射事件时会执行 hide+缩到
     // 1x1 的副作用)。直接返回不可用,不注册监听、不阻塞、不留挂起状态。
@@ -463,7 +463,7 @@ mod tests {
         SERIAL.lock().unwrap_or_else(|p| p.into_inner())
     }
 
-    // C1(贴图 scale 用错屏):x/y 与 center 分支的图片逻辑尺寸必须按目标
+    // 贴图 scale 用错屏:x/y 与 center 分支的图片逻辑尺寸必须按目标
     // 坐标所在显示器 scale 折算(get_scale_factor_at_point),不能用光标屏
     // scale——两屏 scale 不同时 inner_size(logical)+set_position(physical)
     // 混用导致物理尺寸错误。preview 分支在光标屏布局,继续用光标屏 scale。
@@ -566,7 +566,7 @@ mod tests {
         assert!(map.is_empty(), "poison 后 PIN_IMAGE_DATA_MAP 仍可访问");
     }
 
-    // w5(编辑模式阻塞桩):start_pin_edit_mode 必须直接返回不可用——
+    // 编辑模式阻塞桩:start_pin_edit_mode 必须直接返回不可用——
     // 旧实现注册一次性 "pin-edit-ready" 监听 + rx.recv_timeout(1s) 阻塞,
     // 超时才返回 Err;若前端在窗口生命周期内发射该事件,残留监听会执行
     // hide+缩到 1x1 的副作用。新实现不注册监听、不阻塞、不留挂起状态。
@@ -604,7 +604,7 @@ mod tests {
         );
     }
 
-    // w7(预览并发建窗数据错位):pin_image_from_file 的预览分支必须先取
+    // 预览并发建窗数据错位:pin_image_from_file 的预览分支必须先取
     // PREVIEW_WINDOW_LOCK 再执行 close/insert/create 整个流程——固定标签
     // "image-preview" 下并发请求交错会导致窗口与其数据错位(详见函数注释)。
     // 护栏断言:取锁位于窗口标签确定之后、窗口创建调用之前。
@@ -659,7 +659,7 @@ mod tests {
         );
     }
 
-    // r6-window-2(close 未纳入串行化):close_image_preview 的 remove+close 必须
+    // close 未纳入串行化:close_image_preview 的 remove+close 必须
     // 与 pin_image_from_file 预览分支共用同一把 PREVIEW_WINDOW_LOCK——否则建窗
     // 流程 await create_pin_image_window 期间并发的 close(菜单 mouseleave/主窗
     // 隐藏路径)可移除刚 insert 的数据并关旧窗,建窗完成新窗 show 后前端

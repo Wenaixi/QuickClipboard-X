@@ -533,7 +533,7 @@ mod tests {
         assert_eq!(merged, vec!["region_snapshot", "inline_a"]);
     }
 
-    // A1:file:// 协议必须拒绝——否则任意本地文件可读
+    // file:// 协议必须拒绝——否则任意本地文件可读
     #[test]
     fn fetch_image_data_rejects_file_scheme() {
         let err = fetch_image_data("file:///C:/Windows/System32/config/SAM")
@@ -545,7 +545,7 @@ mod tests {
         );
     }
 
-    // A1:绝对路径必须拒绝——与 file:// 同源的任意文件读取向量
+    // 绝对路径必须拒绝——与 file:// 同源的任意文件读取向量
     #[test]
     fn fetch_image_data_rejects_absolute_path() {
         // Windows 绝对路径 + Unix 绝对路径都拒

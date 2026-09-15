@@ -71,7 +71,7 @@ static SHORTCUT_STATUS: Lazy<Mutex<HashMap<String, ShortcutStatus>>> =
 // 设置变更(reload_from_settings)、单键注册(register_shortcut)可能从不同线程
 // 同时触发，RegisterHotKey 对同一组合键并发注册会返回 AlreadyRegistered，
 // 失败后内部表与 Windows 层不一致，残留吞键的"幽灵热键"——
-// 62e6b718 只给 navigation 加了锁，global.rs 的整体热键注册漏了，这是
+// 此前只给 navigation 加了锁，global.rs 的整体热键注册漏了，这是
 // "所有快捷键失效"的根因之一。串行化后从根源消除并发撞车。
 pub(super) static GLOBAL_HOTKEY_SYNC_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 // 锁序契约：GLOBAL 必须先于 NAVIGATION 获取。global 层入口
@@ -104,7 +104,7 @@ fn apply_activation(desired: HotkeyActivation) {
 // 先注销 Windows 层全部注册再清空内部表，消除"半注册/幽灵热键"残留；
 // 同时让导航热键内部状态整体失效，等下次前台切换/显隐时干净重建。
 fn disable_all_shortcuts() {
-    // F2: 必须持 GLOBAL_HOTKEY_SYNC_LOCK。apply_activation(Inactive) 从
+    // 必须持 GLOBAL_HOTKEY_SYNC_LOCK。apply_activation(Inactive) 从
     // sync_hotkeys_for_foreground 的 spawn 线程调用本函数，不持锁会与
     // 持锁的 register_* 并发留下半注册幽灵热键。
     let _guard = GLOBAL_HOTKEY_SYNC_LOCK.lock();
@@ -198,7 +198,7 @@ pub fn register_shortcut<F>(id: &str, shortcut_str: &str, handler: F) -> Result<
 where
     F: Fn(&AppHandle) + Send + Sync + 'static,
 {
-    // F1: 假设调用方已持 GLOBAL_HOTKEY_SYNC_LOCK；同线程再 lock 会自死锁。
+    // 假设调用方已持 GLOBAL_HOTKEY_SYNC_LOCK；同线程再 lock 会自死锁。
     let app = get_app()?;
 
     unregister_shortcut(id);
@@ -299,7 +299,7 @@ pub fn register_open_settings_hotkey(shortcut_str: &str) -> Result<(), String> {
 }
 
 pub fn register_quickpaste_hotkey(shortcut_str: &str) -> Result<(), String> {
-    // F1: 假设调用方已持 GLOBAL_HOTKEY_SYNC_LOCK；不在此 lock。
+    // 假设调用方已持 GLOBAL_HOTKEY_SYNC_LOCK；不在此 lock。
     let app = get_app()?;
 
     unregister_shortcut("quickpaste");
@@ -352,7 +352,7 @@ pub fn register_quickpaste_hotkey(shortcut_str: &str) -> Result<(), String> {
                     let _ = window.emit("quickpaste-hide", ());
                 }
 
-                // r8-hk-1:非键盘模式松开热键的延迟隐藏与键盘模式(A4)同款会话
+                // 非键盘模式松开热键的延迟隐藏与键盘模式同款会话
                 // 守卫——先置 QUICKPASTE_HIDE_TRIGGERED 标记,延迟回调用 swap(false)
                 // 一次性判定是否仍应隐藏。否则 50ms 内用户重新唤出(show 路径
                 // manager.rs 已 reset 标记)时,旧 hide 请求会把新会话窗口误关闭。
@@ -361,7 +361,7 @@ pub fn register_quickpaste_hotkey(shortcut_str: &str) -> Result<(), String> {
                 let app_clone = app.clone();
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_millis(50));
-                    // A4 同款:不能以 is_visible() 作前置条件——重开后窗口重新可见,
+                    // 与键盘模式一致:不能以 is_visible() 作前置条件——重开后窗口重新可见,
                     // 反而误关新窗口;标记已被 show 路径复位则放弃本次隐藏。
                     if crate::services::system::raw_input::take_quickpaste_hide_triggered() {
                         if let Err(e) =
@@ -529,7 +529,7 @@ pub fn register_toggle_low_memory_mode_hotkey(shortcut_str: &str) -> Result<(), 
 }
 
 pub fn register_paste_plain_text_hotkey(shortcut_str: &str) -> Result<(), String> {
-    // F1: 假设调用方已持 GLOBAL_HOTKEY_SYNC_LOCK；不在此 lock。
+    // 假设调用方已持 GLOBAL_HOTKEY_SYNC_LOCK；不在此 lock。
     let app = get_app()?;
 
     unregister_shortcut("paste_plain_text");
@@ -619,7 +619,7 @@ fn handle_paste_plain_text_press(app: &AppHandle) -> Result<(), String> {
 }
 
 pub fn register_number_shortcuts(modifier: &str) -> Result<(), String> {
-    // F1: 假设调用方已持 GLOBAL_HOTKEY_SYNC_LOCK；不在此 lock。
+    // 假设调用方已持 GLOBAL_HOTKEY_SYNC_LOCK；不在此 lock。
     let app = get_app()?;
 
     unregister_number_shortcuts();
@@ -692,7 +692,7 @@ pub fn register_number_shortcuts(modifier: &str) -> Result<(), String> {
                         "注册数字快捷键 {} 失败: {}，继续注册其他快捷键",
                         shortcut_str, e
                     );
-                    // F6: 注册失败：插件可能在 Err 前部分写入 Windows 层，主动探测并
+                    // 注册失败：插件可能在 Err 前部分写入 Windows 层，主动探测并
                     // 注销清理，避免残留吞键的"幽灵热键"。但清理前必须检查命中的
                     // 组合键是否属于其他条目——reload 顺序是用户自定义条目先注册
                     // 成功、数字快捷键后注册失败,失败清理探测到 Ctrl+1 已注册
@@ -748,7 +748,7 @@ pub fn unregister_number_shortcuts() {
     for (id, shortcut_str) in number_shortcuts {
         if let Ok(shortcut) = parse_shortcut(&shortcut_str) {
             if let Ok(app) = get_app() {
-                // F5: 与 unregister_shortcut 同款——先 is_registered 探测再
+                // 与 unregister_shortcut 同款——先 is_registered 探测再
                 // 注销，避免对未注册的裸键 UnregisterHotKey 空跑后内部表
                 // 与 Windows 层脱节，残留吞键的"幽灵热键"。
                 if app.global_shortcut().is_registered(shortcut) {
@@ -812,7 +812,7 @@ fn simulate_paste_only() -> Result<(), String> {
 }
 
 pub fn unregister_all() {
-    // F1: 假设调用方已持 GLOBAL_HOTKEY_SYNC_LOCK；reload_from_settings_inner
+    // 假设调用方已持 GLOBAL_HOTKEY_SYNC_LOCK；reload_from_settings_inner
     // 持锁贯穿整个 reload，此处再 lock 同一把 parking_lot Mutex 会
     // 同线程不可重入自死锁。
     let shortcuts = REGISTERED_SHORTCUTS.lock().clone();
@@ -826,7 +826,7 @@ pub fn enable_hotkeys() -> Result<(), String> {
         return Ok(());
     }
 
-    // F2: 与 disable_hotkeys 对称——先持锁再 store+reload，
+    // 与 disable_hotkeys 对称——先持锁再 store+reload，
     // 避免 store(true) 在锁外被并发 disable 覆盖或读到撕裂状态；
     // 持锁后必须调 reload_from_settings_inner（顶层 reload 会再 lock 自死锁）。
     let _guard = GLOBAL_HOTKEY_SYNC_LOCK.lock();
@@ -841,7 +841,7 @@ pub fn disable_hotkeys() {
         return;
     }
 
-    // F1: outer 持 GLOBAL_HOTKEY_SYNC_LOCK 覆盖 unregister_all 假设锁已持的调用契约，
+    // outer 持 GLOBAL_HOTKEY_SYNC_LOCK 覆盖 unregister_all 假设锁已持的调用契约，
     // 否则 disable_hotkeys 内的 unregister_all 不持锁无法走完串行化。
     let _guard = GLOBAL_HOTKEY_SYNC_LOCK.lock();
     unregister_all();
@@ -1015,7 +1015,7 @@ mod tests {
         super::super::test_utils::source_file("src/services/system/hotkey/global.rs")
     }
 
-    // F5: unregister_number_shortcuts 必须先 is_registered 探测再注销,
+    // unregister_number_shortcuts 必须先 is_registered 探测再注销,
     // 与 unregister_shortcut 同款——裸 UnregisterHotKey 空跑会让内部表
     // 与 Windows 层脱节,残留吞键的幽灵热键。统一走 safe_unregister。
     #[test]
@@ -1035,7 +1035,7 @@ mod tests {
         );
     }
 
-    // F6: register_number_shortcuts 失败清理不得误杀同组合键的其他条目——
+    // register_number_shortcuts 失败清理不得误杀同组合键的其他条目——
     // 用户把自定义热键设为 Ctrl+1 时,reload 顺序是用户条目先注册成功,
     // 数字快捷键后注册失败,失败清理探测到 Ctrl+1 已注册(用户条目的)
     // 即注销它→用户热键静默失效但状态表仍显示成功。清理前必须先检查
@@ -1056,11 +1056,11 @@ mod tests {
         );
     }
 
-    // F1: reload 顶层入口持锁后调用的内层函数禁止再 lock，
+    // reload 顶层入口持锁后调用的内层函数禁止再 lock，
     // 否则 parking_lot 同线程不可重入自死锁——启动/settings 保存/托盘/
     // 前台切换全挂死。内层契约：reload_from_settings 顶层持锁贯穿整个
     // reload 过程，unregister_all / register_* 全部假设锁已持。
-    // 锁序契约（F8）见 GLOBAL_HOTKEY_SYNC_LOCK 定义处注释。
+    // 锁序契约见 GLOBAL_HOTKEY_SYNC_LOCK 定义处注释。
     // 负向 contains 必须剥注释,避免注释字面误命中(§10.3)。
     #[test]
     fn reload_inner_and_callees_must_not_reenter_sync_lock() {
@@ -1081,7 +1081,7 @@ mod tests {
         }
     }
 
-    // F1 配套:reload 顶层入口 + 配套 disable_hotkeys 必须持锁,
+    // reload 顶层入口与配套的 disable_hotkeys 必须持锁,
     // 保证 reload/disable 过程仍串行。
     #[test]
     fn reload_outer_entries_hold_sync_lock() {
@@ -1095,7 +1095,7 @@ mod tests {
         }
     }
 
-    // F2: enable_hotkeys 持锁后必须调 reload_from_settings_inner
+    // enable_hotkeys 持锁后必须调 reload_from_settings_inner
     // （顶层 reload_from_settings 会再 lock 同一把锁，同线程自死锁），
     // 且锁位置早于 HOTKEYS_ENABLED.store(true)。
     #[test]
@@ -1115,7 +1115,7 @@ mod tests {
         );
     }
 
-    // F8: 锁序契约必须成文——global 层入口(持 GLOBAL)内部调 navigation
+    // 锁序契约必须成文——global 层入口(持 GLOBAL)内部调 navigation
     // sync(持 NAVIGATION),反向顺序即 AB-BA 死锁。注释须在锁定义处。
     // 本测试故意匹配注释字面("锁序契约"/"NAVIGATION"),故保留 raw 源码不剥注释。
     #[test]
@@ -1135,7 +1135,7 @@ mod tests {
         );
     }
 
-    // F2: disable_all_shortcuts 必须持 GLOBAL_HOTKEY_SYNC_LOCK,
+    // disable_all_shortcuts 必须持 GLOBAL_HOTKEY_SYNC_LOCK,
     // 且锁位置早于 REGISTERED_SHORTCUTS.lock().clear()。
     // apply_activation(Inactive) 在 spawn 线程调用它,不持锁会与持锁
     // 的 register_* 并发留下半注册幽灵热键。
@@ -1203,7 +1203,7 @@ mod tests {
         }
     }
 
-    // A6 护栏:unregister_shortcut 注销时必须先探测再调 safe_unregister,
+    // 护栏:unregister_shortcut 注销时必须先探测再调 safe_unregister,
     // 且不得把探测改成无条件注销——裸 UnregisterHotKey 空跑会让内部表与
     // Windows 层脱节,残留吞键的幽灵热键。
     #[test]
@@ -1220,7 +1220,7 @@ mod tests {
         );
     }
 
-    // r7-hotkey F2:两个 toggle 热键回调(剪贴板监听/格式粘贴)必须受
+    // 两个 toggle 热键回调(剪贴板监听/格式粘贴)必须受
     // is_foreground_globally_disabled 守卫,与其他全部热键对齐——全局禁用
     // 生效时不得切换监听/格式粘贴。反证:删回调内守卫 → FAILED。
     #[test]

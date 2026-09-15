@@ -396,21 +396,21 @@ mod windows_raw_input {
         QUICKPASTE_HIDE_TRIGGERED.store(false, Ordering::SeqCst);
     }
 
-    // B10:仅复位"本会话已触发隐藏"标记,不动键盘模式的任何状态。
+    // 仅复位"本会话已触发隐藏"标记,不动键盘模式的任何状态。
     // show_quickpaste_window 显示路径调用:上次会话该标记残留为 true 时,
     // 本次会话松开修饰键的隐藏判断会被跳过,便捷粘贴窗口卡住不关。
     pub(crate) fn reset_quickpaste_hide_triggered() {
         QUICKPASTE_HIDE_TRIGGERED.store(false, Ordering::SeqCst);
     }
 
-    // r8-hk-1:非键盘模式(global.rs 快捷键 Released 路径)发起延迟隐藏请求时
-    // 先置位隐藏触发标记,与键盘模式 A4 共用同一枚原子——show 路径复用
+    // 非键盘模式(global.rs 快捷键 Released 路径)发起延迟隐藏请求时
+    // 先置位隐藏触发标记,与键盘模式共用同一枚原子——show 路径复用
     // reset_quickpaste_hide_triggered 复位,延迟回调由 take_ 消费。
     pub(crate) fn mark_quickpaste_hide_triggered() {
         QUICKPASTE_HIDE_TRIGGERED.store(true, Ordering::SeqCst);
     }
 
-    // r8-hk-1:一次性判定"应否执行隐藏"——swap(false) 取走标记:若期间有
+    // 一次性判定"应否执行隐藏"——swap(false) 取走标记:若期间有
     // 新会话 show 路径复位过(值 false)则放弃,否则消费并执行隐藏。
     pub(crate) fn take_quickpaste_hide_triggered() -> bool {
         QUICKPASTE_HIDE_TRIGGERED.swap(false, Ordering::SeqCst)
@@ -648,7 +648,7 @@ mod windows_raw_input {
                 std::thread::sleep(std::time::Duration::from_millis(50));
                 input_common::run_on_main_thread(|| {
                     if let Some(app) = input_common::try_get_app_handle() {
-                        // A4: 50ms 延迟期间用户可能再次唤出 quickpaste(新会话),
+                        // 50ms 延迟期间用户可能再次唤出 quickpaste(新会话),
                         // show 路径已 reset_quickpaste_hide_triggered 复位标记。
                         // 旧 hide 请求若直接 hide 会把新窗口立即误隐藏——因此
                         // 此刻用 swap(false) 一次性判定:标记仍为 true(发起置位
@@ -948,7 +948,7 @@ pub(crate) use windows_raw_input::{
 
 #[cfg(target_os = "windows")]
 mod windows_raw_input_tests {
-    // §10.3 源码护栏(A4 会话重检):延迟隐藏线程的回调必须以隐藏触发标记
+    // §10.3 源码护栏(会话重检):延迟隐藏线程的回调必须以隐藏触发标记
     // (QUICKPASTE_HIDE_TRIGGERED)的 swap(false) 判定是否仍应隐藏,先于
     // hide_quickpaste_window;且禁止以 is_visible() 作前置条件——重开后窗口
     // 重新可见,若以可见性作守卫反而把新会话窗口立即误隐藏(方向反转)。
@@ -995,7 +995,7 @@ mod windows_raw_input_tests {
         );
     }
 
-    // B10 护栏:显示路径必须复位 QUICKPASTE_HIDE_TRIGGERED,否则上次会话
+    // 护栏:显示路径必须复位 QUICKPASTE_HIDE_TRIGGERED,否则上次会话
     // 残留的标记会让本次会话松开修饰键时跳过隐藏,窗口卡住。
     #[test]
     fn show_quickpaste_resets_hide_triggered_flag() {
@@ -1031,7 +1031,7 @@ mod windows_raw_input_tests {
         );
     }
 
-    // B10 护栏:复位函数只复位标记,不得改动键盘模式其他状态。
+    // 护栏:复位函数只复位标记,不得改动键盘模式其他状态。
     #[test]
     fn reset_hide_triggered_only_touches_flag() {
         let source = std::fs::read_to_string(format!(
@@ -1075,7 +1075,7 @@ mod windows_raw_input_tests {
         );
     }
 
-    // r8-hk-1 护栏:非键盘模式延迟隐藏路径必须与键盘模式 A4 同款会话守卫——
+    // 护栏:非键盘模式延迟隐藏路径必须与键盘模式同款会话守卫——
     // 发起隐藏请求时置位标记(mark),延迟回调用 swap(false) 一次性判定(take),
     // 且 take 必须先于 hide_quickpaste_window;禁止以 is_visible() 作前置条件。
     #[test]
@@ -1160,7 +1160,7 @@ mod windows_raw_input_tests {
         );
     }
 
-    // r8-hk-2 护栏:修饰键释放必须重求值全空——先松必需要后松非必需键时,
+    // 护栏:修饰键释放必须重求值全空——先松必需要后松非必需键时,
     // 后松的键 keyup 仍要触达隐藏判定,不得被"非必需要早退"跳过。断言:
     // 函数体内出现对本次释放掩码的判断且早退条件同时要求"非必需要且未全空"。
     #[test]

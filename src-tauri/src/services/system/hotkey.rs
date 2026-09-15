@@ -29,7 +29,7 @@ pub fn disable_hotkeys() {
 }
 
 pub fn unregister_all() {
-    // F1: 托盘菜单 toggle 关闭热键直接调本入口（不在 reload 持锁路径上），
+    // 托盘菜单 toggle 关闭热键直接调本入口（不在 reload 持锁路径上），
     // 必须自己持 GLOBAL_HOTKEY_SYNC_LOCK 与持锁的 register_* 串行化；
     // global::unregister_all 假设锁已持，不得再 lock。
     let _guard = global::GLOBAL_HOTKEY_SYNC_LOCK.lock();
@@ -50,7 +50,7 @@ pub fn disable_navigation_hotkeys() {
     navigation::disable_navigation_hotkeys();
 }
 
-// hk1:设置窗口打开/关闭期间的导航键期望状态快照——打开设置在禁用导航键前
+// 设置窗口打开/关闭期间的导航键期望状态快照——打开设置在禁用导航键前
 // 先快照 DESIRED,关闭后按快照恢复,不误启用自动弹出(MouseAuto)隐藏态
 // (DESIRED=false)下本就禁用的导航键。
 pub fn snapshot_navigation_hotkeys_desired() {
@@ -77,7 +77,7 @@ mod tests {
         super::test_utils::source_file("src/services/system/hotkey.rs")
     }
 
-    // F1: 托盘菜单 toggle 关闭热键调用 crate::hotkey::unregister_all()
+    // 托盘菜单 toggle 关闭热键调用 crate::hotkey::unregister_all()
     // （hotkey.rs 顶层），该入口不在 reload 持锁路径上，必须自己持
     // GLOBAL_HOTKEY_SYNC_LOCK，否则与持锁的 register_* 并发撞车。
     // 锁位置必须早于 global::unregister_all() 调用。

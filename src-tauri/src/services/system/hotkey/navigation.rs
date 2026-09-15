@@ -47,13 +47,13 @@ struct NavigationShortcutConfig {
 }
 
 pub fn enable_navigation_hotkeys() {
-    // F4: 与 disable 对称——先持 NAVIGATION_SYNC_LOCK 再 store+sync，
+    // 与 disable 对称——先持 NAVIGATION_SYNC_LOCK 再 store+sync，
     // 消除锁外 store 的 lost wakeup：并发 disable 在 store 与 sync 之间
     // 抢锁时，enable 的 sync 可能看到 desired=true 直接跳过注册。
     let _guard = NAVIGATION_SYNC_LOCK.lock();
     let _lifecycle_guard = NAVIGATION_HOTKEYS_LIFECYCLE_LOCK.lock();
     NAVIGATION_HOTKEYS_DESIRED.store(true, Ordering::SeqCst);
-    // A2: 窗口显示启用导航键时,输入框聚焦期间的旧挂起已无意义(焦点必然
+    // 窗口显示启用导航键时,输入框聚焦期间的旧挂起已无意义(焦点必然
     // 已离开旧输入框)。swap(false) 取回旧值:若残留挂起则强制 reload 重新
     // 注册被跳过的 execute-item 键;否则走原 sync 路径,已注册则不空转。
     // 否则 useInputFocus 的 blur 恢复守卫拦掉 restoreLastFocus 时 SUSPENDED
@@ -68,7 +68,7 @@ pub fn enable_navigation_hotkeys() {
 }
 
 pub fn disable_navigation_hotkeys() {
-    // F4: 与 enable 对称——先持 NAVIGATION_SYNC_LOCK 再 store+unregister，
+    // 与 enable 对称——先持 NAVIGATION_SYNC_LOCK 再 store+unregister，
     // 消除锁外 store 的 lost wakeup：并发 enable 在 store 与锁内 unregister
     // 之间抢锁时,enable 的 sync 可能看到 desired=true 跳过注册。
     let _guard = NAVIGATION_SYNC_LOCK.lock();
@@ -77,7 +77,7 @@ pub fn disable_navigation_hotkeys() {
     unregister_navigation_hotkeys_locked();
 }
 
-// hk1:设置窗口打开/关闭期间的导航键期望状态快照——打开设置在禁用导航键前
+// 设置窗口打开/关闭期间的导航键期望状态快照——打开设置在禁用导航键前
 // 先快照 DESIRED(主窗口当前形态:显式显示 true / 自动弹出隐藏 false),
 // 关闭后按快照恢复,不误启用自动弹出(MouseAuto)状态下本就禁用的导航键。
 static NAVIGATION_SETTINGS_SNAPSHOT: AtomicBool = AtomicBool::new(false);
@@ -106,7 +106,7 @@ pub fn unregister_navigation_hotkeys() {
 }
 
 // 输入框获得焦点时暂停执行粘贴快捷键，避免全局 Enter 抢占输入法组合提交。
-// A2:挂起必须同时跳过 Enter 与方向类导航键(默认 ArrowUp/Down/Left/Right)
+// 挂起必须同时跳过 Enter 与方向类导航键(默认 ArrowUp/Down/Left/Right)
 // ——仅挂 Enter 时,方向键仍在 OS 层被 RegisterHotKey 截走,webview 收不到
 // keydown,搜索框内光标无法左右移动/框选/IME 候选方向选择(快捷键回环只修
 // 了一半)。方向键在挂起期间不注册,恢复后经 reload 重新注册。
@@ -218,7 +218,7 @@ fn register_navigation_hotkeys_from_settings_locked() -> Result<(), String> {
         }
 
         if EXECUTE_ITEM_HOTKEY_SUSPENDED.load(Ordering::SeqCst) {
-            // A2:挂起期间 Enter 与方向类导航键一并跳过注册——仅跳过 Enter 时
+            // 挂起期间 Enter 与方向类导航键一并跳过注册——仅跳过 Enter 时
             // 方向键仍全局注册截走 webview keydown,搜索框内光标/IME 无法方向选择
             match config.id {
                 "navigation_execute_item"
@@ -234,7 +234,7 @@ fn register_navigation_hotkeys_from_settings_locked() -> Result<(), String> {
             Ok(shortcut) => shortcut,
             Err(error) => {
                 eprintln!("解析导航快捷键 [{}] 失败: {}", config.id, error);
-                // F8: parse 失败与 register 失败对称——写 SHORTCUT_STATUS,
+                // parse 失败与 register 失败对称——写 SHORTCUT_STATUS,
                 // 否则用户配错键时前端 navigation tab 静默无红错提示。
                 super::global::set_shortcut_status(
                     &config.id,
@@ -258,7 +258,7 @@ fn register_navigation_hotkeys_from_settings_locked() -> Result<(), String> {
             }) {
             Ok(_) => {
                 println!("已注册导航快捷键 [{}]: {}", config.id, config.shortcut);
-                // F2: 成功注册必须写 success 状态,覆盖同 id 的旧失败状态——
+                // 成功注册必须写 success 状态,覆盖同 id 的旧失败状态——
                 // 用户改回合法键并保存后立即清除设置页红错。
                 super::global::set_shortcut_status(&config.id, &config.shortcut, true, None);
                 registrations.push(NavigationShortcutRegistration {
@@ -273,13 +273,13 @@ fn register_navigation_hotkeys_from_settings_locked() -> Result<(), String> {
                 );
                 // 插件可能在 Err 前部分写入 Windows 层，主动探测并注销清理，
                 // 避免残留吞键的"幽灵热键"。与 global.rs register_shortcut 同款。
-                // A7: 清理前必须检查命中的组合键是否属于其他条目——用户条目
+                // 清理前必须检查命中的组合键是否属于其他条目——用户条目
                 // 先注册成功、导航键后注册失败时,直接探测注销会误摘用户热键;
                 // 属于其他条目则跳过清理,仅记录失败状态,由用户配置侧处理冲突。
                 if !super::global::belongs_to_other_shortcut(&shortcut) {
                     super::global::safe_unregister(&app, shortcut);
                 }
-                // F7: 注册失败必须写 SHORTCUT_STATUS 状态表——前端 navigation tab
+                // 注册失败必须写 SHORTCUT_STATUS 状态表——前端 navigation tab
                 // 的 ShortcutInput 靠 backendId 查 getBackendError 展示冲突/失败，
                 // 不写则用户配置错误时前端静默无提示。key 用导航 config id，
                 // 错误码与 global.rs register_shortcut 同款区分 CONFLICT/REGISTRATION_FAILED。
@@ -289,7 +289,7 @@ fn register_navigation_hotkeys_from_settings_locked() -> Result<(), String> {
                     "REGISTRATION_FAILED".to_string()
                 };
                 super::global::set_shortcut_status(&config.id, &config.shortcut, false, Some(error_msg));
-                // F7(单键失败治理):仅记录该键失败状态,不整体置 REGISTERED=false——
+                // 单键失败治理:仅记录该键失败状态,不整体置 REGISTERED=false——
                 // 避免一个键配错让全部导航键失效并清空其余成功注册;
                 // 失败键由下次 reload 重试,其余成功键保持可用。
             }
@@ -356,7 +356,7 @@ fn unregister_navigation_hotkeys_locked() -> bool {
                             "已注销导航快捷键 [{}]: {}",
                             registration.id, registration.shortcut
                         );
-                        // F2: 注销成功即清除该 id 的 SHORTCUT_STATUS——
+                        // 注销成功即清除该 id 的 SHORTCUT_STATUS——
                         // 导航 id 不在 REGISTERED_SHORTCUTS,global 的
                         // unregister_all 清理覆盖不到;不清除则用户改回合法键后
                         // 设置页持续显示红错直到全局 reload/重启。
@@ -603,7 +603,7 @@ mod tests {
         super::super::test_utils::source_file("src/services/system/hotkey/navigation.rs")
     }
 
-    // F3: 注册失败路径必须调 safe_unregister 清理幽灵热键（内部先
+    // 注册失败路径必须调 safe_unregister 清理幽灵热键（内部先
     // is_registered 探测再 unregister,与 global.rs register_shortcut 同款），
     // 并保留 eprintln 错误日志。
     #[test]
@@ -620,7 +620,7 @@ mod tests {
         );
     }
 
-    // F7: 注册失败必须写 global 的 SHORTCUT_STATUS 状态表——
+    // 注册失败必须写 global 的 SHORTCUT_STATUS 状态表——
     // 前端 navigation tab 的 ShortcutInput 靠 backendId 查状态展示错误，
     // 不写则用户配置错误时前端静默无提示。错误码区分 CONFLICT/REGISTRATION_FAILED。
     #[test]
@@ -640,7 +640,7 @@ mod tests {
         );
     }
 
-    // F4: enable_navigation_hotkeys 必须先持 NAVIGATION_SYNC_LOCK 再 store+sync，
+    // enable_navigation_hotkeys 必须先持 NAVIGATION_SYNC_LOCK 再 store+sync，
     // 与 disable_navigation_hotkeys 对称，消除锁外 store 的 lost wakeup。
     #[test]
     fn enable_navigation_hotkeys_holds_lock_before_store() {
@@ -658,7 +658,7 @@ mod tests {
         );
     }
 
-    // F4(对称性护栏):disable_navigation_hotkeys 必须与 enable 对称——
+    // 对称性护栏:disable_navigation_hotkeys 必须与 enable 对称——
     // 先持 NAVIGATION_SYNC_LOCK 再 store(false)，锁外 store 与并发
     // enable/sync 存在 lost wakeup 竞态（store 与锁内 unregister 之间
     // 被并发 enable 抢锁时,enable 的 sync 可能看到 desired=true 跳过注册）。
@@ -697,7 +697,7 @@ mod tests {
         }
     }
 
-    // F7(连带雪崩治理):单键注册失败不得整体置 NAVIGATION_HOTKEYS_REGISTERED=false,
+    // 连带雪崩治理:单键注册失败不得整体置 NAVIGATION_HOTKEYS_REGISTERED=false,
     // 否则一个键配错会让全部导航键失效——下次前台切换/显隐触发 reload 时
     // unregister 会摘除全部已成功注册的键,用户配错的键连同其余正常键一起
     // 全部失灵。失败键自身已写 SHORTCUT_STATUS 错误状态,由下次 reload 重试。
@@ -717,7 +717,7 @@ mod tests {
         );
     }
 
-    // F8: parse_shortcut 失败必须与 register 失败对称——写 global 的
+    // parse_shortcut 失败必须与 register 失败对称——写 global 的
     // SHORTCUT_STATUS 状态表,否则用户配错键时前端 navigation tab 静默无红错提示。
     // 错误码固定 REGISTRATION_FAILED(parse 失败与 OS 层注册失败同源)。
     #[test]
@@ -750,7 +750,7 @@ mod tests {
         );
     }
 
-    // F2: 导航注册失败路径写入 global::SHORTCUT_STATUS 状态表后,成功/重试路径
+    // 导航注册失败路径写入 global::SHORTCUT_STATUS 状态表后,成功/重试路径
     // 必须清除该 id 的失败状态——否则用户改回合法键并保存后,设置页持续显示
     // 红错直到全局 reload/重启。清除逻辑须同时覆盖 unregister 路径。
     #[test]
@@ -771,7 +771,7 @@ mod tests {
         );
     }
 
-    // F9 节流护栏:execute-item 必须先 throttle 再发射粘贴,
+    // 节流护栏:execute-item 必须先 throttle 再发射粘贴,
     // 否则松手再按瞬间会重复触发粘贴动作。用户视角即"回车无效/重复粘贴"。
     // throttle 在 emit_navigation_action_if_ready -> should_throttle 链路上生效;
     // Pressed 处理函数必须经过 emit_navigation_action_if_ready 才能拿到 throttle。
@@ -810,7 +810,7 @@ mod tests {
         );
     }
 
-    // F10 防回归:导航热键必须同时处理 Pressed 与 Released。
+    // 防回归:导航热键必须同时处理 Pressed 与 Released。
     // 仅监听 Pressed 时,throttle 只滤"重复按下",但松手立刻再按 Enter
     // 仍会被新一次 Pressed 命中导致单次按下触发两次粘贴。
     // 必须显式区分两个状态,并保证 throttle 同时作用于 Pressed 路径。
@@ -955,7 +955,7 @@ mod tests {
         );
     }
 
-    // A2(快捷键回环):enable_navigation_hotkeys 必须复位残留的
+    // 快捷键回环:enable_navigation_hotkeys 必须复位残留的
     // EXECUTE_ITEM_HOTKEY_SUSPENDED 并强制 reload——输入框聚焦期间窗口被
     // 隐藏(useInputFocus 的 blur 恢复守卫会因 activeElement 仍是 input 拦掉
     // restoreLastFocus),SUSPENDED 残留 true,而 suspend 是跳过 execute-item
@@ -981,7 +981,7 @@ mod tests {
         );
     }
 
-    // A2(方向键回环):输入框聚焦挂起导航键时,必须连方向类导航键(默认
+    // 方向键回环:输入框聚焦挂起导航键时,必须连方向类导航键(默认
     // ArrowUp/Down/Left/Right)一并跳过注册——仅跳过 Enter 时方向键仍在 OS 层
     // 被 RegisterHotKey 截走,webview 收不到 keydown,搜索框内光标无法左右
     // 移动/框选/IME 候选方向选择。
@@ -1008,7 +1008,7 @@ mod tests {
         }
     }
 
-    // A7(归属检查):导航键注册失败清理前必须检查组合键是否属于其他条目
+    // 归属检查:导航键注册失败清理前必须检查组合键是否属于其他条目
     // (global 的 REGISTERED_SHORTCUTS 用户条目先注册成功、导航键后注册失败
     // 时,直接 safe_unregister 会误摘用户热键)。belongs 检查必须早于清理。
     #[test]

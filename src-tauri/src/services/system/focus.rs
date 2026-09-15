@@ -45,16 +45,16 @@ pub fn stop_focus_listener() {
     LISTENER_RUNNING.store(false, Ordering::SeqCst);
 }
 
-// A5:按窗口标签整体重建"自身窗口排除列表",替换 add_excluded_hwnd 的只增
+// 按窗口标签整体重建"自身窗口排除列表",替换 add_excluded_hwnd 的只增
 // 不减——低内存模式退出重建主窗口时旧 hwnd 已销毁,若仍留在列表里,OS 复用
 // 该 hwnd 值后会把无关窗口当自身窗口,其聚焦事件被误过滤。重建保证列表
 // 始终只含现存自身窗口,且不随重建次数无限增长。
 #[cfg(windows)]
 pub fn refresh_excluded_hwnds(app_handle: &tauri::AppHandle) {
     let mut excluded = Vec::new();
-    // A3:排除列表必须覆盖全部自身窗口——缺 quickpaste 时便捷粘贴窗口的聚焦
+    // 排除列表必须覆盖全部自身窗口——缺 quickpaste 时便捷粘贴窗口的聚焦
     // 事件不被过滤,可被记为 LAST_FOCUS_HWND,恢复焦点时把焦点设回隐藏窗口。
-    // r6-hotkey-3:预览窗口真实标签是 PREVIEW_WINDOW_LABEL "preview-window",
+    // 预览窗口真实标签是 PREVIEW_WINDOW_LABEL "preview-window",
     // 此前 "preview" 标签 get_webview_window 恒 None,预览窗 hwnd 从未进列表;
     // 改用标签常量消除误导。
     for label in [
@@ -89,7 +89,7 @@ pub fn focus_clipboard_window(window: WebviewWindow) -> Result<(), String> {
 
 // 仅保存当前焦点（手动）
 pub fn save_current_focus(_app_handle: tauri::AppHandle) -> Result<(), String> {
-    // hk3:由 no-op 改为真正捕获当前前台窗口——focus_callback 的前台切换
+    // 由 no-op 改为真正捕获当前前台窗口——focus_callback 的前台切换
     // 事件在自身窗口聚焦时被过滤,LAST_FOCUS_HWND 停留"最后外部窗口"状态;
     // 但连续快速切换或事件钩子未送达时,主动抓一次保证 restore 目标最新。
     #[cfg(windows)]
@@ -128,26 +128,26 @@ pub fn restore_last_focus() -> Result<(), String> {
         use std::ffi::c_void;
 
         if let Some(hwnd_val) = *LAST_FOCUS_HWND.lock() {
-            // A3:恢复前校验句柄仍有效——主窗口销毁重建后旧 hwnd 已失效,
+            // 恢复前校验句柄仍有效——主窗口销毁重建后旧 hwnd 已失效,
             // 直接 SetForegroundWindow 到无效句柄静默失败,焦点归还被吞。
             // windows crate 的 IsWindow 接收 Option<HWND>,None 表示无效。
             let valid = unsafe { IsWindow(Some(HWND(hwnd_val as *mut c_void))) };
             if valid.as_bool() {
-                // r6-hotkey-1:SetForegroundWindow 返回值必须判定——windows 前台
+                // SetForegroundWindow 返回值必须判定——windows 前台
                 // 锁限制 / 非前台线程调用 / hwnd 跨虚拟桌面时,句柄有效但归还失败,
                 // 此时仍 resume 会让 SUSPENDED 被静默清掉、execute-item/方向键重新
-                // 全局注册,输入框仍聚焦,正好是 hk2 想修的输入被截 bug 本身。
+                // 全局注册,输入框仍聚焦,正好是要修的输入被截 bug 本身。
                 // 归还成功才恢复;失败保持挂起并保留记录待下次重试。
                 let brought = unsafe { SetForegroundWindow(HWND(hwnd_val as *mut c_void)) };
                 if brought.as_bool() {
-                    // hk2:仅在焦点真正归还给外部窗口后恢复执行粘贴热键——输入框
+                    // 仅在焦点真正归还给外部窗口后恢复执行粘贴热键——输入框
                     // 聚焦期间的挂起(SUSPENDED)记录的是"输入域仍需独占 Enter";
                     // 归还失败时挂起保持,避免输入框仍聚焦时全局 Enter 截走
                     // 输入法组合提交。
                     crate::hotkey::resume_execute_item_hotkey();
                 }
             } else {
-                // r8-hk-3:句柄已失效(主窗口销毁重建/外部窗口已关),记录作废
+                // 句柄已失效(主窗口销毁重建/外部窗口已关),记录作废
                 // 清空前先显式 resume 执行粘贴热键——resume_execute_item_hotkey
                 // 全仓唯一调用方就是本函数,若此处只清空记录不 resume,挂起的
                 // EXECUTE_ITEM_HOTKEY_SUSPENDED 将永久无释放路径,Enter/方向键
@@ -296,7 +296,7 @@ fn start_win_event_hook() {
     }
 }
 
-// hk4:前台窗口忽略过滤器——focus_callback 与 save_current_focus 共用。
+// 前台窗口忽略过滤器——focus_callback 与 save_current_focus 共用。
 // 除系统托盘/弹层/主窗口/设置/菜单外,补齐全部自身窗口标题:文本编辑器、
 // 贴图、收件盒、便捷粘贴、文件盒、更新、拖放接收层、快速剪贴板(低内存面板)。
 // 缺失时这些窗口聚焦会被记为 LAST_FOCUS_HWND,恢复焦点把焦点设回隐藏自身窗口。
@@ -312,7 +312,7 @@ fn is_ignored_foreground_window(class_name: &str, name: &str) -> bool {
         || class_name == "DropDown"
         || class_name == "Xaml_WindowedPopupClass"
         || name == "快速剪贴板"
-        // A3:设置窗口标题含"设置 - 快速剪贴板",名字以"设置"开头即视为自身
+        // 设置窗口标题含"设置 - 快速剪贴板",名字以"设置"开头即视为自身
         // 窗口——主窗口在设置页聚焦时聚焦事件若被过滤,导航键仍注册,
         // Tab/方向键会被 RegisterHotKey 吞掉,设置界面无法键盘移动光标。
         || name.starts_with("设置")
@@ -403,7 +403,7 @@ mod tests {
         );
     }
 
-    // A3(焦点污染):排除列表必须覆盖全部自身窗口——缺失 quickpaste 时便捷
+    // 焦点污染:排除列表必须覆盖全部自身窗口——缺失 quickpaste 时便捷
     // 粘贴窗口可被记为上次焦点,恢复时把焦点设回隐藏窗口。护栏断言 label 数组
     // 同时含 quickpaste 与 main/context-menu/preview(用标签常量,防字符串漂移)。
     #[test]
@@ -419,12 +419,12 @@ mod tests {
         }
     }
 
-    // hk2(焦点未归还仍挂起执行键):restore_last_focus 必须在焦点成功归还外部
+    // 焦点未归还仍挂起执行键:restore_last_focus 必须在焦点成功归还外部
     // 窗口后(SetForegroundWindow 之后)才恢复执行粘贴热键——输入框聚焦期间
     // 挂起的 EXECUTE_ITEM_HOTKEY_SUSPENDED 记录"输入域仍需独占 Enter";
     // 若 LAST_FOCUS_HWND 无有效窗口(记录为空),挂起保持,避免全局 Enter
     // 在输入框仍聚焦时截走输入法组合提交。
-    // r6-hotkey-1(修复不彻底):旧实现丢弃 SetForegroundWindow 返回值,只受
+    // 修复不彻底:旧实现丢弃 SetForegroundWindow 返回值,只受
     // IsWindow 有效保护——句柄有效但前台归还失败(前台锁/非前台线程/跨虚拟
     // 桌面)时仍 resume,输入被截复现。修复:判定返回值,false 保持挂起。
     #[test]
@@ -460,7 +460,7 @@ mod tests {
         );
     }
 
-    // hk3(save_current_focus no-op):手动保存焦点必须真正把当前前台窗口写进
+    // save_current_focus 原为空操作:手动保存焦点必须真正把当前前台窗口写进
     // LAST_FOCUS_HWND——旧实现是空函数,前端 3 处调用(main 显隐/鼠标进入/
     // 便捷粘贴)全部无效果,restore 目标停留在 focus_callback 的旧记录。
     #[test]
@@ -481,7 +481,7 @@ mod tests {
         );
     }
 
-    // A3 护栏:restore_last_focus 设置焦点前必须校验句柄仍有效——
+    // 护栏:restore_last_focus 设置焦点前必须校验句柄仍有效——
     // 主窗口销毁重建后旧 hwnd 失效,直接 SetForegroundWindow 静默失败;
     // 无效时清空记录,避免把焦点设回已销毁/隐藏窗口。
     #[test]
@@ -500,7 +500,7 @@ mod tests {
             b.contains("LAST_FOCUS_HWND.lock() = None"),
             "无效句柄必须清空 LAST_FOCUS_HWND 记录"
         );
-        // r8-hk-3:句柄失效清空记录前必须先 resume 执行粘贴热键——否则挂起
+        // 句柄失效清空记录前必须先 resume 执行粘贴热键——否则挂起
         // 的 EXECUTE_ITEM_HOTKEY_SUSPENDED 无释放路径,Enter/方向键永久门闩。
         // 断言 else(无效句柄)分支内、清空记录之前紧邻含 resume;成功分支的
         // resume(brought.as_bool() 内)不能顶替本断言,必须锚定无效分支。
@@ -517,10 +517,10 @@ mod tests {
         );
     }
 
-    // A3 护栏:focus_callback 过滤块必须把设置窗口当作自身窗口过滤——
+    // 护栏:focus_callback 过滤块必须把设置窗口当作自身窗口过滤——
     // 设置窗口标题为"设置 - 快速剪贴板",若聚焦事件不被过滤,前台切到设置页
     // 时 sync_hotkeys_for_foreground 会把导航键注册上,Tab/方向键被吞掉,
-    // 设置界面无法键盘移动光标。hk4 抽 helper 后,护栏改为断言回调调用
+    // 设置界面无法键盘移动光标。抽 helper 后,护栏改为断言回调调用
     // helper,且 helper 的过滤项覆盖设置窗口与全部自身窗口。
     #[test]
     fn focus_callback_filters_settings_window_as_own() {
@@ -551,7 +551,7 @@ mod tests {
         );
 
         // helper 过滤项必须包含:自身主窗口标题 + 设置窗口 + 菜单(且顺序
-        // 设置早于菜单,与旧内联块一致);hk4 补齐的其余自身窗口也应在列。
+        // 设置早于菜单,与旧内联块一致);补齐的其余自身窗口也应在列。
         let helper_start = stripped
             .find("fn is_ignored_foreground_window")
             .expect("缺 is_ignored_foreground_window");

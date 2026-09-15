@@ -356,7 +356,7 @@ pub fn query_favorites(params: FavoritesQueryParams) -> Result<PaginatedResult<F
     let search_keyword = params.search.clone();
     
     with_connection(|conn| {
-        // B6: where_clauses 改 Vec<String>,不再 Box::leak 泄漏字符串
+        // where_clauses 改 Vec<String>,不再 Box::leak 泄漏字符串
         let mut where_clauses = vec![];
         let mut count_params: Vec<Box<dyn rusqlite::ToSql>> = vec![];
         let mut query_params: Vec<Box<dyn rusqlite::ToSql>> = vec![];
@@ -973,10 +973,10 @@ pub fn update_favorite(
     let group_name = group_name.unwrap_or_else(|| "全部".to_string());
     
     with_connection(|conn| {
-        // r7-db-3:UPDATE + 旧格式 DELETE 必须在同一事务——旧实现在闭包外另起
+        // UPDATE + 旧格式 DELETE 必须在同一事务——旧实现在闭包外另起
         // 连接 delete_clipboard_data_items,第二步失败时 content 已更新而旧 raw
         // formats 残留,前端按新内容请求旧格式找不到对应 raw,内容回退错乱。
-        // 与 L2(update_clipboard_item,clipboard.rs:1191+)同构:事务内直删。
+        // 与 update_clipboard_item(clipboard.rs:1191+)同构:事务内直删。
         let tx = conn.unchecked_transaction()?;
         let (old_group_name, content_type, old_content, old_html_content) = tx.query_row(
             "SELECT group_name, content_type, content, html_content FROM favorites WHERE id = ?",
@@ -1023,7 +1023,7 @@ pub fn update_favorite(
             )?;
         }
         if content_changed || html_changed {
-            // r7-db-3:旧 raw formats 同事务清理——UPDATE + DELETE 任一失败整体回滚
+            // 旧 raw formats 同事务清理——UPDATE + DELETE 任一失败整体回滚
             tx.execute(
                 "DELETE FROM clipboard_data WHERE target_kind = 'favorite' AND target_id = ?1",
                 [&id],
@@ -1091,7 +1091,7 @@ mod content_type_like_tests {
         );
     }
 
-    /// B6 护栏:where_clauses 必须是 Vec<String>,禁止 Box::leak 泄漏字符串。
+    /// 护栏:where_clauses 必须是 Vec<String>,禁止 Box::leak 泄漏字符串。
     #[test]
     fn query_favorites_where_clauses_are_strings_not_leaked() {
         let source = fs::read_to_string(format!(
@@ -1128,10 +1128,10 @@ mod content_type_like_tests {
         );
     }
 
-    /// r7-db-3 护栏:update_favorite 的旧 raw formats 清理必须在同一事务内
+    /// 护栏:update_favorite 的旧 raw formats 清理必须在同一事务内
     /// (tx.execute 的 DELETE),禁止闭包外独立连接 delete_clipboard_data_items
     /// ——否则 UPDATE 提交后第二步失败会留下"新 content 配旧 formats"不一致态。
-    /// 与 L2(update_clipboard_item,clipboard.rs)同构。
+    /// 与 update_clipboard_item(clipboard.rs)同构。
     #[test]
     fn update_favorite_clears_raw_formats_in_same_transaction() {
         let source = fs::read_to_string(format!(

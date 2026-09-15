@@ -561,7 +561,7 @@ pub fn hide_snapped_window(window: &WebviewWindow) -> Result<(), String> {
         return Ok(());
     }
 
-    // w2:取消在飞 show 动画——动画中 toggle hide 时窗口停在中间帧坐标,
+    // 取消在飞 show 动画——动画中 toggle hide 时窗口停在中间帧坐标,
     // 若以其计算比例会污染落盘。cancel 后窗口停在当前帧,ratio 走 state
     // 稳定值,记账坐标即当前真实位置。
     cancel_pending_animation();
@@ -575,7 +575,7 @@ pub fn hide_snapped_window(window: &WebviewWindow) -> Result<(), String> {
 
     let size = window.outer_size().map_err(|e| e.to_string())?;
     let (x, y, _, _) = crate::utils::positioning::get_window_bounds(window)?;
-    // r6-window-1:比例必须优先 state 稳定值,不能只在中途 compute 报错时才回退——
+    // 比例必须优先 state 稳定值,不能只在中途 compute 报错时才回退——
     // cancel_pending_animation() 只停掉在飞 show 动画线程,窗口仍停在中间帧坐标,
     // 以其计算比例会污染落盘(下次 show 位置偏移)。与 refresh_hidden_snapped_window
     // 的 :654-664 同款:state.snap_ratio.or(settings).unwrap_or(compute)。
@@ -1443,11 +1443,11 @@ mod tests {
         );
     }
 
-    // w2(动画中 toggle 污染贴边比例):hide_snapped_window 必须先
+    // 动画中 toggle 污染贴边比例:hide_snapped_window 必须先
     // cancel_pending_animation 再读窗口坐标算比例——show 动画中 toggle hide,
     // 窗口停在中间帧坐标,若以其算 ratio 会落盘被污染(如 0.4 比例),下次
     // show 从错误比例恢复。cancel 后窗口停在当前帧。
-    // r6-window-1(修复不彻底):仅取消动画不够——比例必须优先 state 稳定值,
+    // 修复不彻底:仅取消动画不够——比例必须优先 state 稳定值,
     // 不能只在 compute 报错时回退。cancel 只停线程,窗口仍停在中间帧坐标,
     // 以其计算比例照样污染落盘;state.snap_ratio.or(settings).unwrap_or(compute)
     // 与 refresh_hidden_snapped_window 同款,中间帧坐标只在无任何记账时兜底。

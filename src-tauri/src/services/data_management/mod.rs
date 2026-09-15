@@ -117,7 +117,7 @@ fn backup_full_zip(dir: &Path) -> Result<Option<PathBuf>, String> {
     let db = dir.join("quickclipboard.db");
     let images_dir = dir.join("clipboard_images");
     let app_icons_dir = dir.join("app_icons");
-    // D3:备份清单必须覆盖全部会被 reset/替换导入清理的目录——重置全部数据
+    // 备份清单必须覆盖全部会被 reset/替换导入清理的目录——重置全部数据
     // 会删 clipboard_images + image_library + app_icons + db,替换导入会删
     // clipboard_images + image_library + app_icons;若备份缺 image_library
     // 与 pin_images,执行这两类操作前图库与贴图数据永久丢失,备份里没有。
@@ -293,7 +293,7 @@ pub fn reset_all_data() -> Result<String, String> {
         if image_library.exists() { let _ = fs::remove_dir_all(&image_library); }
         let app_icons = dir.join("app_icons");
         if app_icons.exists() { let _ = fs::remove_dir_all(&app_icons); }
-        // r6-db-2:重置所有数据必须清 pin_images——与 D3/M2 已修的"备份/替换导入/
+        // 重置所有数据必须清 pin_images——与备份/替换导入/
         // 合并"目录清单对齐。此前遗漏:重置后贴图文件残留磁盘,与"全部清空"
         // 语义不符,且下次重置的备份里不会有这份残留(旧备份才有)。
         let pin_images = dir.join("pin_images");
@@ -410,8 +410,8 @@ pub fn import_data_zip(zip_path: PathBuf, mode: &str) -> Result<String, String> 
                 get_default_data_dir()?
             };
 
-            // H1:修复"关库后散布 ? 早返,失败时既不重开库又已改设置"——
-            // 与 D2 export_data_zip 同款病(export 修了,import replace 漏了)。
+            // 修复"关库后散布 ? 早返,失败时既不重开库又已改设置"——
+            // 与 export_data_zip 同款病(export 修了,import replace 漏了)。
             // ①close_database() 之后的替换步骤收进闭包,全部错误经闭包返回;
             // ②闭包无论成败外层无条件 init_database(target 库),绝不留下关闭态;
             // ③update_settings 后置到替换与重开都成功之后,失败时不改设置,
@@ -427,9 +427,9 @@ pub fn import_data_zip(zip_path: PathBuf, mode: &str) -> Result<String, String> 
                 let target_app_icons = target_dir.join("app_icons");
                 if target_app_icons.exists() { fs::remove_dir_all(&target_app_icons).map_err(|e| e.to_string())?; }
                 if imported_app_icons.exists() { copy_dir_all(&imported_app_icons, &target_app_icons)?; }
-                // M2:pin_images 与 clipboard_images/image_library 同列——导出已收,
+                // pin_images 与 clipboard_images/image_library 同列——导出已收,
                 // 替换导入漏收会让贴图文件成为"数据要清但备份没有"的孤儿(类比
-                // D3 目录清单),必须与目标库同清同补。
+                // 备份目录清单),必须与目标库同清同补。
                 let target_pin_images = target_dir.join("pin_images");
                 if target_pin_images.exists() { fs::remove_dir_all(&target_pin_images).map_err(|e| e.to_string())?; }
                 if imported_pin_images.exists() { copy_dir_all(&imported_pin_images, &target_pin_images)?; }
@@ -595,7 +595,7 @@ fn merge_database(src_db: &Path) -> Result<(), String> {
             .ok_or(rusqlite::Error::InvalidPath("bad path".into()))?;
         conn.execute("ATTACH DATABASE ?1 AS importdb", [import_path])?;
 
-        // M1:ATTACH 导入必须包事务——merge_* 里任一失败(如撞 uuid 唯一索引)
+        // ATTACH 导入必须包事务——merge_* 里任一失败(如撞 uuid 唯一索引)
         // 前面已落地的 groups/favorites/clipboard 都要回滚,否则半合并数据
         // 无法回滚,重复导入越积越多(INSERT OR IGNORE 幂等只兜部分)。
         let tx = conn.unchecked_transaction()?;
@@ -606,7 +606,7 @@ fn merge_database(src_db: &Path) -> Result<(), String> {
         let id_mapping = merge_clipboard_from_importdb(&tx)?;
         merge_clipboard_data_from_importdb(&tx, &id_mapping)?;
 
-        // r7-db-4:删除墓碑也必须并入——源库已删除的记录不能在导入后复活。
+        // 删除墓碑也必须并入——源库已删除的记录不能在导入后复活。
         // 只同步"比本地更新的墓碑"(源端 deleted_at > 本地),避免旧的删除
         // 反向盖掉本地较新的复活。逐行取源端 deleted_at,应用全部是
         // LWW 语义(每行最少删一次>插入一次)。
@@ -642,7 +642,7 @@ fn merge_database(src_db: &Path) -> Result<(), String> {
         reorder_clipboard_by_time(&tx);
         tx.commit()?;
 
-        // r6-db-1:无论成败都必须拆离 importdb——M1 修过"失败时 DETACH 不执行"使
+        // 无论成败都必须拆离 importdb——此前修过"失败时 DETACH 不执行"使
         // importdb 残留 ATTACH 在全局连接上,下次 merge_database 再 ATTACH 撞
         // "already in use",后续所有 merge 永久失败。事务已包 commit(成功=DETACH 前
         // 已落盘;失败=tx Drop 回滚),DETACH 与事务成败解耦,独立无条件执行。
@@ -975,7 +975,7 @@ fn merge_clipboard_from_importdb(
         ])?;
 
         if let Some(old_id) = old_id {
-            // r7-db-2:INSERT OR IGNORE 撞 uuid 唯一索引被忽略的行不分配新 rowid,
+            // INSERT OR IGNORE 撞 uuid 唯一索引被忽略的行不分配新 rowid,
             // last_insert_rowid() 仍是上一条成功插入的 rowid——无条件取会把旧库
             // raw formats 挂到错误本地点,粘贴格式错乱不可自愈。真实 id 按 uuid
             // 回查(该行可能已被忽略,data 表必须重挂到既有本地点)。
@@ -1115,7 +1115,7 @@ fn change_storage_dir_internal(src_dir: &Path, dst_dir: &Path, mode: &str) -> Re
 
     close_database();
 
-    // H2:关库后的迁移操作收进闭包,全部错误经闭包返回;外层无论成败统一
+    // 关库后的迁移操作收进闭包,全部错误经闭包返回;外层无论成败统一
     // 重开 src 库,绝不留下关闭态——磁盘满/跨盘回退复制失败时本会话 DB
     // 仍可用,且设置未改(update_settings 在 internal 成功后才执行)。
     let src_db = src_dir.join("quickclipboard.db");
@@ -1231,7 +1231,7 @@ fn change_storage_dir_internal(src_dir: &Path, dst_dir: &Path, mode: &str) -> Re
         Ok(())
     })();
 
-    // r7-db-5:失败路径才重开 src 库(源库原样保留,重开后本会话 DB 立即恢复
+    // 失败路径才重开 src 库(源库原样保留,重开后本会话 DB 立即恢复
     // 可用)。成功路径 src 库已迁移到 dst(或 source_only/target_only 已删)——
     // 无条件重开会新建空孤儿库并成为全局连接,剪贴板监控与新写入落空库永久
     // 丢失,且 check_target_has_data 把空库当有效数据。三个调用方(change_storage
@@ -1254,7 +1254,7 @@ pub fn export_data_zip(target_path: PathBuf) -> Result<PathBuf, String> {
     let _ = crate::services::database::connection::with_connection(|conn| {
         conn.execute_batch("PRAGMA wal_checkpoint(FULL); PRAGMA wal_checkpoint(TRUNCATE);")
     });
-    // D2:close_database() 之后必须保证 init_database() 一定能执行到——旧代码
+    // close_database() 之后必须保证 init_database() 一定能执行到——旧代码
     // 在关库后散布多个 `?` 早返,任一失败(建目录/建文件/读图库/zip 收尾)都会
     // 跳过末尾 init_database,剪贴板监听与所有 DB 命令本会话全部失效且无恢复
     // 入口。抽闭包收敛:导出体全部错误都经闭包返回,外层无论成败统一重开库。
@@ -1344,7 +1344,7 @@ mod tests {
     use super::safe_zip_entry_name;
     use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
 
-    // D3(备份缺图库/贴图):backup_full_zip 必须覆盖全部会被 reset/替换导入
+    // 备份缺图库/贴图:backup_full_zip 必须覆盖全部会被 reset/替换导入
     // 清理的目录——清理侧删 clipboard_images + image_library + app_icons,
     // 备份若缺 image_library 与 pin_images,执行重置/替换导入前图库与贴图
     // 数据永久丢失,备份里没有可回滚。
@@ -1370,7 +1370,7 @@ mod tests {
         }
     }
 
-    // D2(关库早返不重开):export_data_zip close_database 后必须保证
+    // 关库早返不重开:export_data_zip close_database 后必须保证
     // init_database 一定执行——错误路径一律经闭包收敛,外层统一重开库。
     // 否则任一导出步骤失败(建目录/建文件/读图库/zip 收尾)都跳过末尾
     // init_database,剪贴板监听与所有 DB 命令本会话全部失效且无恢复入口。
@@ -1409,11 +1409,11 @@ mod tests {
         );
     }
 
-    // H2(换存储目录关库早返不重开):change_storage_dir_internal close_database 后
+    // 换存储目录关库早返不重开:change_storage_dir_internal close_database 后
     // 迁移体必须收进闭包、错误经闭包返回，失败路径重开 src 库并仅在成功后才让
     // 调用方持久化新设置——否则磁盘满/跨盘复制失败时 DB 永久关闭、剪贴板监听
     // 与所有 DB 命令本会话全部失效。
-    // r7-db-5(成功路径不再无条件重开 src)：成功时 src 库已迁移到 dst(或
+    // 成功路径不再无条件重开 src：成功时 src 库已迁移到 dst(或
     // source_only/target_only 已删),无条件重开会新建空孤儿库并成为全局连接,
     // 剪贴板监控与新写入落空库永久丢失。重开只允许出现在 result.is_err() 分支。
     #[test]
@@ -1473,7 +1473,7 @@ mod tests {
         );
     }
 
-    // H1(替换导入关库早返不重开):import_data_zip 的 replace 分支与 D2 export
+    // 替换导入关库早返不重开:import_data_zip 的 replace 分支与 export
     // 同款病——close_database 后替换步骤若散布 `?` 早返,失败时既不重开库又已
     // 改掉设置,下次启动指向半替换目录。闭包收敛 + 无条件重开 + 设置后置。
     #[test]
@@ -1516,7 +1516,7 @@ mod tests {
         );
     }
 
-    // M1(ATTACH 导入无事务):merge_database 的各 merge_* 步骤(先 groups/favorites
+    // ATTACH 导入无事务:merge_database 的各 merge_* 步骤(先 groups/favorites
     // 再 clipboard/clipboard_data)必须包进同一个事务——任一失败时事务回滚,
     // 前面已落地的合并数据不残留,重复导入不会因半合并越积越多
     // (INSERT OR IGNORE 幂等只兜部分)。DETACH 必须在 commit 之后。
@@ -1553,7 +1553,7 @@ mod tests {
             commit_pos < detach_pos,
             "DETACH 必须位于 commit 之后(失败时事务回滚仍需 importdb)"
         );
-        // r7-db-4:删除墓碑必须并入合并——源库已删除记录不能在导入后复活。
+        // 删除墓碑必须并入合并——源库已删除记录不能在导入后复活。
         // 复用的 record_sync_tombstone_in_conn 自带 LWW 语义,必须出现在事务内。
         let tombstone_pos = body
             .find("record_sync_tombstone_in_conn")
@@ -1564,7 +1564,7 @@ mod tests {
         );
     }
 
-    // r7-db-2(merge id 映射错位):INSERT OR IGNORE 撞 uuid 唯一索引被忽略的行
+    // merge id 映射错位:INSERT OR IGNORE 撞 uuid 唯一索引被忽略的行
     // 不分配新 rowid,last_insert_rowid() 仍是上一条成功插入的 rowid——无条件
     // 取会把旧库 raw formats 挂到错误本地点。真实 id 必须按 uuid 回查已存在
     // 行(INSERT OR IGNORE 幂等合并的既有行)。反证:回退 last_insert_rowid
@@ -1596,8 +1596,8 @@ mod tests {
         }
     }
 
-    // M2(pin_images 数据孤儿):贴图目录必须走完整的"备份/导出/替换导入/合并"
-    // 四路闭环——D3 补过备份与清理侧清单,但 export_data_zip 只收 db +
+    // pin_images 数据孤儿:贴图目录必须走完整的"备份/导出/替换导入/合并"
+    // 四路闭环——备份与清理侧清单已补齐,但 export_data_zip 只收 db +
     // clipboard_images + image_library + app_icons,import replace/merge 也只
     // 处理这三目录,pin_images 成了"会被替换清掉、但导出包里没有"的数据孤儿。
     #[test]

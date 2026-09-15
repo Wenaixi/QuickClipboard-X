@@ -181,7 +181,7 @@ pub fn query_clipboard_items(params: QueryParams) -> Result<PaginatedResult<Clip
         || params.paste_status.as_ref().map(|s| s.split(',').any(|v| v.trim() == "pasted" || v.trim() == "unpasted")).unwrap_or(false);
     
     with_connection(|conn| {
-        // B6: where_clauses 改 Vec<String>,不再 Box::leak 泄漏字符串
+        // where_clauses 改 Vec<String>,不再 Box::leak 泄漏字符串
         let mut where_clauses = vec![];
         let mut query_params: Vec<Box<dyn rusqlite::ToSql>> = vec![];
 
@@ -220,7 +220,7 @@ pub fn query_clipboard_items(params: QueryParams) -> Result<PaginatedResult<Clip
         
         let total_count: i64 = if has_filter {
             let count_sql = format!("SELECT COUNT(*) FROM clipboard {}", where_clause);
-            // L4:COUNT 直接绑定 query_params 的真实值,不得先经 to_sql() 反射式
+            // COUNT 直接绑定 query_params 的真实值,不得先经 to_sql() 反射式
             // 深拷贝——旧实现对非文本参数(如 _sortId 深拷贝的数字项)会折叠成
             // 空串,让 COUNT 的 WHERE 比主查询的 WHERE 收到不同的值,分页总数
             // 与列表语义脱节。COUNT 执行时 query_params 只含 WHERE 文本参数,
@@ -876,7 +876,7 @@ pub fn limit_clipboard_history(max_count: u64) -> Result<(), String> {
         }
         drop(stmt);
 
-        // B3:裁剪删除必须写 tombstone——先收集待删记录的 (id, uuid),
+        // 裁剪删除必须写 tombstone——先收集待删记录的 (id, uuid),
         // 删除超出上限的记录若不通知云端/peers,切换设备会把已裁剪内容拉回,
         // 且另一端删除也无法传播删除语义。
         let mut tombstone_ids = Vec::new();
@@ -953,9 +953,9 @@ pub fn delete_clipboard_item(id: i64) -> Result<(), String> {
         let Some((image_ids, uuid)) = item else {
             return Ok(Vec::new());
         };
-        // B5:tombstone + DELETE 包同一事务,与 delete_clipboard_items 口径
+        // tombstone + DELETE 包同一事务,与 delete_clipboard_items 口径
         // 一致——否则崩溃/异常时可能只写墓碑不删记录(本地幽灵删除,云端会
-        // 删它但本地还在)或只删记录不写墓碑(云端残留,B3 同款问题)。
+        // 删它但本地还在)或只删记录不写墓碑(云端残留,裁剪同款问题)。
         let tx = conn.unchecked_transaction()?;
         let deleted_at = chrono::Local::now().timestamp();
         let tombstone_id = uuid.filter(|value| !value.trim().is_empty()).unwrap_or_else(|| id.to_string());
@@ -1184,7 +1184,7 @@ pub fn update_clipboard_item(
     content: String,
     html_content: Option<String>,
 ) -> Result<(), String> {
-    // L2:旧格式清理必须在同一事务内完成——UPDATE 提交后再清 raw formats
+    // 旧格式清理必须在同一事务内完成——UPDATE 提交后再清 raw formats
     // 失败(独立连接)会留下"新 content 配旧 formats"的不一致态,前端按新
     // 格式请求 clipboard_data 时找不到对应 raw,内容回退显示错乱。
     // 事务内直接 DELETE,UPDATE + 清理任一失败整体回滚,原子落地。
@@ -1279,11 +1279,11 @@ mod limit_zero_guard {
 mod upsert_null_uuid_guard {
     use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
 
-    // B2(NULL uuid 重复):upsert_history_records 的 existing 查询必须与
+    // NULL uuid 重复:upsert_history_records 的 existing 查询必须与
     // webdav_get_history_record_by_uuid 口径一致,含 NULL uuid 兜底分支——
     // 否则本地 uuid 为 NULL 的旧记录被上传(uuid 兜底成 id 字符串)后,对端
     // upsert 查 WHERE uuid=?1 匹配不到 NULL 行,INSERT 出重复行。
-    // L3(B2 只修了 NULL,漏 uuid='' 空串):reading 路径 :414 兜底是
+    // 修复只覆盖 NULL,漏 uuid='' 空串:reading 路径 :414 兜底是
     // (uuid IS NULL OR uuid = ''),upsert 也必须同样覆盖——某些导入/修复
     // 场景 uuid 会被写成空串而非 NULL,只兜 NULL 会漏,INSERT 出重复行。
     #[test]
@@ -1300,7 +1300,7 @@ mod upsert_null_uuid_guard {
         );
     }
 
-    // B2 配套:UPDATE 分支的 WHERE 同样要覆盖 NULL uuid 行,否则 existing
+    // UPDATE 分支的 WHERE 同样要覆盖 NULL uuid 行,否则 existing
     // 兜底命中的 NULL 行会被 UPDATE 更新 0 行,新值不落地。
     #[test]
     fn upsert_update_where_covers_null_uuid_rows() {
@@ -1321,7 +1321,7 @@ mod upsert_null_uuid_guard {
 mod limit_tombstone_guard {
     use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
 
-    // B3(裁剪不写 tombstone):limit_clipboard_history 删除超出上限的记录
+    // 裁剪不写 tombstone:limit_clipboard_history 删除超出上限的记录
     // 必须写 tombstone(collection=history,item_id=uuid 兜底 id)——否则云端/
     // peers 不知道这些记录已删,切换设备把已裁剪内容拉回,且另一端删除无法
     // 传播删除语义。裁剪是常态路径,不写墓碑等于删除永不扩散。
@@ -1340,7 +1340,7 @@ mod limit_tombstone_guard {
 mod single_delete_tx_guard {
     use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
 
-    // B5(单删无事务):delete_clipboard_item 的 tombstone + DELETE 必须包在
+    // 单删无事务:delete_clipboard_item 的 tombstone + DELETE 必须包在
     // 同一事务里——崩溃可能只写墓碑不删记录(本地幽灵删除)或只删记录不写
     // 墓碑(云端残留)。与 delete_clipboard_items 的既有事务路径对齐。
     #[test]
@@ -1371,7 +1371,7 @@ mod content_type_like_tests {
     use std::fs;
     use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
 
-    /// C25 护栏:content_type 过滤必须 like_pattern + ESCAPE,与搜索词路径一致。
+    /// 护栏:content_type 过滤必须 like_pattern + ESCAPE,与搜索词路径一致。
     #[test]
     fn query_clipboard_content_type_uses_like_pattern_with_escape() {
         let source = fs::read_to_string(format!(
@@ -1419,7 +1419,7 @@ mod content_type_like_tests {
         );
     }
 
-    /// L2 护栏:update_clipboard_item 的旧格式清理必须包进同一事务。
+    /// 护栏:update_clipboard_item 的旧格式清理必须包进同一事务。
     /// 原实现 UPDATE 提交后才调 delete_clipboard_data_items(独立连接),
     /// 清理失败时留下"新 content 配旧 formats"的不一致态;且 DELETE 必须
     /// 用 tx 内的执行器,禁止再调 with_connection 嵌套(死锁)。
@@ -1448,7 +1448,7 @@ mod content_type_like_tests {
         );
     }
 
-    /// L4 护栏:COUNT 参数必须直接复用 query_params(深拷贝会折叠非文本)。
+    /// 护栏:COUNT 参数必须直接复用 query_params(深拷贝会折叠非文本)。
     /// 旧实现对每个参数 to_sql() 反射:文本拷贝、其余折叠空串——选中项含
     /// 数字/整型(_sortId 深拷贝)时,WHERE 按原始值过滤、COUNT 按空串计数,
     /// 分页总数与列表语义脱节。COUNT 执行时 query_params 只含 WHERE 文本
@@ -1471,7 +1471,7 @@ mod content_type_like_tests {
         );
     }
 
-    /// B6 护栏:where_clauses 必须是 Vec<String>,禁止 Box::leak 泄漏字符串。
+    /// 护栏:where_clauses 必须是 Vec<String>,禁止 Box::leak 泄漏字符串。
     #[test]
     fn query_clipboard_where_clauses_are_strings_not_leaked() {
         let source = fs::read_to_string(format!(

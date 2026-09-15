@@ -204,7 +204,7 @@ pub fn received_files_dir() -> Result<PathBuf, String> {
     Ok(crate::services::get_data_directory()?.join("sync_transfer_files"))
 }
 
-// B7:清理接收目录残留的半写 .qcpart 临时文件——发送端中断/接收端进程崩溃
+// 清理接收目录残留的半写 .qcpart 临时文件——发送端中断/接收端进程崩溃
 // 时 prepare_received_file 创建的临时文件不会走到 rename/remove,下次启动
 // 服务前清扫,避免堆积占用磁盘。
 pub fn sweep_orphan_qcpart_files() -> Result<usize, String> {
@@ -346,7 +346,7 @@ fn is_valid_image_id(image_id: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    // B7 护栏:启动清扫函数必须存在且只清 .qcpart,不动 index.json 与正常文件。
+    // 护栏:启动清扫函数必须存在且只清 .qcpart,不动 index.json 与正常文件。
     #[test]
     fn sweep_orphan_qcpart_files_is_defined_and_targeted() {
         let source = std::fs::read_to_string(format!(
@@ -383,7 +383,7 @@ mod tests {
         );
     }
 
-    // B7 护栏:http_server::start 必须在监听前调用清扫函数。
+    // 护栏:http_server::start 必须在监听前调用清扫函数。
     #[test]
     fn http_server_start_sweeps_orphan_qcpart_first() {
         let source = std::fs::read_to_string(format!(
@@ -403,7 +403,7 @@ mod tests {
         let stop_pos = rest
             .find("pub async fn stop")
             .expect("缺 http_server stop");
-        // B7:以 stop 函数开头为界,取完整 start 函数体,不用固定字符窗口
+        // 以 stop 函数开头为界,取完整 start 函数体,不用固定字符窗口
         // (函数内注释剥除后行数不固定,魔数窗口会误切到监听行之外)。
         let body = &stripped[start..start + stop_pos];
         let sweep_pos = body
