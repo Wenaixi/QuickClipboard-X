@@ -575,21 +575,21 @@ pub fn hide_snapped_window(window: &WebviewWindow) -> Result<(), String> {
 
     let size = window.outer_size().map_err(|e| e.to_string())?;
     let (x, y, _, _) = crate::utils::positioning::get_window_bounds(window)?;
-    let snap_result = compute_snap_ratio(
-        window.app_handle(),
-        state.snap_edge,
-        x,
-        y,
-        size.width as i32,
-        size.height as i32,
-    );
-    let ratio = match snap_result {
-        Ok(r) => r,
-        Err(error) => match state.snap_ratio.or(settings.edge_snap_ratio) {
-            Some(r) => r,
-            None => return Err(error),
-        },
-    };
+    // r6-window-1:比例必须优先 state 稳定值,不能只在中途 compute 报错时才回退——
+    // cancel_pending_animation() 只停掉在飞 show 动画线程,窗口仍停在中间帧坐标,
+    // 以其计算比例会污染落盘(下次 show 位置偏移)。与 refresh_hidden_snapped_window
+    // 的 :654-664 同款:state.snap_ratio.or(settings).unwrap_or(compute)。
+    let ratio = state
+        .snap_ratio
+        .or(settings.edge_snap_ratio)
+        .unwrap_or(compute_snap_ratio(
+            window.app_handle(),
+            state.snap_edge,
+            x,
+            y,
+            size.width as i32,
+            size.height as i32,
+        )?);
     let resolved = resolve_hidden_position(
         window.app_handle(),
         state.snap_edge,
@@ -1446,7 +1446,11 @@ mod tests {
     // w2(动画中 toggle 污染贴边比例):hide_snapped_window 必须先
     // cancel_pending_animation 再读窗口坐标算比例——show 动画中 toggle hide,
     // 窗口停在中间帧坐标,若以其算 ratio 会落盘被污染(如 0.4 比例),下次
-    // show 从错误比例恢复。cancel 后窗口停在当前帧,ratio 走 state 稳定值。
+    // show 从错误比例恢复。cancel 后窗口停在当前帧。
+    // r6-window-1(修复不彻底):仅取消动画不够——比例必须优先 state 稳定值,
+    // 不能只在 compute 报错时回退。cancel 只停线程,窗口仍停在中间帧坐标,
+    // 以其计算比例照样污染落盘;state.snap_ratio.or(settings).unwrap_or(compute)
+    // 与 refresh_hidden_snapped_window 同款,中间帧坐标只在无任何记账时兜底。
     #[test]
     fn hide_snapped_window_cancels_in_flight_show_animation_before_ratio() {
         let body = strip_line_comments(fn_body(snap_source(), "hide_snapped_window"));
@@ -1456,12 +1460,25 @@ mod tests {
         let emit_pos = body
             .find("window.emit(\"edge-snap-hide\"")
             .expect("hide 必须发射 edge-snap-hide 事件");
-        let ratio_pos = body
+        let state_ratio_pos = body
+            .find("state\n        .snap_ratio")
+            .or_else(|| body.find(".snap_ratio"))
+            .expect("hide 必须从 state 取稳定比例");
+        let compute_pos = body
             .find("compute_snap_ratio(")
-            .expect("hide 必须计算贴边比例");
+            .expect("hide 必须保留 compute_snap_ratio 兜底");
         assert!(
-            cancel_pos < emit_pos && cancel_pos < ratio_pos,
-            "cancel_pending_animation 必须早于任何坐标读取(emit 与 compute_snap_ratio)"
+            cancel_pos < emit_pos && cancel_pos < state_ratio_pos,
+            "cancel_pending_animation 必须早于任何坐标读取(emit 与状态比例记账)"
+        );
+        assert!(
+            state_ratio_pos < compute_pos,
+            "state.snap_ratio 稳定值必须优先于 compute_snap_ratio(中间帧坐标兜底)"
+        );
+        // 禁止旧的"仅在 compute 报错回退"形态(取消动画后仍以中间帧坐标算比例)
+        assert!(
+            !body.contains("let ratio = match snap_result"),
+            "禁止 match snap_result 的半修复:中间帧坐标仍会污染稳定比例"
         );
     }
 }
