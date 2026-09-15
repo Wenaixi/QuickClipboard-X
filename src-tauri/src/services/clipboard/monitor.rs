@@ -316,7 +316,13 @@ fn spawn_capture_worker_loop() {
             }
         }
 
-        CAPTURE_IN_FLIGHT.store(false, Ordering::SeqCst);
+        // 尾处理放在循环之外仍属本 worker:只有在飞标志仍归本代所有时
+        // 才复位——旧代 worker 完成捕获时 stop→start 已推进代数,这里
+        // 不得清掉新代 worker 拉起的在飞标志,否则下一次事件 CAS 又拉起
+        // 第三个 worker,新旧代并发 OpenClipboard 丢项。
+        if GENERATION.load(Ordering::SeqCst) == worker_generation {
+            CAPTURE_IN_FLIGHT.store(false, Ordering::SeqCst);
+        }
 
         // 防止退出与新事件到达之间的竞态，必要时再拉起下一轮 worker。
         if CAPTURE_PENDING.swap(false, Ordering::SeqCst) {
@@ -593,6 +599,22 @@ mod tests {
         assert!(
             stop_body.contains("CAPTURE_IN_FLIGHT.store(false,"),
             "stop 必须复位在飞标志,否则 CAS 永久失败、监控停摆"
+        );
+
+        // worker 尾部:在飞标志复位必须受代数保护——旧代 worker 完成捕获
+        // 后若无条件 store(false),stop→start 后它会把新代 worker 拉起的
+        // 在飞标志清掉,下一次事件 CAS 又拉起第三个 worker,新旧代并发
+        // OpenClipboard 丢项。只有仍处于自己代次时才允许复位。用下标
+        // 比较锁死"代数守卫在 store(false) 之前"(contains 区分不了顺序)。
+        let store_pos = worker_body
+            .find("CAPTURE_IN_FLIGHT.store(false,")
+            .expect("worker 尾部必须有在飞标志复位");
+        let guard_pos = worker_body
+            .find("if GENERATION.load(Ordering::SeqCst) == worker_generation")
+            .expect("worker 尾部复位前必须有代数校验守卫");
+        assert!(
+            guard_pos < store_pos,
+            "代数校验守卫必须出现在 store(false) 之前,否则旧代清掉新代在飞标志"
         );
     }
 
