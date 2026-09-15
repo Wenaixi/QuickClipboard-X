@@ -31,9 +31,30 @@ pub fn normalize_path_for_hash(path: &str) -> String {
     normalized
 }
 
+// 检查路径是否含 . / .. 段——含父目录段的输入不得用于拼接解析，
+// 否则词法拼接后 starts_with(data_dir) 在 `..` 未折叠时必然通过，
+// 恶意同步记录可把 data_dir 之外任意路径解析出来。
+// 按分隔符拆段判断：`file..txt` 是单个 Normal 段算安全，
+// 只有独立成段的 `.`/`..` 才命中（LastIteration 等 Windows 特殊段不在此列）。
+fn contains_parent_segments(path: &str) -> bool {
+    use std::path::{Component, Path};
+    Path::new(path)
+        .components()
+        .any(|c| matches!(c, Component::CurDir | Component::ParentDir))
+}
+
 // 解析存储的路径为实际绝对路径
 pub fn resolve_stored_path(stored_path: &str) -> String {
     let normalized_input = stored_path.replace("/", "\\");
+
+    // 目录穿越防线：任何含 . / .. 段的输入直接返回空串，不参与拼接。
+    // 两条 `..` 折叠后的 starts_with(&data_dir) 词法比较在 Windows 上
+    // 无法可靠折叠（Path::starts_with 是组件级词法比较，Data 段不会展开），
+    // 统一在拼接前拦截父目录段最稳。返回空串而非原始输入——原始串带 ..
+    // 会被下游 fs::read 跟随，读到 data_dir 之外任意文件。
+    if contains_parent_segments(&normalized_input) {
+        return String::new();
+    }
 
     if normalized_input.starts_with("clipboard_images\\")
         || normalized_input.starts_with("pin_images\\")
@@ -200,6 +221,19 @@ mod tests {
         // —— 不强制改,setup 语义是"若是 portable 构建则落 flag",不是 runtime 检测
     }
 
+    // 提取 resolve_stored_path 的函数体(剥注释后)
+    fn resolve_stored_path_body() -> String {
+        let src = bare_source("services/mod.rs");
+        let start = src
+            .find("pub fn resolve_stored_path")
+            .expect("缺 resolve_stored_path");
+        let end = src[start..]
+            .find("\npub fn ")
+            .map(|i| start + i)
+            .unwrap_or(src.len());
+        src[start..end].to_string()
+    }
+
     #[test]
     fn resolve_stored_path_guards_against_parent_traversal() {
         // 以固定子目录开头的输入必须解析回 data_dir 之下;含父目录段时回退原样
@@ -212,6 +246,47 @@ mod tests {
             count >= 2,
             "resolve_stored_path 必须对两条拼接路径都做 starts_with(data_dir) 校验,实际 {}",
             count
+        );
+    }
+
+    #[test]
+    fn resolve_stored_path_rejects_parent_segments_before_resolving() {
+        // 目录穿越反证:data_dir.join("clipboard_images\\..\\..\\evil") 的
+        // starts_with(&data_dir) 是词法前缀比较,`..` 段未折叠时必然通过,
+        // 且 Reject 后 fallback 若返回原始串,下游 fs::read 仍会跟随 `..`
+        // 读到 data_dir 之外任意文件。修复必须在拼接前拦截独立成段的
+        // `.`/`..`(用 Component::ParentDir/CurDir,避免误伤 file..txt),
+        // 拒绝时返回空串视为不存在。
+        let whole = bare_source("services/mod.rs");
+        let helper_start = whole
+            .find("fn contains_parent_segments")
+            .expect("必须提供父目录段检测函数");
+        let helper_end = whole[helper_start..]
+            .find("\n}\n")
+            .map(|i| helper_start + i + 2)
+            .unwrap_or(whole.len());
+        let helper = &whole[helper_start..helper_end];
+        assert!(
+            helper.contains("Component::ParentDir") && helper.contains("Component::CurDir"),
+            "父目录段检测必须覆盖 ParentDir 与 CurDir 组件"
+        );
+        // 检测必须在 resolve_stored_path 的拼接分支之前定义/可达
+        let body = resolve_stored_path_body();
+        let reject_pos = body
+            .find("contains_parent_segments(&normalized_input)")
+            .expect("拼接前必须调用父目录段检测");
+        let prefix_pos = body
+            .find("starts_with(\"clipboard_images")
+            .expect("缺前缀直拼分支");
+        assert!(
+            reject_pos < prefix_pos,
+            "父目录段拒绝必须早于任何拼接分支,否则恶意 .. 已参与候选路径"
+        );
+        // 拒绝分支必须返回空串,不能回退原始串——原始串带 .. 会被下游读取
+        let reject_seg = &body[reject_pos..prefix_pos];
+        assert!(
+            reject_seg.contains("String::new()"),
+            "拒绝父目录段必须返回空串,禁止回退原始输入(下游 fs::read 会跟随 ..)"
         );
     }
 }
