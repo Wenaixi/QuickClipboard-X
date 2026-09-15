@@ -15,7 +15,15 @@ pub async fn pull_from_peer(device_id: &str) -> Result<SyncReport, String> {
     report.pulled_groups += tombstone_report.groups;
     report.pulled += tombstone_report.total();
 
-    let history = super::http_client::fetch_peer_history_records(&peer).await?;
+    // s3:LAN pull 必须按 since 增量拉取——全量拉取在记录数增长后每次同步
+    // 都拉全表,且对端 list_history_records_since(since) 已支持增量,客户端
+    // 不带 since 就等于丢弃了服务端的差量能力。增量点取本地 MAX(updated_at):
+    // 更早的已落地记录再拉也不会被 upsert 改动(幂等),只省带宽与会话时长。
+    let history = super::http_client::fetch_peer_history_records(
+        &peer,
+        crate::services::database::lan_local_history_max_updated_at()?,
+    )
+    .await?;
     let history_records = crate::services::database::filter_records_not_deleted(
         crate::services::database::COLLECTION_HISTORY,
         &history.records,
@@ -28,7 +36,11 @@ pub async fn pull_from_peer(device_id: &str) -> Result<SyncReport, String> {
         .pulled_items
         .extend(changed_history.iter().map(|record| record.report_item("clipboard")));
 
-    let favorites = super::http_client::fetch_peer_favorite_records(&peer).await?;
+    let favorites = super::http_client::fetch_peer_favorite_records(
+        &peer,
+        crate::services::database::lan_local_favorites_max_updated_at()?,
+    )
+    .await?;
     let favorite_records = crate::services::database::filter_records_not_deleted(
         crate::services::database::COLLECTION_FAVORITES,
         &favorites.records,
@@ -88,5 +100,50 @@ async fn fetch_missing_images_best_effort(
             Ok(None) => {}
             Err(e) => eprintln!("[局域网同步] 拉取图片失败 image_id={} 错误={}", image_id, e),
         }
+    }
+}
+
+#[cfg(test)]
+mod lan_incremental_pull_guard {
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+    // s3(LAN pull 全量):pull_from_peer 必须按 since 增量——对端
+    // list_*_records_since(since) 早已支持,客户端不带 since 每次同步拉全表,
+    // 记录增长后带宽与会话时长线性膨胀。增量点 = 本地 MAX(updated_at)。
+    #[test]
+    fn pull_passess_local_max_updated_at_as_since() {
+        let src = strip_line_comments(&source_file("src/services/sync_transfer/lan/pull.rs"));
+        let body = fn_body(&src, "pull_from_peer");
+        for (fetch, since_fn) in [
+            (
+                "fetch_peer_history_records",
+                "lan_local_history_max_updated_at",
+            ),
+            (
+                "fetch_peer_favorite_records",
+                "lan_local_favorites_max_updated_at",
+            ),
+        ] {
+            let fetch_pos = body.find(fetch).unwrap_or_else(|| {
+                panic!("pull 必须调用 {}", fetch)
+            });
+            let since_pos = body
+                .find(since_fn)
+                .unwrap_or_else(|| panic!("{} 必须传入 {}", fetch, since_fn));
+            assert!(
+                since_pos > fetch_pos && since_pos < fetch_pos + 600,
+                "{} 必须紧跟本地 MAX(updated_at) 增量起点",
+                fetch
+            );
+        }
+        // 负向:禁止裸全量调用(不带 since 参数)
+        assert!(
+            !body.contains("authorized_get(peer, \"/qc-sync/records/history\")"),
+            "历史拉取禁止裸全量调用,必须带 since"
+        );
+        assert!(
+            !body.contains("authorized_get(peer, \"/qc-sync/records/favorites\")"),
+            "收藏拉取禁止裸全量调用,必须带 since"
+        );
     }
 }

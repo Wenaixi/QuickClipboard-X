@@ -14,6 +14,26 @@ pub use tombstones::*;
 
 /// 把用户搜索词转成带两侧 % 的 LIKE 模式,并转义 \, %, _ 三个通配符。
 /// 配合 SQL 端 `ESCAPE '\\'` 使用,避免用户输入 `%`/`_` 被当成通配符。
+// s3 增量 pull 的本地锚点:本地历史/收藏的 MAX(updated_at),作为下次
+// 拉取的 since——更早记录已落地,重拉幂等,只省带宽与会话时长。
+pub fn lan_local_history_max_updated_at() -> Result<Option<i64>, String> {
+    connection::with_connection(|conn| {
+        Ok(conn.query_row("SELECT COALESCE(MAX(updated_at), 0) FROM clipboard", [], |row| {
+            row.get::<_, i64>(0)
+        })?)
+    })
+    .map(|max_ts| if max_ts > 0 { Some(max_ts) } else { None })
+}
+
+pub fn lan_local_favorites_max_updated_at() -> Result<Option<i64>, String> {
+    connection::with_connection(|conn| {
+        Ok(conn.query_row("SELECT COALESCE(MAX(updated_at), 0) FROM favorites", [], |row| {
+            row.get::<_, i64>(0)
+        })?)
+    })
+    .map(|max_ts| if max_ts > 0 { Some(max_ts) } else { None })
+}
+
 pub fn like_pattern(input: &str) -> String {
     let escaped = input
         .replace('\\', "\\\\")

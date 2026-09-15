@@ -133,12 +133,18 @@ pub async fn fetch_peer_snapshot(peer: &super::peer_store::PairedPeer) -> Result
     authorized_get(peer, "/qc-sync/snapshot").await
 }
 
-pub async fn fetch_peer_history_records(peer: &super::peer_store::PairedPeer) -> Result<super::LanRecordBatch, String> {
-    authorized_get(peer, "/qc-sync/records/history").await
+pub async fn fetch_peer_history_records(
+    peer: &super::peer_store::PairedPeer,
+    since_updated_at: Option<i64>,
+) -> Result<super::LanRecordBatch, String> {
+    authorized_get_since(peer, "/qc-sync/records/history", since_updated_at).await
 }
 
-pub async fn fetch_peer_favorite_records(peer: &super::peer_store::PairedPeer) -> Result<super::LanRecordBatch, String> {
-    authorized_get(peer, "/qc-sync/records/favorites").await
+pub async fn fetch_peer_favorite_records(
+    peer: &super::peer_store::PairedPeer,
+    since_updated_at: Option<i64>,
+) -> Result<super::LanRecordBatch, String> {
+    authorized_get_since(peer, "/qc-sync/records/favorites", since_updated_at).await
 }
 
 pub async fn fetch_peer_groups(peer: &super::peer_store::PairedPeer) -> Result<super::LanGroupBatch, String> {
@@ -373,6 +379,18 @@ impl<R: AsyncRead + Unpin> AsyncRead for ProgressHashReader<R> {
         }
         poll
     }
+}
+
+async fn authorized_get_since<T: serde::de::DeserializeOwned>(
+    peer: &super::peer_store::PairedPeer,
+    path: &str,
+    since_updated_at: Option<i64>,
+) -> Result<T, String> {
+    let url = match since_updated_at {
+        Some(since) => format!("{}?since={}", path, since),
+        None => path.to_string(),
+    };
+    authorized_get(peer, &url).await
 }
 
 async fn authorized_get<T: serde::de::DeserializeOwned>(peer: &super::peer_store::PairedPeer, path: &str) -> Result<T, String> {
