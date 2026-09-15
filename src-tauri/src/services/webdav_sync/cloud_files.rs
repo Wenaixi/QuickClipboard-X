@@ -256,9 +256,13 @@ pub async fn download_file(client: &WebdavClient, file_id: &str) -> Result<Cloud
         });
     }
 
+    // 临时下载文件必须带唯一后缀——纯按目标扩展名推导的 temp 路径在并发
+    // 下载同一目标时互相覆盖对方 .qcpart,一个下载删掉另一个的进行中文件。
+    // uuid 后缀保证互不冲突;残留 .qcpart 由下一次下载同名时清掉,不留历史。
     let temp = target.with_extension(format!(
-        "{}.qcpart",
-        target.extension().and_then(|value| value.to_str()).unwrap_or("tmp")
+        "{}.{}.qcpart",
+        target.extension().and_then(|value| value.to_str()).unwrap_or("tmp"),
+        Uuid::new_v4().simple(),
     ));
     if temp.exists() {
         let _ = std::fs::remove_file(&temp);
@@ -616,4 +620,29 @@ fn sha256_file(path: &Path) -> Result<String, String> {
     std::io::copy(&mut file, &mut hasher)
         .map_err(|e| format!("计算文件校验值失败: {}", e))?;
     Ok(hex::encode(hasher.finalize()))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+    // 并发下载同一目标文件时,temp 路径若只按扩展名推导,fetch 的文件会被
+    // 对方的 remove_file 清掉。uuid 后缀保证每个下载使用独立 temp 文件。
+    #[test]
+    fn download_file_temp_path_includes_unique_uuid() {
+        let src = strip_line_comments(&source_file("src/services/webdav_sync/cloud_files.rs"));
+        let body = fn_body(&src, "download_file");
+        let temp_pos = body
+            .find("let temp = target.with_extension")
+            .expect("下载必须构造临时文件路径");
+        let ext_seg = &body[temp_pos..];
+        assert!(
+            ext_seg.contains("Uuid::new_v4()"),
+            "temp 路径必须含唯一 uuid,否则并发下载同一目标互相覆盖 .qcpart"
+        );
+        assert!(
+            ext_seg.contains("qcpart"),
+            "临时文件必须带 .qcpart 后缀标记进行中下载"
+        );
+    }
 }
