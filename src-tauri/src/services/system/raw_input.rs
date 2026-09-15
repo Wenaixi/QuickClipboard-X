@@ -277,16 +277,6 @@ mod windows_raw_input {
                 if (button_flags & RI_MOUSE_MIDDLE_BUTTON_DOWN) != 0 {
                     handle_middle_button_down_impl();
                 }
-
-                if (button_flags & RI_MOUSE_WHEEL) != 0 {
-                    let delta = mouse.Anonymous.Anonymous.usButtonData as i16 as i32;
-                    if delta != 0 {
-                        let dy = delta as i64;
-                        input_common::run_on_main_thread(move || {
-                            handle_wheel_event_impl(dy);
-                        });
-                    }
-                }
             }
             // 键盘
             1 => {
@@ -538,8 +528,11 @@ mod windows_raw_input {
 
         let secondary_vk = QUICKPASTE_SECONDARY_KEY_VK.load(Ordering::Relaxed);
         if secondary_vk == 0 {
-            QUICKPASTE_SECONDARY_KEY_VK.store(vk, Ordering::Relaxed);
-        } else if vk != secondary_vk {
+            // 快捷键只有修饰键组合时无副键——不允许把任意按键兜底充当
+            // 触发键,否则按住空格/字母即开始切换条目,误触频发。
+            return;
+        }
+        if vk != secondary_vk {
             return;
         }
 
@@ -682,9 +675,6 @@ mod windows_raw_input {
         }
 
         false
-    }
-
-    fn handle_wheel_event_impl(_delta_y: i64) {
     }
 
     fn current_unix_ms() -> u64 {
@@ -1205,6 +1195,52 @@ mod windows_raw_input_tests {
         assert!(
             all_pos < hide_pos,
             "必须先在 all_released 成立后才触发隐藏"
+        );
+    }
+
+    // 护栏:快捷键只有修饰键组合(无副键)时,不得把任意按键兜底存为
+    // 副键——否则按住空格/字母即开始切换条目。必须:副键为 0 时直接
+    // 返回,且函数体内不得出现把 vk 写进副键寄存器的兜底代码。
+    #[test]
+    fn no_secondary_key_does_not_fallback_to_arbitrary_key() {
+        use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+        let src = strip_line_comments(&source_file("src/services/system/raw_input.rs"));
+        let body = fn_body(&src, "handle_quickpaste_secondary_key_down");
+        // 无副键早退必须发生在 repeat 之前
+        let zero_pos = body
+            .find("secondary_vk == 0")
+            .expect("必须判断无副键情况");
+        let repeat_pos = body
+            .find("start_quickpaste_secondary_repeat")
+            .expect("候选副键按下后应进入切换逻辑");
+        assert!(
+            zero_pos < repeat_pos,
+            "无副键早退必须发生在 repeat 之前"
+        );
+        // 禁止任意键兜底:不得把任意按键 vk 写进副键寄存器
+        assert!(
+            !body.contains("QUICKPASTE_SECONDARY_KEY_VK.store(vk"),
+            "禁止把任意按键兜底存为副键——按住任意键即切换条目"
+        );
+    }
+
+    // 护栏:滚轮事件不得派发到空实现(曾有每次滚轮都跨线程投递一次
+    // 空调用,纯浪费)。删除 wheel 派发与空函数后,生产代码区域不应
+    // 再出现 adapter 调用或定义。检查范围限定在测试模块(本模块声明)
+    // 之前,避免护栏自身字符串字面量误命中。
+    #[test]
+    fn wheel_event_has_no_empty_dispatch() {
+        use crate::services::system::hotkey::test_utils::{source_file, strip_line_comments};
+
+        let src = strip_line_comments(&source_file("src/services/system/raw_input.rs"));
+        let prod_end = src
+            .find("mod windows_raw_input_tests")
+            .unwrap_or(src.len());
+        let prod = &src[..prod_end];
+        assert!(
+            !prod.contains("handle_wheel_event_impl"),
+            "生产代码不得存在 wheel 空处理实现——每次滚轮跨线程投递空调用是纯浪费"
         );
     }
 }
