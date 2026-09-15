@@ -338,9 +338,19 @@ pub async fn save_pin_image_as(app: AppHandle, window: WebviewWindow) -> Result<
 }
 
 // 关闭预览窗口
+// r6-window-2:close/remove 同样纳入 PREVIEW_WINDOW_LOCK 串行化——否则建窗
+// 流程(pin_image_from_file 预览分支)await create_pin_image_window 期间,并发的
+// close_image_preview 可移除刚 insert 的 PinImageData 并关旧窗,建窗完成新窗
+// show 后其前端 get_pin_image_data 读 map 为空返回 Err,预览窗空屏+穿透残留。
+// 该函数是同步 fn,阻塞持有锁极短,不会拖慢建窗流程。
 #[tauri::command]
 pub fn close_image_preview(app: AppHandle) -> Result<(), String> {
     let label = "image-preview";
+    let _preview_guard = if app.get_webview_window(label).is_some() {
+        Some(PREVIEW_WINDOW_LOCK.get_or_init(|| tokio::sync::Mutex::new(())).lock())
+    } else {
+        None
+    };
     if let Some(window) = app.get_webview_window(label) {
         lock_pin_data().remove(label);
         let _ = window.hide();
@@ -442,6 +452,7 @@ pub fn animate_window_resize(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
 
     // §11.2:全局静态测试串行化(同 §7.12 state.rs SERIAL 模式)
     static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -642,6 +653,36 @@ mod tests {
         assert!(
             body.contains("Some(PREVIEW_WINDOW_LOCK"),
             "取锁必须位于 if is_preview 的 Some 分支(非预览为 None)"
+        );
+    }
+
+    // r6-window-2(close 未纳入串行化):close_image_preview 的 remove+close 必须
+    // 与 pin_image_from_file 预览分支共用同一把 PREVIEW_WINDOW_LOCK——否则建窗
+    // 流程 await create_pin_image_window 期间并发的 close(菜单 mouseleave/主窗
+    // 隐藏路径)可移除刚 insert 的数据并关旧窗,建窗完成新窗 show 后前端
+    // get_pin_image_data 读 map 空返回 Err,预览窗空屏+穿透残留。close 是同步
+    // fn,阻塞持有锁极短,不拖慢建窗。反证:删 close 的取锁块 → FAILED。
+    #[test]
+    fn close_image_preview_serialized_under_preview_lock() {
+        let src = strip_line_comments(&source_file("src/windows/pin_image_window/pin_image_window.rs"));
+        let close_body = fn_body(&src, "close_image_preview");
+        let lock_pos = close_body
+            .find("PREVIEW_WINDOW_LOCK")
+            .expect("close_image_preview 必须取 PREVIEW_WINDOW_LOCK 串行化");
+        let remove_pos = close_body
+            .find("lock_pin_data().remove(label)")
+            .expect("close 必须移除数据");
+        let close_call_pos = close_body
+            .find(".close()")
+            .expect("close 必须关闭窗口");
+        assert!(
+            lock_pos < remove_pos && remove_pos < close_call_pos,
+            "close_image_preview 必须先取锁再 remove 再 close(与建窗流程互斥)"
+        );
+        // 负向:不能先 remove 再取锁(取锁必须在 remove 之前)
+        assert!(
+            !close_body[..lock_pos].contains("lock_pin_data().remove(label)"),
+            "取锁必须早于数据移除"
         );
     }
 }
