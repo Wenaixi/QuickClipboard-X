@@ -424,7 +424,14 @@ fn start_cursor_passthrough_monitor(window: WebviewWindow, session_id: u64) {
         let _ = app.run_on_main_thread(move || {
             let _ = window_for_task.set_ignore_cursor_events(false);
         });
-        super::clear_menu_regions();
+        // w1:只在会话仍属于本线程时才清区域——while 循环可能因会话被新
+        // 菜单接管(next_menu_session_id 推进 + set_active_menu_session)而
+        // 退出,此时新会话刚 update_menu_regions 写入的区域属于新菜单,
+        // 旧线程无条件 clear 会把新菜单的穿透区域一并清掉,新菜单穿透
+        // 计算全失效。
+        if super::get_active_menu_session() == session_id {
+            super::clear_menu_regions();
+        }
     });
 }
 
@@ -566,4 +573,43 @@ pub async fn show_menu(
     super::clear_active_menu_session(session_id);
     super::clear_options_for_session(session_id);
     Ok(result)
+}
+
+#[cfg(test)]
+mod w1_menu_region_guard {
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+    // w1(区域被旧会话线程误清):start_cursor_passthrough_monitor 退出时必须
+    // 只在"活跃会话仍是本线程 session"时才 clear_menu_regions——while 退出
+    // 可能因为新菜单接管,此时区域已被新会话写入,无条件清会连新菜单的
+    // 穿透区域一起清掉。
+    #[test]
+    fn passthrough_monitor_clears_regions_only_for_own_session() {
+        let src = strip_line_comments(&source_file("src/windows/plugins/context_menu/window.rs"));
+        let body = fn_body(&src, "start_cursor_passthrough_monitor");
+        // 退出循环后的收尾段必须存在会话比对
+        let clear_pos = body
+            .find("clear_menu_regions()")
+            .expect("收尾必须清菜单区域");
+        // 比对必须位于 clear 之前且引用同一 session_id
+        let cmp_pos = body
+            .find("super::get_active_menu_session() == session_id")
+            .expect("清区域前必须比对活跃会话仍属本线程");
+        assert!(
+            cmp_pos < clear_pos,
+            "必须先在会话仍属本线程时才 clear_menu_regions"
+        );
+        // 负向:比对之前不得再出现裸 clear_menu_regions(清区域)——修复后
+        // 唯一一次调用被 `if super::get_active_menu_session() == session_id`
+        // 守卫,且该 if 的 `{` 就在调用同一行(无重排余地)。
+        assert!(
+            !body[..cmp_pos].contains("clear_menu_regions()"),
+            "clear_menu_regions 必须被会话比对守卫"
+        );
+        let guarded = &body[cmp_pos..clear_pos + "super::clear_menu_regions();".len()];
+        assert!(
+            guarded.contains("if super::get_active_menu_session() == session_id {"),
+            "clear_menu_regions 必须位于 if 会话比对分支内"
+        );
+    }
 }
