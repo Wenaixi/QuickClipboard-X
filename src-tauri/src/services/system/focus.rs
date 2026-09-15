@@ -81,6 +81,33 @@ pub fn focus_clipboard_window(window: WebviewWindow) -> Result<(), String> {
 
 // 仅保存当前焦点（手动）
 pub fn save_current_focus(_app_handle: tauri::AppHandle) -> Result<(), String> {
+    // hk3:由 no-op 改为真正捕获当前前台窗口——focus_callback 的前台切换
+    // 事件在自身窗口聚焦时被过滤,LAST_FOCUS_HWND 停留"最后外部窗口"状态;
+    // 但连续快速切换或事件钩子未送达时,主动抓一次保证 restore 目标最新。
+    #[cfg(windows)]
+    {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetClassNameW, GetForegroundWindow, GetWindowTextW,
+        };
+        unsafe {
+            let hwnd = GetForegroundWindow();
+            if !hwnd.0.is_null() {
+                let hwnd_val = hwnd.0 as isize;
+                if !EXCLUDED_HWNDS.lock().contains(&hwnd_val) {
+                    let mut class_buf = [0u16; 256];
+                    let mut name_buf = [0u16; 256];
+                    let class_len = GetClassNameW(hwnd, &mut class_buf);
+                    let name_len = GetWindowTextW(hwnd, &mut name_buf);
+                    let class_name =
+                        String::from_utf16_lossy(&class_buf[..class_len as usize]);
+                    let name = String::from_utf16_lossy(&name_buf[..name_len as usize]);
+                    if !is_ignored_foreground_window(&class_name, &name) {
+                        *LAST_FOCUS_HWND.lock() = Some(hwnd_val);
+                    }
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -101,14 +128,18 @@ pub fn restore_last_focus() -> Result<(), String> {
                 unsafe {
                     let _ = SetForegroundWindow(HWND(hwnd_val as *mut c_void));
                 }
+                // hk2:仅在焦点真正归还给外部窗口后恢复执行粘贴热键——输入框
+                // 聚焦期间的挂起(SUSPENDED)记录的是"输入域仍需独占 Enter";
+                // 若 LAST_FOCUS_HWND 无有效窗口或归还失败,挂起保持,避免
+                // 输入框仍在聚焦时全局 Enter 截走输入法组合提交。
+                crate::hotkey::resume_execute_item_hotkey();
             } else {
                 *LAST_FOCUS_HWND.lock() = None;
             }
         }
-        crate::hotkey::resume_execute_item_hotkey();
         Ok(())
     }
-    
+
     #[cfg(not(windows))]
     {
         crate::hotkey::resume_execute_item_hotkey();
@@ -246,6 +277,36 @@ fn start_win_event_hook() {
     }
 }
 
+// hk4:前台窗口忽略过滤器——focus_callback 与 save_current_focus 共用。
+// 除系统托盘/弹层/主窗口/设置/菜单外,补齐全部自身窗口标题:文本编辑器、
+// 贴图、收件盒、便捷粘贴、文件盒、更新、拖放接收层、快速剪贴板(低内存面板)。
+// 缺失时这些窗口聚焦会被记为 LAST_FOCUS_HWND,恢复焦点把焦点设回隐藏自身窗口。
+#[cfg(windows)]
+fn is_ignored_foreground_window(class_name: &str, name: &str) -> bool {
+    class_name == "Shell_TrayWnd"
+        || class_name == "Shell_SecondaryTrayWnd"
+        || class_name == "NotifyIconOverflowWindow"
+        || class_name == "TopLevelWindowForOverflowXamlIsland"
+        || class_name == "tray_icon_app"
+        || class_name.starts_with("Windows.UI.")
+        || class_name == "#32768"
+        || class_name == "DropDown"
+        || class_name == "Xaml_WindowedPopupClass"
+        || name == "快速剪贴板"
+        // A3:设置窗口标题含"设置 - 快速剪贴板",名字以"设置"开头即视为自身
+        // 窗口——主窗口在设置页聚焦时聚焦事件若被过滤,导航键仍注册,
+        // Tab/方向键会被 RegisterHotKey 吞掉,设置界面无法键盘移动光标。
+        || name.starts_with("设置")
+        || name == "菜单"
+        || name.starts_with("文本编辑器")
+        || name == "贴图"
+        || name == "收件盒"
+        || name == "便捷粘贴"
+        || name.starts_with("文件盒")
+        || name == "更新"
+        || name == "拖放接收层"
+}
+
 #[cfg(windows)]
 unsafe extern "system" fn focus_callback(
     _hook: windows::Win32::UI::Accessibility::HWINEVENTHOOK,
@@ -281,26 +342,12 @@ unsafe extern "system" fn focus_callback(
     let name_len = GetWindowTextW(hwnd, &mut name_buf);
     let class_name = String::from_utf16_lossy(&class_buf[..class_len as usize]);
     let name = String::from_utf16_lossy(&name_buf[..name_len as usize]);
-    
-    // 过滤窗口
-    if class_name == "Shell_TrayWnd"
-        || class_name == "Shell_SecondaryTrayWnd"
-        || class_name == "NotifyIconOverflowWindow"
-        || class_name == "TopLevelWindowForOverflowXamlIsland"
-        || class_name == "tray_icon_app"
-        || class_name.starts_with("Windows.UI.")
-        || class_name == "#32768"
-        || class_name == "DropDown"
-        || class_name == "Xaml_WindowedPopupClass"
-        || name == "快速剪贴板"
-        // A3:设置窗口标题含"设置 - 快速剪贴板",名字以"设置"开头即视为自身
-        // 窗口——主窗口在设置页聚焦时聚焦事件若被过滤,导航键仍注册,
-        // Tab/方向键会被 RegisterHotKey 吞掉,设置界面无法键盘移动光标。
-        || name.starts_with("设置")
-        || name == "菜单" {
+
+    // 过滤窗口:所有自身窗口 + 系统托盘/弹层统一走 is_ignored_foreground_window
+    if is_ignored_foreground_window(&class_name, &name) {
         return;
     }
-    
+
     *LAST_FOCUS_HWND.lock() = Some(hwnd_val);
 
     crate::services::system::hotkey::sync_hotkeys_for_foreground();
@@ -353,6 +400,64 @@ mod tests {
         }
     }
 
+    // hk2(焦点未归还仍挂起执行键):restore_last_focus 必须在焦点成功归还外部
+    // 窗口后(SetForegroundWindow 之后)才恢复执行粘贴热键——输入框聚焦期间
+    // 挂起的 EXECUTE_ITEM_HOTKEY_SUSPENDED 记录"输入域仍需独占 Enter";
+    // 若 LAST_FOCUS_HWND 无有效窗口(记录为空),挂起保持,避免全局 Enter
+    // 在输入框仍聚焦时截走输入法组合提交。
+    #[test]
+    fn restore_last_focus_resumes_execute_item_only_after_successful_foreground() {
+        let src = strip_line_comments(&focus_source());
+        let b = fn_body(&src, "restore_last_focus");
+        let resume_pos = b
+            .find("resume_execute_item_hotkey()")
+            .expect("restore_last_focus 必须含恢复执行键调用");
+        let set_pos = b
+            .find("SetForegroundWindow(HWND(hwnd_val as *mut c_void));")
+            .expect("restore_last_focus 必须设置前台窗口");
+        let else_seg = &b[set_pos..];
+        let else_pos = else_seg
+            .find("} else {")
+            .expect("IsWindow 有效分支必须带 else 分支");
+        // resume 必须位于 SetForegroundWindow 与 else 之间,即"焦点归还成功
+        // 分支"内——旧实现 resume 在 if 块外无条件调用(SUSPENDED 记录
+        // "输入域仍需独占 Enter"被静默清掉,输入框仍聚焦时全局 Enter 截输入法)。
+        let success_branch = &b[set_pos..set_pos + else_pos];
+        assert!(
+            success_branch.contains("resume_execute_item_hotkey()"),
+            "执行键恢复必须位于焦点归还成功分支内(SetForegroundWindow 与 else 之间),\
+             禁止 if 块外无条件恢复"
+        );
+        let iswindow_pos = b
+            .find("IsWindow(")
+            .expect("restore_last_focus 必须校验句柄有效性");
+        assert!(
+            iswindow_pos < resume_pos,
+            "执行键恢复必须位于 IsWindow 有效分支内"
+        );
+    }
+
+    // hk3(save_current_focus no-op):手动保存焦点必须真正把当前前台窗口写进
+    // LAST_FOCUS_HWND——旧实现是空函数,前端 3 处调用(main 显隐/鼠标进入/
+    // 便捷粘贴)全部无效果,restore 目标停留在 focus_callback 的旧记录。
+    #[test]
+    fn save_current_focus_writes_foreground_window_to_last_focus() {
+        let src = strip_line_comments(&focus_source());
+        let b = fn_body(&src, "save_current_focus");
+        assert!(
+            b.contains("GetForegroundWindow()"),
+            "save_current_focus 必须获取当前前台窗口"
+        );
+        assert!(
+            b.contains("LAST_FOCUS_HWND.lock() = Some(hwnd_val)"),
+            "save_current_focus 必须把前台窗口写进 LAST_FOCUS_HWND"
+        );
+        assert!(
+            b.contains("is_ignored_foreground_window"),
+            "save_current_focus 必须过滤自身窗口,不能把自身窗口记为外部焦点"
+        );
+    }
+
     // A3(焦点归还):restore_last_focus 设置焦点前必须校验句柄仍有效——
     // 主窗口销毁重建后旧 hwnd 失效,直接 SetForegroundWindow 静默失败;
     // 无效时清空记录,避免把焦点设回已销毁/隐藏窗口。
@@ -377,7 +482,8 @@ mod tests {
     // A3 护栏:focus_callback 过滤块必须把设置窗口当作自身窗口过滤——
     // 设置窗口标题为"设置 - 快速剪贴板",若聚焦事件不被过滤,前台切到设置页
     // 时 sync_hotkeys_for_foreground 会把导航键注册上,Tab/方向键被吞掉,
-    // 设置界面无法键盘移动光标。
+    // 设置界面无法键盘移动光标。hk4 抽 helper 后,护栏改为断言回调调用
+    // helper,且 helper 的过滤项覆盖设置窗口与全部自身窗口。
     #[test]
     fn focus_callback_filters_settings_window_as_own() {
         let source = std::fs::read_to_string(format!(
@@ -400,24 +506,54 @@ mod tests {
             .find("sync_hotkeys_for_foreground()")
             .expect("focus_callback 必须同步前台热键");
         let filter_seg = &body[..sync_pos];
-        // 过滤块必须同时包含:自身主窗口标题 + 设置窗口标题(以"设置"开头)
+        // 回调过滤段必须调用统一 helper
         assert!(
-            filter_seg.contains("快速剪贴板"),
-            "过滤块必须过滤主窗口标题"
+            filter_seg.contains("is_ignored_foreground_window(&class_name, &name)"),
+            "focus_callback 必须调用统一的前台窗口忽略过滤器"
+        );
+
+        // helper 过滤项必须包含:自身主窗口标题 + 设置窗口 + 菜单(且顺序
+        // 设置早于菜单,与旧内联块一致);hk4 补齐的其余自身窗口也应在列。
+        let helper_start = stripped
+            .find("fn is_ignored_foreground_window")
+            .expect("缺 is_ignored_foreground_window");
+        let helper_rest = &stripped[helper_start..];
+        let helper_end = helper_rest
+            .find("\n}\n")
+            .map(|i| helper_start + i)
+            .unwrap_or(stripped.len());
+        let helper = &stripped[helper_start..helper_end];
+        assert!(
+            helper.contains("快速剪贴板"),
+            "helper 必须过滤主窗口标题(含低内存面板)"
         );
         assert!(
-            filter_seg.contains("name.starts_with(\"设置\")"),
-            "过滤块必须把设置窗口(标题以 设置 开头)当自身窗口过滤"
+            helper.contains("name.starts_with(\"设置\")"),
+            "helper 必须把设置窗口(标题以 设置 开头)当自身窗口过滤"
         );
-        let settings_pos = filter_seg
+        assert!(
+            helper.contains("name == \"菜单\""),
+            "helper 必须过滤菜单窗口"
+        );
+        let settings_pos = helper
             .find("name.starts_with(\"设置\")")
             .expect("设置窗口过滤条件必须存在");
-        let menu_pos = filter_seg
+        let menu_pos = helper
             .find("name == \"菜单\"")
-            .expect("过滤块末尾菜单条件必须存在");
+            .expect("菜单窗口条件必须存在");
+        let text_editor_pos = helper
+            .find("name.starts_with(\"文本编辑器\")")
+            .expect("文本编辑器标题过滤必须存在(hk4)");
+        let drop_pos = helper
+            .find("name == \"拖放接收层\"")
+            .expect("拖放接收层标题过滤必须存在(hk4)");
         assert!(
             settings_pos < menu_pos,
-            "设置窗口过滤必须早于 sync,且在菜单条件之前"
+            "设置窗口过滤必须早于菜单条件(hk4 抽 helper 后仍在)"
+        );
+        assert!(
+            text_editor_pos < drop_pos,
+            "hk4 补齐的自身窗口过滤项必须在 helper 内"
         );
     }
 }

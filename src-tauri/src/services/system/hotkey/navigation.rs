@@ -77,6 +77,26 @@ pub fn disable_navigation_hotkeys() {
     unregister_navigation_hotkeys_locked();
 }
 
+// hk1:设置窗口打开/关闭期间的导航键期望状态快照——打开设置在禁用导航键前
+// 先快照 DESIRED(主窗口当前形态:显式显示 true / 自动弹出隐藏 false),
+// 关闭后按快照恢复,不误启用自动弹出(MouseAuto)状态下本就禁用的导航键。
+static NAVIGATION_SETTINGS_SNAPSHOT: AtomicBool = AtomicBool::new(false);
+
+// 打开设置前捕获期望状态,随后调用方禁用导航键。
+pub fn snapshot_navigation_hotkeys_desired() {
+    NAVIGATION_SETTINGS_SNAPSHOT.store(
+        NAVIGATION_HOTKEYS_DESIRED.load(Ordering::SeqCst),
+        Ordering::SeqCst,
+    );
+}
+
+// 设置关闭后按快照恢复:快照为 true(主窗口显示态)才重新启用导航键。
+pub fn restore_navigation_hotkeys_from_snapshot() {
+    if NAVIGATION_SETTINGS_SNAPSHOT.load(Ordering::SeqCst) {
+        enable_navigation_hotkeys();
+    }
+}
+
 // 立即释放当前导航键，但不改窗口生命周期写入的期望状态。
 // 托盘关闭全部热键后，后续恢复仍由显式窗口显示流程重新决定。
 pub fn unregister_navigation_hotkeys() {

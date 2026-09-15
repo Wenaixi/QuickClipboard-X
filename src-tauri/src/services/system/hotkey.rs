@@ -50,6 +50,17 @@ pub fn disable_navigation_hotkeys() {
     navigation::disable_navigation_hotkeys();
 }
 
+// hk1:设置窗口打开/关闭期间的导航键期望状态快照——打开设置在禁用导航键前
+// 先快照 DESIRED,关闭后按快照恢复,不误启用自动弹出(MouseAuto)隐藏态
+// (DESIRED=false)下本就禁用的导航键。
+pub fn snapshot_navigation_hotkeys_desired() {
+    navigation::snapshot_navigation_hotkeys_desired();
+}
+
+pub fn restore_navigation_hotkeys_from_snapshot() {
+    navigation::restore_navigation_hotkeys_from_snapshot();
+}
+
 pub fn suspend_execute_item_hotkey() {
     navigation::suspend_execute_item_hotkey();
 }
