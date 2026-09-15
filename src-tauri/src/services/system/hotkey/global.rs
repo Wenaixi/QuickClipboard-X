@@ -475,6 +475,9 @@ pub fn register_toggle_clipboard_monitor_hotkey(shortcut_str: &str) -> Result<()
     register_shortcut("toggle_clipboard_monitor", shortcut_str, |app| {
         let app_clone = app.clone();
         std::thread::spawn(move || {
+            if is_foreground_globally_disabled() {
+                return;
+            }
             if let Err(e) = crate::commands::settings::toggle_clipboard_monitor(&app_clone) {
                 eprintln!("切换剪贴板监听状态失败: {}", e);
             }
@@ -486,6 +489,9 @@ pub fn register_toggle_paste_with_format_hotkey(shortcut_str: &str) -> Result<()
     register_shortcut("toggle_paste_with_format", shortcut_str, |app| {
         let app_clone = app.clone();
         std::thread::spawn(move || {
+            if is_foreground_globally_disabled() {
+                return;
+            }
             if let Err(e) = crate::commands::settings::toggle_paste_with_format(&app_clone) {
                 eprintln!("切换格式粘贴状态失败: {}", e);
             }
@@ -1200,6 +1206,21 @@ mod tests {
             !b.find("let _ = app.global_shortcut().unregister(shortcut);").is_some(),
             "不得绕过探测直接裸注销"
         );
+    }
+
+    // r7-hotkey F2:两个 toggle 热键回调(剪贴板监听/格式粘贴)必须受
+    // is_foreground_globally_disabled 守卫,与其他全部热键对齐——全局禁用
+    // 生效时不得切换监听/格式粘贴。反证:删回调内守卫 → FAILED。
+    #[test]
+    fn toggle_hotkeys_pass_global_disable_guard() {
+        let src = strip_line_comments(&global_source());
+        for name in ["register_toggle_clipboard_monitor_hotkey", "register_toggle_paste_with_format_hotkey"] {
+            let b = fn_body(&src, name);
+            assert!(
+                b.find("is_foreground_globally_disabled").is_some(),
+                "{name} 必须查全局禁用守卫"
+            );
+        }
     }
 }
 
