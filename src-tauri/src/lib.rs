@@ -515,6 +515,14 @@ pub fn run() {
                 Ok(())
             })
             .build(tauri::generate_context!())
+            .map_err(|error| {
+                // setup 失败必须留下"failed"状态并弹窗——否则 startup-status.json
+                // 停在 "starting",下次启动 detect_blocking_previous_instance 读到
+                // 旧 PID 仍在 "starting" 就误判"异常卡死的旧进程"弹错误框,
+                // 用户无法自行绕过,应用从此再难启动。
+                startup_diagnostics::report_startup_error("启动失败", &error);
+                error
+            })
             .expect("运行 Tauri 应用失败");
 
     startup_diagnostics::set_startup_stage("运行应用事件循环");
