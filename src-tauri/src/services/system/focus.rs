@@ -147,6 +147,12 @@ pub fn restore_last_focus() -> Result<(), String> {
                     crate::hotkey::resume_execute_item_hotkey();
                 }
             } else {
+                // r8-hk-3:句柄已失效(主窗口销毁重建/外部窗口已关),记录作废
+                // 清空前先显式 resume 执行粘贴热键——resume_execute_item_hotkey
+                // 全仓唯一调用方就是本函数,若此处只清空记录不 resume,挂起的
+                // EXECUTE_ITEM_HOTKEY_SUSPENDED 将永久无释放路径,Enter/方向键
+                // 被持续门闩。目标窗口已不存在,恢复独占键无冲突。
+                crate::hotkey::resume_execute_item_hotkey();
                 *LAST_FOCUS_HWND.lock() = None;
             }
         }
@@ -475,7 +481,7 @@ mod tests {
         );
     }
 
-    // A3(焦点归还):restore_last_focus 设置焦点前必须校验句柄仍有效——
+    // A3 护栏:restore_last_focus 设置焦点前必须校验句柄仍有效——
     // 主窗口销毁重建后旧 hwnd 失效,直接 SetForegroundWindow 静默失败;
     // 无效时清空记录,避免把焦点设回已销毁/隐藏窗口。
     #[test]
@@ -493,6 +499,21 @@ mod tests {
         assert!(
             b.contains("LAST_FOCUS_HWND.lock() = None"),
             "无效句柄必须清空 LAST_FOCUS_HWND 记录"
+        );
+        // r8-hk-3:句柄失效清空记录前必须先 resume 执行粘贴热键——否则挂起
+        // 的 EXECUTE_ITEM_HOTKEY_SUSPENDED 无释放路径,Enter/方向键永久门闩。
+        // 断言 else(无效句柄)分支内、清空记录之前紧邻含 resume;成功分支的
+        // resume(brought.as_bool() 内)不能顶替本断言,必须锚定无效分支。
+        let clear_pos = b
+            .find("LAST_FOCUS_HWND.lock() = None")
+            .expect("无效句柄必须清空记录");
+        let else_pos = b[..clear_pos]
+            .rfind("} else {")
+            .expect("必须有 else(无效句柄)分支");
+        let invalid_branch = &b[else_pos..clear_pos];
+        assert!(
+            invalid_branch.contains("resume_execute_item_hotkey()"),
+            "无效句柄(else)分支内清空记录前必须 resume 执行粘贴热键,否则挂起永久无释放路径"
         );
     }
 
