@@ -89,7 +89,9 @@ fn build_pin_images_children() -> Vec<CtxMenuItem> {
                 name.clone()
             };
             children.push(
-                CtxMenuItem::item(format!("pin-image-{}", idx), display_name, Some("ti ti-photo"))
+                // F6:菜单项 id 用文件名而非排序下标——目录在菜单打开与点击之间
+                // 变化时(idx 漂移),下标会指向另一张图;文件名目录内唯一且稳定。
+                CtxMenuItem::item(format!("pin-image-{}", name), display_name, Some("ti ti-photo"))
                     .with_preview_image(path.clone()),
             );
         }
@@ -260,20 +262,21 @@ fn handle_tray_menu_selection(app: &AppHandle, selected_id: &str) {
             open_pin_images_folder();
         }
         id if id.starts_with("pin-image-") => {
-            if let Some(idx_str) = id.strip_prefix("pin-image-") {
-                if let Ok(idx) = idx_str.parse::<usize>() {
-                    let images = get_pin_images_list();
-                    if let Some((_, file_path)) = images.get(idx) {
-                        let app = app.clone();
-                        let file_path = file_path.clone();
-                        tauri::async_runtime::spawn(async move {
-                            if let Err(e) = crate::windows::pin_image_window::pin_image_from_file(
-                                app, file_path, None, None, None, None, None, None, None, None, None, None, None,
-                            ).await {
-                                eprintln!("创建贴图窗口失败: {}", e);
-                            }
-                        });
-                    }
+            if let Some(file_name) = id.strip_prefix("pin-image-") {
+                let images = get_pin_images_list();
+                if let Some((_, file_path)) = images
+                    .iter()
+                    .find(|(name, _)| name == file_name)
+                    .cloned()
+                {
+                    let app = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(e) = crate::windows::pin_image_window::pin_image_from_file(
+                            app, file_path, None, None, None, None, None, None, None, None, None, None, None,
+                        ).await {
+                            eprintln!("创建贴图窗口失败: {}", e);
+                        }
+                    });
                 }
             }
         }
@@ -345,6 +348,56 @@ mod display_name_guard {
         assert!(
             !body.contains("&name[..27]"),
             "禁止字节下标切片 &name[..27](多字节字符边界 panic)"
+        );
+    }
+
+    // F6(托盘贴图项 idx 漂移):菜单项 id 必须用文件名(pin-image-{name})而非
+    // 排序下标(pin-image-{idx}),点击处理必须按文件名 find 匹配而非下标 get——
+    // 菜单打开与点击之间目录变化(新增/删除/改名)时下标漂移会贴错图。
+    // 文件名目录内唯一且稳定,不受排序变化影响。反证:id 改回 idx 下标 → FAILED。
+    #[test]
+    fn pin_image_menu_uses_file_name_not_sort_index() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/windows/tray/menu.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读 menu.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        // 菜单构建段:item id 用 name(不得用 idx)
+        let build_start = stripped
+            .find("build_pin_images_children")
+            .expect("缺 build_pin_images_children");
+        let build_rest = &stripped[build_start..];
+        let build_end = build_rest.find("\n}\n").map(|i| build_start + i).unwrap_or(stripped.len());
+        let build_body = &stripped[build_start..build_end];
+        assert!(
+            build_body.contains("format!(\"pin-image-{}\", name)"),
+            "菜单项 id 必须用文件名(pin-image-{{name}}),禁止下标 {{idx}} 漂移"
+        );
+        assert!(
+            !build_body.contains("format!(\"pin-image-{}\", idx)"),
+            "禁止用排序下标构造 id(pin-image-{{idx}}),目录变化时漂移贴错图"
+        );
+        // 点击处理段:按文件名 find 匹配,不得用下标 get
+        // 锚点用 "fn handle_tray_menu_selection" 而非裸函数名——裸名会命中
+        // show_tray_menu 里的调用处(:192),从调用处切到函数结尾拿错函数体。
+        let handle_start = stripped
+            .find("fn handle_tray_menu_selection")
+            .expect("缺 handle_tray_menu_selection");
+        let handle_rest = &stripped[handle_start..];
+        let handle_end = handle_rest.find("\n}\n").map(|i| handle_start + i).unwrap_or(stripped.len());
+        let handle_body = &stripped[handle_start..handle_end];
+        assert!(
+            handle_body.contains(".find(|(name, _)| name == file_name)"),
+            "点击处理必须按文件名 find 匹配,禁止下标 get 漂移"
+        );
+        assert!(
+            !handle_body.contains("images.get(idx)"),
+            "禁止用排序下标 get 定位贴图"
         );
     }
 }
