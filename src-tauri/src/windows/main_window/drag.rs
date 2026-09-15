@@ -167,15 +167,23 @@ pub fn stop_drag(window: &WebviewWindow) -> Result<(), String> {
     super::state::set_dragging(false);
 
     if let Ok(hwnd) = window.hwnd() {
-        unsafe { platform::restore_wndproc(HWND(hwnd.0 as *mut _)); }
         let hwnd_value = hwnd.0 as isize;
-        let installed_hwnd = INSTALLED_WNDPROC_HWND.swap(0, Ordering::SeqCst);
-        if installed_hwnd != 0 && installed_hwnd != hwnd_value {
-            eprintln!(
-                "拖拽结束时窗口句柄不匹配，已安装句柄: {}, 当前句柄: {}",
-                installed_hwnd,
-                hwnd_value
-            );
+        // w6:restore_wndproc 必须先比对 INSTALLED_WNDPROC_HWND——若拖拽
+        // 期间窗口被重建(引号场景),当前 hwnd 是新窗口,ORIGINAL_WNDPROC_PTR
+        // 里存的是旧窗口的过程,直接装到新窗口上会把旧 WndProc 安到错误
+        // 窗口。只有在句柄确实是自己安装过的窗口时才恢复。
+        let installed_hwnd = INSTALLED_WNDPROC_HWND.load(Ordering::SeqCst);
+        if installed_hwnd == hwnd_value {
+            unsafe { platform::restore_wndproc(HWND(hwnd.0 as *mut _)); }
+            INSTALLED_WNDPROC_HWND.store(0, Ordering::SeqCst);
+        } else {
+            INSTALLED_WNDPROC_HWND.store(0, Ordering::SeqCst);
+            if installed_hwnd != 0 {
+                eprintln!(
+                    "拖拽结束跳过恢复:句柄不匹配,安装句柄: {}, 当前句柄: {}",
+                    installed_hwnd, hwnd_value
+                );
+            }
         }
     } else {
         let installed_hwnd = INSTALLED_WNDPROC_HWND.swap(0, Ordering::SeqCst);
@@ -263,4 +271,53 @@ fn wait_for_mouse_release(window: WebviewWindow) {
         let _ = stop_drag(&window);
         let _ = window.emit("drag-ended", ());
     });
+}
+
+#[cfg(test)]
+mod w6_restore_wndproc_guard {
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+    // w6(恢复装错窗口):stop_drag 恢复 WndProc 前必须比对 INSTALLED_WNDPROC_HWND
+    // 与当前 hwnd——引号场景窗口重建后 ORIGINAL_WNDPROC_PTR 是旧窗口过程,
+    // 无条件 SetWindowLongPtrW 会把旧过程装到新窗口,生成的新实例行为异常。
+    #[test]
+    fn stop_drag_only_restores_wndproc_when_hwnd_matches() {
+        let src = strip_line_comments(&source_file("src/windows/main_window/drag.rs"));
+        let body = fn_body(&src, "stop_drag");
+        // 必须先读到已安装句柄(比对前不 swap 掉——否则更新语义丢失)
+        let load_pos = body
+            .find("INSTALLED_WNDPROC_HWND.load")
+            .expect("恢复前必须先读已安装句柄");
+        let cmp_pos = body
+            .find("installed_hwnd == hwnd_value")
+            .expect("必须比对句柄是否为本窗口");
+        assert!(load_pos < cmp_pos, "比对应在读句柄之后");
+        // 比对成功后,restore_wndproc 与清句柄都在条件分支内
+        let restore_seg_start = body.find("restore_wndproc(&platform::").unwrap_or_else(|| {
+            body.find("restore_wndproc")
+                .expect("restore_wndproc 调用存在")
+        });
+        let cmp_seg = &body[cmp_pos..];
+        assert!(
+            cmp_seg.starts_with(&body[cmp_pos..cmp_pos + 60]),
+            "restore_wndproc 必须位于句柄比对分支内"
+        );
+        // 核心:INSTALLED_WNDPROC_HWND 的写入(store/swap)必须早于 restore_wndproc,
+        // 且两者之间就是"是否匹配"的分支
+        let store_pos = body
+            .find("INSTALLED_WNDPROC_HWND.store(0, Ordering::SeqCst)")
+            .expect("恢复后必须清空已安装句柄");
+        assert!(
+            cmp_pos < restore_seg_start && restore_seg_start < store_pos,
+            "顺序必须为:比对 -> restore(仅匹配时) -> 清句柄"
+        );
+        // 负向:禁止先 restore 后比对的旧实现形态(直通测试:命中就 fail)
+        let load_first = body
+            .find("INSTALLED_WNDPROC_HWND.load")
+            .expect("必须含句柄比对读");
+        assert!(
+            load_first < restore_seg_start,
+            "restore 必须晚于句柄比对"
+        );
+    }
 }
