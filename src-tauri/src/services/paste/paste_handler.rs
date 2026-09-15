@@ -584,9 +584,11 @@ fn update_item_content(
         let now = chrono::Local::now().timestamp();
 
         if let Some(id) = clipboard_id {
+            // 只刷新内容与更新时间;created_at 是历史时间轴锚点,
+            // 重置成当前时间会让旧条目跳到列表最前。
             conn.execute(
-                "UPDATE clipboard SET content = ?, updated_at = ?, created_at = ? WHERE id = ?",
-                params![new_content, now, now, id],
+                "UPDATE clipboard SET content = ?, updated_at = ? WHERE id = ?",
+                params![new_content, now, id],
             )?;
         } else if let Some(id) = favorite_id {
             conn.execute(
@@ -625,6 +627,28 @@ mod tests {
             resolve.matches("join(\"clipboard_images\")").count(),
             1,
             "resolve 体只允许一处拼路径"
+        );
+    }
+
+    // 旧格式图片粘贴转换刷新条目内容时,只许动内容与更新时间——
+    // created_at 若被重置为当前时间,历史条目的时间轴会被整体后移,
+    // 按创建时间排序的历史列表里该条会跳到最前面,语义完全错误。
+    #[test]
+    fn clipboard_update_keeps_created_at_unchanged() {
+        let src = paste_source();
+        let body = fn_body(&src, "update_item_content");
+        assert!(
+            body.contains("UPDATE clipboard SET content = ?, updated_at = ? WHERE id = ?"),
+            "clipboard 分支不得把 created_at 重置为当前时间"
+        );
+        assert!(
+            !body.contains("created_at = ?"),
+            "clipboard 分支更新不得触碰 created_at"
+        );
+        assert_eq!(
+            body.matches("updated_at = ?").count(),
+            2,
+            "clipboard 与 favorites 两条 UPDATE 都应刷新 updated_at"
         );
     }
 }
