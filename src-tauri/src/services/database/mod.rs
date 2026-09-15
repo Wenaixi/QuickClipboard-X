@@ -16,6 +16,9 @@ pub use tombstones::*;
 /// 配合 SQL 端 `ESCAPE '\\'` 使用,避免用户输入 `%`/`_` 被当成通配符。
 // s3 增量 pull 的本地锚点:本地历史/收藏的 MAX(updated_at),作为下次
 // 拉取的 since——更早记录已落地,重拉幂等,只省带宽与会话时长。
+// r6-sync-1(同秒漏拉配套):拉取端 since=MAX(updated_at) 时,服务端
+// list_*_records_since 必须用 >= 过滤才能带上同秒新增/更新的记录;
+// 锚点本身保持不变(MAX 语义,>= 由服务端负责)。
 pub fn lan_local_history_max_updated_at() -> Result<Option<i64>, String> {
     connection::with_connection(|conn| {
         Ok(conn.query_row("SELECT COALESCE(MAX(updated_at), 0) FROM clipboard", [], |row| {
