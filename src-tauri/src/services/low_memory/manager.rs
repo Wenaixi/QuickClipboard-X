@@ -117,13 +117,23 @@ pub fn exit_low_memory_mode(app: &AppHandle) -> Result<(), String> {
             Ok(())
         });
 
-    if result.is_ok() {
-        set_low_memory_mode(false);
+    // 无论退出流程中间步骤成功与否,都必须复位低占用标记:
+    // 只复位 EXITING_LOW_MEMORY 而把 LOW_MEMORY_MODE 留在 true,
+    // lib.rs ExitRequested 会因 is_low_memory_mode() && !is_user_requested_exit()
+    // 而 prevent_exit,用户被锁在"低占用标记但窗口未恢复"的撕裂态。
+    // 重建失败时尽力兜底恢复窗口与监听,让用户至少回到可用状态。
+    set_low_memory_mode(false);
+
+    if let Err(e) = &result {
+        crate::input_monitor::enable_navigation_keys();
+        crate::input_monitor::enable_mouse_monitoring();
+        eprintln!("退出低占用模式恢复主窗口失败: {}", e);
     }
 
     finish_exit_low_memory();
 
     if let Err(e) = result {
+        let _ = ensure_main_window(app);
         return Err(e);
     }
 
@@ -513,6 +523,41 @@ mod tests {
         assert!(
             state_src.contains("pub fn is_exiting_low_memory"),
             "state.rs 必须提供退出进行中查询能力"
+        );
+    }
+
+    // 退出低占用模式的失败路径必须复位 LOW_MEMORY_MODE——只复位
+    // EXITING_LOW_MEMORY 而把 LOW_MEMORY_MODE 留在 true 时,lib.rs
+    // ExitRequested 会 prevent_exit,用户被锁在"低占用标记但窗口未恢复"
+    // 撕裂态;重建失败分支还必须兜底恢复导航键/鼠标监听。
+    #[test]
+    fn exit_low_memory_failure_path_resets_low_memory_mode() {
+        let src = strip_line_comments(&manager_source());
+        let body = crate::services::system::hotkey::test_utils::fn_body(&src, "exit_low_memory_mode");
+        let set_pos = body
+            .find("set_low_memory_mode(false)")
+            .expect("退出流程必须复位低占用标记");
+        let finish_pos = body
+            .find("finish_exit_low_memory()")
+            .expect("缺退出流程完成标记");
+        assert!(
+            set_pos < finish_pos,
+            "复位 LOW_MEMORY_MODE 必须早于 finish 复位 EXITING——否则复位 EXITING 后\
+             并发 enter 会击穿,而 LOW_MEMORY_MODE 仍 true 造成撕裂态"
+        );
+        // 失败兜底:重建失败分支内必须恢复监听
+        let err_pos = body
+            .find("return Err(e)")
+            .expect("退出失败必须返回错误");
+        let fail_seg = &body[..err_pos];
+        assert!(
+            fail_seg.contains("enable_navigation_keys()")
+                && fail_seg.contains("enable_mouse_monitoring()"),
+            "重建失败分支必须兜底恢复导航键与鼠标监听"
+        );
+        assert!(
+            fail_seg.contains("ensure_main_window(app)"),
+            "重建失败后必须再次尝试确保主窗口可用"
         );
     }
 
