@@ -156,6 +156,43 @@ fn schedule_preview_hide_watchdog(app: AppHandle, watchdog_version: u64) {
     });
 }
 
+// 关闭预览窗口的前端回调兜底:emit "preview-window-will-hide" 后,隐藏
+// 依赖前端调 finalize_hide_preview_window;preview JS 未加载/被阻断时
+// 回调永不返回,窗口滞留。此看门狗按可见性判定 finalize 是否真的完成
+// (finalize 只 hide + 调度延迟销毁,不推进 PREVIEW_DATA 的 request_id,
+// 不能用请求代判断)——窗口已隐藏则正常路径不打扰 60s 复用 TTL,
+// 超时仍可见才强制销毁兜底。
+fn schedule_preview_close_watchdog(app: AppHandle, watchdog_version: u64) {
+    tauri::async_runtime::spawn(async move {
+        let started_at = Instant::now();
+
+        loop {
+            if PREVIEW_HIDE_WATCHDOG_VERSION.load(Ordering::SeqCst) != watchdog_version {
+                return;
+            }
+
+            // finalize 已隐藏或窗口已销毁:正常路径,交由 destroy TTL 复用
+            let visible = app
+                .get_webview_window(PREVIEW_WINDOW_LABEL)
+                .and_then(|window| window.is_visible().ok())
+                .unwrap_or(false);
+            if !visible {
+                return;
+            }
+
+            if started_at.elapsed() >= Duration::from_millis(PREVIEW_HIDE_WATCHDOG_DURATION_MS) {
+                destroy_preview_window_internal(&app);
+                return;
+            }
+
+            tokio::time::sleep(Duration::from_millis(
+                PREVIEW_HIDE_WATCHDOG_INTERVAL_MS,
+            ))
+            .await;
+        }
+    });
+}
+
 fn create_preview_window(
     app: &AppHandle,
     work_area_x: i32,
@@ -359,6 +396,12 @@ pub fn close_preview_window(app: AppHandle) -> Result<(), String> {
         window
             .emit("preview-window-will-hide", request_id)
             .map_err(|e| format!("发送预览窗口隐藏事件失败: {}", e))?;
+
+        // 前端回调兜底看门狗:preview 的 JS 未加载/被阻断时,finalize_hide
+        // 永不回来,预览窗口滞留到 destroy TTL(60s)。此处按需启动短超时
+        // 兜底——窗口超时仍可见即强制销毁。
+        let watchdog_version = PREVIEW_HIDE_WATCHDOG_VERSION.fetch_add(1, Ordering::SeqCst) + 1;
+        schedule_preview_close_watchdog(app, watchdog_version);
     } else {
         hide_preview_window_internal(&app);
     }
@@ -436,4 +479,58 @@ pub fn get_preview_window_data() -> Result<PreviewWindowData, String> {
         .map_err(|_| "获取预览窗口数据失败".to_string())?
         .clone()
         .ok_or_else(|| "预览窗口数据不存在".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+    fn preview_source() -> String {
+        strip_line_comments(&source_file("src/windows/preview_window/mod.rs"))
+    }
+
+    // 关闭预览窗口不能只 emit 就返回——preview JS 未加载/被阻断时,
+    // finalize_hide 前端回调永不回来,窗口滞留到 destroy TTL(60s)。
+    // close 路径必须启动兜底看门狗,超时窗口仍可见即强制销毁;且要与
+    // 主窗口隐藏的 suppress 路径共用同一版本原子,互相取消对方已失效
+    // 的看门狗(新代覆盖旧代)。
+    #[test]
+    fn close_preview_window_schedules_watchdog_fallback() {
+        let src = preview_source();
+        let close_body = fn_body(&src, "close_preview_window");
+        let emit_pos = close_body
+            .find("preview-window-will-hide")
+            .expect("close_preview_window 必须 emit 隐藏事件");
+        let schedule_pos = close_body
+            .find("schedule_preview_close_watchdog(")
+            .expect("close_preview_window 必须在 emit 后启动兜底看门狗");
+        assert!(
+            emit_pos < schedule_pos,
+            "看门狗必须启动于 emit 之后(emit 是正常路径,看门狗是超时兜底)"
+        );
+        assert!(
+            close_body.contains("PREVIEW_HIDE_WATCHDOG_VERSION.fetch_add(1,"),
+            "看门狗必须推进共用版本原子,与 suppress 路径互相取消失效看门狗"
+        );
+
+        let watchdog_body = fn_body(&src, "schedule_preview_close_watchdog");
+        assert!(
+            watchdog_body.contains("PREVIEW_HIDE_WATCHDOG_DURATION_MS"),
+            "看门狗必须有超时阈值"
+        );
+        assert!(
+            watchdog_body.contains("destroy_preview_window_internal(&app)"),
+            "看门狗超时后必须强制销毁预览窗口"
+        );
+        let visible_pos = watchdog_body
+            .find("is_visible().ok()")
+            .expect("看门狗必须按可见性判定 finalize 是否真的完成");
+        let destroy_pos = watchdog_body
+            .find("destroy_preview_window_internal(&app)")
+            .expect("看门狗必须销毁窗口");
+        assert!(
+            visible_pos < destroy_pos,
+            "必须确认窗口仍可见(超时未隐藏)才销毁"
+        );
+    }
 }
