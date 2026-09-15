@@ -1105,81 +1105,129 @@ pub fn export_data_zip(target_path: PathBuf) -> Result<PathBuf, String> {
     let _ = crate::services::database::connection::with_connection(|conn| {
         conn.execute_batch("PRAGMA wal_checkpoint(FULL); PRAGMA wal_checkpoint(TRUNCATE);")
     });
+    // D2:close_database() 之后必须保证 init_database() 一定能执行到——旧代码
+    // 在关库后散布多个 `?` 早返,任一失败(建目录/建文件/读图库/zip 收尾)都会
+    // 跳过末尾 init_database,剪贴板监听与所有 DB 命令本会话全部失效且无恢复
+    // 入口。抽闭包收敛:导出体全部错误都经闭包返回,外层无论成败统一重开库。
     close_database();
+    let result = (|| -> Result<(), String> {
+        let images_dir = current_dir.join("clipboard_images");
+        let image_library_dir = current_dir.join("image_library");
+        let app_icons_dir = current_dir.join("app_icons");
+        let db_files = [
+            "quickclipboard.db",
+        ];
+        let settings_path = crate::services::settings::storage::SettingsStorage::get_settings_path()?;
 
-    let images_dir = current_dir.join("clipboard_images");
-    let image_library_dir = current_dir.join("image_library");
-    let app_icons_dir = current_dir.join("app_icons");
-    let db_files = [
-        "quickclipboard.db",
-    ];
-    let settings_path = crate::services::settings::storage::SettingsStorage::get_settings_path()?;
+        if let Some(parent) = target_path.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+        let file = fs::File::create(&target_path).map_err(|e| format!("创建导出文件失败: {}", e))?;
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated)
+            .unix_permissions(0o644);
 
-    if let Some(parent) = target_path.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
-    let file = fs::File::create(&target_path).map_err(|e| format!("创建导出文件失败: {}", e))?;
-    let mut zip = zip::ZipWriter::new(file);
-    let options = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated)
-        .unix_permissions(0o644);
-
-    for name in &db_files {
-        let src = current_dir.join(name);
-        if src.exists() {
-            let mut f = fs::File::open(&src).map_err(|e| format!("读取文件失败: {}", e))?;
-            zip.start_file(name, options).map_err(|e| e.to_string())?;
-            std::io::copy(&mut f, &mut zip).map_err(|e| e.to_string())?;
-        }
-    }
-
-    fn add_dir_to_zip(base: &Path, dir: &Path, prefix: &str, zip: &mut zip::ZipWriter<fs::File>, options: zip::write::SimpleFileOptions) -> Result<(), String> {
-        for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
-            let entry = entry.map_err(|e| e.to_string())?;
-            let path = entry.path();
-            let rel = path.strip_prefix(base).map_err(|e| e.to_string())?;
-            if path.is_dir() {
-                add_dir_to_zip(base, &path, prefix, zip, options)?;
-            } else {
-                let zip_path = Path::new(prefix).join(rel);
-                let mut f = fs::File::open(&path).map_err(|e| format!("读取文件失败: {}", e))?;
-                let zip_name = zip_path.to_string_lossy();
-                zip.start_file(zip_name.as_ref(), options).map_err(|e| e.to_string())?;
-                std::io::copy(&mut f, zip).map_err(|e| e.to_string())?;
+        for name in &db_files {
+            let src = current_dir.join(name);
+            if src.exists() {
+                let mut f = fs::File::open(&src).map_err(|e| format!("读取文件失败: {}", e))?;
+                zip.start_file(name, options).map_err(|e| e.to_string())?;
+                std::io::copy(&mut f, &mut zip).map_err(|e| e.to_string())?;
             }
         }
+
+        fn add_dir_to_zip(base: &Path, dir: &Path, prefix: &str, zip: &mut zip::ZipWriter<fs::File>, options: zip::write::SimpleFileOptions) -> Result<(), String> {
+            for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
+                let entry = entry.map_err(|e| e.to_string())?;
+                let path = entry.path();
+                let rel = path.strip_prefix(base).map_err(|e| e.to_string())?;
+                if path.is_dir() {
+                    add_dir_to_zip(base, &path, prefix, zip, options)?;
+                } else {
+                    let zip_path = Path::new(prefix).join(rel);
+                    let mut f = fs::File::open(&path).map_err(|e| format!("读取文件失败: {}", e))?;
+                    let zip_name = zip_path.to_string_lossy();
+                    zip.start_file(zip_name.as_ref(), options).map_err(|e| e.to_string())?;
+                    std::io::copy(&mut f, zip).map_err(|e| e.to_string())?;
+                }
+            }
+            Ok(())
+        }
+
+        if images_dir.exists() {
+            add_dir_to_zip(&images_dir, &images_dir, "clipboard_images", &mut zip, options)?;
+        }
+
+        if image_library_dir.exists() {
+            add_dir_to_zip(&image_library_dir, &image_library_dir, "image_library", &mut zip, options)?;
+        }
+
+        if app_icons_dir.exists() {
+            add_dir_to_zip(&app_icons_dir, &app_icons_dir, "app_icons", &mut zip, options)?;
+        }
+
+        if settings_path.exists() {
+            let mut f = fs::File::open(&settings_path).map_err(|e| format!("读取settings失败: {}", e))?;
+            zip.start_file("settings.json", options).map_err(|e| e.to_string())?;
+            std::io::copy(&mut f, &mut zip).map_err(|e| e.to_string())?;
+        }
+
+        zip.finish().map_err(|e| e.to_string())?;
         Ok(())
-    }
+    })();
 
-    if images_dir.exists() {
-        add_dir_to_zip(&images_dir, &images_dir, "clipboard_images", &mut zip, options)?;
-    }
-
-    if image_library_dir.exists() {
-        add_dir_to_zip(&image_library_dir, &image_library_dir, "image_library", &mut zip, options)?;
-    }
-
-    if app_icons_dir.exists() {
-        add_dir_to_zip(&app_icons_dir, &app_icons_dir, "app_icons", &mut zip, options)?;
-    }
-
-    if settings_path.exists() {
-        let mut f = fs::File::open(&settings_path).map_err(|e| format!("读取settings失败: {}", e))?;
-        zip.start_file("settings.json", options).map_err(|e| e.to_string())?;
-        std::io::copy(&mut f, &mut zip).map_err(|e| e.to_string())?;
-    }
-
-    zip.finish().map_err(|e| e.to_string())?;
-
+    // 无论导出成败都重开数据库,绝不留下关闭态
     let db_path = current_dir.join("quickclipboard.db");
     if db_path.exists() {
         init_database(db_path.to_str().ok_or("数据库路径无效")?)?;
     }
 
+    result?;
     Ok(target_path)
 }
 
 #[cfg(test)]
 mod tests {
     use super::safe_zip_entry_name;
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+    // D2(关库早返不重开):export_data_zip close_database 后必须保证
+    // init_database 一定执行——错误路径一律经闭包收敛,外层统一重开库。
+    // 否则任一导出步骤失败(建目录/建文件/读图库/zip 收尾)都跳过末尾
+    // init_database,剪贴板监听与所有 DB 命令本会话全部失效且无恢复入口。
+    #[test]
+    fn export_data_zip_reopens_database_on_all_paths() {
+        let src = strip_line_comments(&source_file("src/services/data_management/mod.rs"));
+        let body = fn_body(&src, "export_data_zip");
+        let close_pos = body
+            .find("close_database()")
+            .expect("export 必须先关库");
+        let after_close = &body[close_pos..];
+        // 闭包收敛:关库后必须出现闭包启动
+        let closure_pos = after_close
+            .find("(|| -> Result<(), String> {")
+            .expect("关库后必须用闭包收敛导出体");
+        let closure_seg = &after_close[closure_pos..];
+        // 闭包内不得再有裸 ? 早返越过重开(整段都要在闭包内)
+        assert!(
+            closure_seg.contains("zip.finish().map_err(|e| e.to_string())?;"),
+            "导出体全部错误必须在闭包内返回"
+        );
+        // 闭包结束后、result? 之前必须无条件重开数据库
+        let finish_pos = after_close
+            .find("zip.finish()")
+            .expect("导出体必须收尾 zip");
+        let tail = &after_close[finish_pos..];
+        assert!(
+            tail.contains("init_database(db_path.to_str()"),
+            "导出无论成败都必须重开数据库"
+        );
+        // 负向:init_database 不得藏在闭包内部(只在闭包之后出现)
+        let close_to_finish = &after_close[..finish_pos];
+        assert!(
+            !close_to_finish.contains("init_database"),
+            "init_database 必须位于闭包之后(错误路径也能执行到)"
+        );
+    }
 
     #[test]
     fn safe_zip_entry_name_allows_normal_relative_paths() {
