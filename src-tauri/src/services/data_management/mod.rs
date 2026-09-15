@@ -1213,11 +1213,16 @@ fn change_storage_dir_internal(src_dir: &Path, dst_dir: &Path, mode: &str) -> Re
         Ok(())
     })();
 
-    // 无论成败都重开 src 库(成功路径 src 库已迁移到 dst 或删除,src 路径
-    // 重开会新建空库——但设置未改,下次启动仍读旧路径,数据安全由备份保证;
-    // 失败路径 src 库原样保留,重开后本会话 DB 立即恢复可用)。
-    if let Some(src_db_str) = src_db.to_str() {
-        let _ = init_database(src_db_str);
+    // r7-db-5:失败路径才重开 src 库(源库原样保留,重开后本会话 DB 立即恢复
+    // 可用)。成功路径 src 库已迁移到 dst(或 source_only/target_only 已删)——
+    // 无条件重开会新建空孤儿库并成为全局连接,剪贴板监控与新写入落空库永久
+    // 丢失,且 check_target_has_data 把空库当有效数据。三个调用方(change_storage
+    // _dir/reset_storage_dir_to_default)在成功路径紧跟着 init_database(dst),
+    // 无需在此重开。
+    if result.is_err() {
+        if let Some(src_db_str) = src_db.to_str() {
+            let _ = init_database(src_db_str);
+        }
     }
     result?;
     let _ = crate::services::database::connection::with_connection(|conn| {
@@ -1387,11 +1392,14 @@ mod tests {
     }
 
     // H2(换存储目录关库早返不重开):change_storage_dir_internal close_database 后
-    // 迁移体必须收进闭包、错误经闭包返回,外层无论成败统一重开 src 库并仅在
-    // 成功后才让调用方持久化新设置——否则磁盘满/跨盘复制失败时 DB 永久关闭、
-    // 剪贴板监听与所有 DB 命令本会话全部失效,且设置已被改掉。
+    // 迁移体必须收进闭包、错误经闭包返回，失败路径重开 src 库并仅在成功后才让
+    // 调用方持久化新设置——否则磁盘满/跨盘复制失败时 DB 永久关闭、剪贴板监听
+    // 与所有 DB 命令本会话全部失效。
+    // r7-db-5(成功路径不再无条件重开 src)：成功时 src 库已迁移到 dst(或
+    // source_only/target_only 已删),无条件重开会新建空孤儿库并成为全局连接,
+    // 剪贴板监控与新写入落空库永久丢失。重开只允许出现在 result.is_err() 分支。
     #[test]
-    fn change_storage_dir_internal_reopens_database_on_all_paths() {
+    fn change_storage_dir_internal_no_longer_reopens_orphan_db_on_success() {
         let src = strip_line_comments(&source_file("src/services/data_management/mod.rs"));
         let body = fn_body(&src, "change_storage_dir_internal");
         let close_pos = body
@@ -1410,25 +1418,36 @@ mod tests {
             closure_pos < invoke_pos,
             "闭包调用必须位于闭包定义之后"
         );
-        // init_database 必须在闭包调用之后(失败路径也能执行到重开)
+        // 重开必须被 result.is_err() 守卫：仅在失败路径(源库原样保留)执行
+        let err_guard_pos = after_close
+            .find("result.is_err()")
+            .expect("重开必须位于 result.is_err() 失败分支");
+        assert!(
+            invoke_pos < err_guard_pos,
+            "result.is_err() 必须位于闭包调用之后"
+        );
         let reopen_pos = after_close
             .find("init_database(src_db_str)")
-            .expect("迁移无论成败都必须重开 src 库");
+            .expect("失败路径必须重开 src 库");
         assert!(
-            invoke_pos < reopen_pos,
-            "init_database 必须位于闭包调用之后"
+            err_guard_pos < reopen_pos,
+            "init_database(src_db_str) 必须位于 result.is_err() 分支内(仅失败重开)"
         );
-        // result? 必须在重开之后:迁移失败也不吞掉错误,且重开先于早返
+        // result? 必须晚于重开:迁移失败也不吞掉错误,先重开再传播
         let result_pos = after_close
             .find("result?;")
             .expect("闭包结果必须向调用方传播");
         assert!(
             reopen_pos < result_pos,
-            "result? 必须位于重开库之后(错误路径也重开)"
+            "result? 必须位于重开库之后(失败路径先重开再传播错误)"
         );
-        // 负向:闭包定义到调用之间不得出现闭包外的重开锚点(init_database(src_db_str)
-        // 是外层无论成败都执行的重开;merge 分支内临时开库走的是
-        // init_database(src_db.to_str()...?)? 带错误传播的合法迁移逻辑,不算)。
+        // 负向:重开不得位于 result.is_err() 守卫之外(成功路径禁止无条件重开 src)
+        let err_to_reopen = &after_close[err_guard_pos..reopen_pos];
+        assert!(
+            !err_to_reopen.contains("init_database"),
+            "重开 init_database(src_db_str) 不得出现在 err 守卫与重开之间(即必须被 err 分支保护)"
+        );
+        // 负向:闭包内不得出现无条件重开(src_db_str 形态的重开必须在外层守卫内)
         let closure_def_to_call = &after_close[..invoke_pos];
         assert!(
             !closure_def_to_call.contains("init_database(src_db_str)"),
