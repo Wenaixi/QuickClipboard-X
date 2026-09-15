@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use super::chunk_manager::{load_chunk, save_chunk};
-use super::index_manager::{load_index, save_index};
+use super::index_manager::{load_index, merge_index, save_index};
 use super::types::{CloudRecord, CloudRecordMeta, ImageFileIndex, ImageFileIndexEntry, SyncCollection, SyncIndexEntry, SyncReport, CHUNK_RECORD_LIMIT};
 use super::webdav_client::WebdavClient;
 
@@ -255,8 +255,17 @@ async fn upload_collection_incremental(
     }
     index.next_chunk = current_chunk_id;
 
+    // s1:index.json 并发整块覆盖——chunk 有 B1 的"先 load 远端再合并",
+    // index 却没有:直接以本地内存 index 裸 PUT 会整块覆盖对端设备并发
+    // 写入的条目(next_chunk 也会被拉回旧值,下一轮 A/B 设备可能为同一
+    // 个 chunk 编号各写各的)。写前 load 远端按 uuid 合并(本地条目覆盖
+    // 同名、远端独有条目保留、next_chunk 取两者较大),仅当合并后确有
+    // 变化才条件 PUT,避免每次同步都整块覆盖 index.json。
     if !changed.is_empty() {
-        save_index(client, collection, &index).await?;
+        let (merged, has_change) = merge_index(client, collection, &index).await?;
+        if has_change {
+            save_index(client, collection, &merged).await?;
+        }
     }
 
     Ok(changed)
@@ -448,6 +457,40 @@ mod image_rescan_guards {
         assert!(
             !new_chunk_seg.contains("RecordChunk::default()"),
             "新 chunk 分支不得用空块直接 PUT"
+        );
+    }
+
+    // s1(index.json 并发整块覆盖):upload_collection_incremental 的 index 写路径
+    // 必须先 merge_index(load 远端合并)再按 has_change 条件 save_index——
+    // 直接 save_index(本地内存 index) 会整块覆盖对端设备并发写入的条目,
+    // next_chunk 也被拉回旧值。护栏断言:调用 merge_index、has_change 分支内
+    // 才 save_index、禁止裸 save_index(client, collection, &index)。
+    #[test]
+    fn index_save_merges_remote_before_conditional_put() {
+        let src = strip_line_comments(&source_file("src/services/webdav_sync/uploader.rs"));
+        let body = fn_body(&src, "upload_collection_incremental");
+        let merge_pos = body
+            .find("merge_index(client, collection, &index)")
+            .expect("写 index 前必须调用 merge_index 合并远端");
+        let has_change_pos = body
+            .find("if has_change")
+            .expect("必须按 merge_index 返回的 has_change 条件写");
+        assert!(
+            merge_pos < has_change_pos,
+            "merge_index 必须早于 has_change 判断"
+        );
+        let save_pos = body
+            .find("save_index(client, collection, &merged)")
+            .expect("条件 PUT 必须写合并后的 index");
+        assert!(
+            has_change_pos < save_pos,
+            "save_index 必须位于 has_change 条件分支内"
+        );
+        // 负向:禁止裸 PUT 本地内存 index(未合并)
+        let bare_save = body.find("save_index(client, collection, &index)");
+        assert!(
+            bare_save.is_none(),
+            "禁止直接裸 PUT 本地内存 index,必须先 merge_index 合并远端"
         );
     }
 }
