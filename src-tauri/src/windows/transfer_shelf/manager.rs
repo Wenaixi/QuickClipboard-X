@@ -350,6 +350,12 @@ pub fn close_shelf(app: &AppHandle, id: &str) -> Result<(), String> {
         DROP_PROXY_RESOURCE_CLEANUP_MIN_AGE_MS,
         DROP_PROXY_RESOURCE_CLEANUP_DELAY_MS,
     );
+
+    // 已销毁的 hwnd 若仍留在排除列表,OS 复用其值后无关窗口聚焦会被误判
+    // 为自身窗口——关闭后立即按现存自身窗口整体重建列表。
+    #[cfg(windows)]
+    crate::services::system::focus::refresh_excluded_hwnds(app);
+
     Ok(())
 }
 
@@ -404,4 +410,40 @@ pub fn save_shelf_state(
     }
 
     storage::upsert_shelf(existing)
+}
+
+#[cfg(test)]
+mod tests {
+    // 源码护栏:关闭文件盒窗口后必须整体重建排除列表——已销毁的 hwnd
+    // 若仍留在 EXCLUDED_HWNDS,OS 复用其句柄值后无关窗口聚焦会被误判为
+    // 自身窗口,其聚焦事件被误过滤。
+    #[test]
+    fn close_shelf_refreshes_excluded_hwnds() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/windows/transfer_shelf/manager.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 manager.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = stripped
+            .find("pub fn close_shelf")
+            .expect("缺 close_shelf");
+        let rest = &stripped[start..];
+        let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(stripped.len());
+        let body = &stripped[start..end];
+        let close_pos = body
+            .find("window\n            .close()")
+            .expect("close_shelf 必须关闭窗口");
+        let refresh_pos = body
+            .find("refresh_excluded_hwnds(app)")
+            .expect("close_shelf 关闭后必须重建排除列表");
+        assert!(
+            close_pos < refresh_pos,
+            "排除列表重建必须发生在窗口关闭之后,否则已销毁 hwnd 残留列表"
+        );
+    }
 }
