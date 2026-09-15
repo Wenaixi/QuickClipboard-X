@@ -2,6 +2,18 @@ use tauri::{AppHandle, Manager};
 use super::creator::create_settings_window;
 
 pub fn open_settings_window(app: &AppHandle) -> Result<(), String> {
+    // hk1:设置窗口打开即禁用导航键——主窗口的 show/hide 路径才启禁导航键,
+    // 打开设置不经过主窗口显隐,导航键保持注册时,设置窗口内按 Tab/方向键
+    // 会被 RegisterHotKey 全局截走,设置界面无法键盘移动光标。禁用前先快照
+    // DESIRED(主窗口当前形态),关闭后由 creator 按快照精确恢复,不误启用
+    // 自动弹出(MouseAuto)隐藏态下本就禁用的导航键。
+    // r6-hotkey-2:快照+禁用必须放在最前、早于一切 `?`——re-show 路径上
+    // unminimize()?/show()?/set_focus()? 任一失败即提前 return 时,若快照/禁用
+    // 排在后面,设置窗口已打开但 Tab/方向仍被吞(hk1 缺陷在错误路径复现),
+    // 且关闭时 restore 按旧快照误判。
+    crate::hotkey::snapshot_navigation_hotkeys_desired();
+    crate::input_monitor::disable_navigation_keys();
+
     if let Some(window) = app.get_webview_window("settings") {
         if window.is_minimized().unwrap_or(false) {
             window.unminimize().map_err(|e| format!("取消最小化设置窗口失败: {}", e))?;
@@ -15,13 +27,6 @@ pub fn open_settings_window(app: &AppHandle) -> Result<(), String> {
         }
     }
 
-    // hk1:设置窗口打开即禁用导航键——主窗口的 show/hide 路径才启禁导航键,
-    // 打开设置不经过主窗口显隐,导航键保持注册时,设置窗口内按 Tab/方向键
-    // 会被 RegisterHotKey 全局截走,设置界面无法键盘移动光标。禁用前先快照
-    // DESIRED(主窗口当前形态),关闭后由 creator 按快照精确恢复,不误启用
-    // 自动弹出(MouseAuto)隐藏态下本就禁用的导航键。
-    crate::hotkey::snapshot_navigation_hotkeys_desired();
-    crate::input_monitor::disable_navigation_keys();
     Ok(())
 }
 
@@ -32,6 +37,10 @@ mod hk1_settings_window_guard {
     // hk1(设置窗口吞导航键):打开设置必须先快照 DESIRED 再禁用导航键——
     // 主窗口 show/hide 路径才启禁导航键,设置窗口打开不经过主窗口显隐,
     // 若不禁用,设置窗口内 Tab/方向键被 RegisterHotKey 全局截走。
+    // r6-hotkey-2:快照+禁用必须在函数最前,早于一切 `?`——re-show 路径上
+    // unminimize()?/show()?/set_focus()? 任一失败提前 return 时,若排在后面
+    // 设置窗口已打开但 Tab/方向仍被吞(hk1 缺陷在错误路径复现),且关闭时
+    // restore 按旧快照误判。
     #[test]
     fn open_settings_window_snapshots_before_disabling_navigation_keys() {
         let src = strip_line_comments(&source_file("src/windows/settings_window/manager.rs"));
@@ -46,6 +55,17 @@ mod hk1_settings_window_guard {
             snapshot_pos < disable_pos,
             "快照必须先于禁用,否则关闭后无法精确恢复"
         );
+        // r6-hotkey-2:快照+禁用必须早于一切可失败的窗口操作(? 早返)
+        for marker in ["unminimize()", "set_focus()", "create_settings_window(app)"] {
+            let marker_pos = body.find(marker);
+            if let Some(marker_pos) = marker_pos {
+                assert!(
+                    disable_pos < marker_pos,
+                    "禁用导航键必须早于 {}——失败提前 return 时窗口已打开但导航键仍注册",
+                    marker
+                );
+            }
+        }
     }
 
     // hk1(恢复路径):设置窗口关闭(CloseRequested/Destroyed)必须按快照恢复

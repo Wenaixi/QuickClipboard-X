@@ -420,10 +420,16 @@ fn start_cursor_passthrough_monitor(window: WebviewWindow, session_id: u64) {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
 
-        let window_for_task = window.clone();
-        let _ = app.run_on_main_thread(move || {
-            let _ = window_for_task.set_ignore_cursor_events(false);
-        });
+        // r6-window-4:退出时无条件 set_ignore_cursor_events(false) 有与 w1 同款
+        // 竞态——while 因新菜单接管而退出时,新会话刚把菜单建出来、其 monitor
+        // 首 tick 尚未接管穿透,旧线程立即 false 会把新菜单的穿透恢复成交互,
+        // 短暂拦截新菜单下方点击。与 clear_menu_regions 同款加会话比对。
+        if super::get_active_menu_session() == session_id {
+            let window_for_task = window.clone();
+            let _ = app.run_on_main_thread(move || {
+                let _ = window_for_task.set_ignore_cursor_events(false);
+            });
+        }
         // w1:只在会话仍属于本线程时才清区域——while 循环可能因会话被新
         // 菜单接管(next_menu_session_id 推进 + set_active_menu_session)而
         // 退出,此时新会话刚 update_menu_regions 写入的区域属于新菜单,
@@ -610,6 +616,24 @@ mod w1_menu_region_guard {
         assert!(
             guarded.contains("if super::get_active_menu_session() == session_id {"),
             "clear_menu_regions 必须位于 if 会话比对分支内"
+        );
+        // r6-window-4:退出时的 set_ignore_cursor_events(false)(恢复交互)也
+        // 必须被同一会话比对守卫——新菜单接管瞬间旧线程无条件恢复交互会
+        // 短暂拦截新菜单下方点击,直到新 monitor 首 tick 再穿透。
+        let reset_offset = body.find("set_ignore_cursor_events(false)").expect("收尾必须恢复交互");
+        assert!(
+            cmp_pos < reset_offset,
+            "set_ignore_cursor_events(false) 必须在会话比对之后"
+        );
+        let reset_guarded = &body[cmp_pos..reset_offset + "set_ignore_cursor_events(false)".len()];
+        assert!(
+            reset_guarded.contains("if super::get_active_menu_session() == session_id"),
+            "set_ignore_cursor_events(false) 必须被会话比对守卫"
+        );
+        // 负向:比对之前不得出现 set_ignore_cursor_events(false)(新会话接管时旧线程不得恢复交互)
+        assert!(
+            !body[..cmp_pos].contains("set_ignore_cursor_events(false)"),
+            "恢复交互必须被会话比对守卫"
         );
     }
 }

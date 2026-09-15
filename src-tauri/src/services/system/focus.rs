@@ -54,7 +54,15 @@ pub fn refresh_excluded_hwnds(app_handle: &tauri::AppHandle) {
     let mut excluded = Vec::new();
     // A3:排除列表必须覆盖全部自身窗口——缺 quickpaste 时便捷粘贴窗口的聚焦
     // 事件不被过滤,可被记为 LAST_FOCUS_HWND,恢复焦点时把焦点设回隐藏窗口。
-    for label in ["main", "context-menu", "preview", "quickpaste"] {
+    // r6-hotkey-3:预览窗口真实标签是 PREVIEW_WINDOW_LABEL "preview-window",
+    // 此前 "preview" 标签 get_webview_window 恒 None,预览窗 hwnd 从未进列表;
+    // 改用标签常量消除误导。
+    for label in [
+        "main",
+        "context-menu",
+        crate::windows::preview_window::PREVIEW_WINDOW_LABEL,
+        "quickpaste",
+    ] {
         if let Some(win) = app_handle.get_webview_window(label) {
             if let Ok(hwnd) = win.hwnd() {
                 excluded.push(hwnd.0 as isize);
@@ -125,14 +133,19 @@ pub fn restore_last_focus() -> Result<(), String> {
             // windows crate 的 IsWindow 接收 Option<HWND>,None 表示无效。
             let valid = unsafe { IsWindow(Some(HWND(hwnd_val as *mut c_void))) };
             if valid.as_bool() {
-                unsafe {
-                    let _ = SetForegroundWindow(HWND(hwnd_val as *mut c_void));
+                // r6-hotkey-1:SetForegroundWindow 返回值必须判定——windows 前台
+                // 锁限制 / 非前台线程调用 / hwnd 跨虚拟桌面时,句柄有效但归还失败,
+                // 此时仍 resume 会让 SUSPENDED 被静默清掉、execute-item/方向键重新
+                // 全局注册,输入框仍聚焦,正好是 hk2 想修的输入被截 bug 本身。
+                // 归还成功才恢复;失败保持挂起并保留记录待下次重试。
+                let brought = unsafe { SetForegroundWindow(HWND(hwnd_val as *mut c_void)) };
+                if brought.as_bool() {
+                    // hk2:仅在焦点真正归还给外部窗口后恢复执行粘贴热键——输入框
+                    // 聚焦期间的挂起(SUSPENDED)记录的是"输入域仍需独占 Enter";
+                    // 归还失败时挂起保持,避免输入框仍聚焦时全局 Enter 截走
+                    // 输入法组合提交。
+                    crate::hotkey::resume_execute_item_hotkey();
                 }
-                // hk2:仅在焦点真正归还给外部窗口后恢复执行粘贴热键——输入框
-                // 聚焦期间的挂起(SUSPENDED)记录的是"输入域仍需独占 Enter";
-                // 若 LAST_FOCUS_HWND 无有效窗口或归还失败,挂起保持,避免
-                // 输入框仍在聚焦时全局 Enter 截走输入法组合提交。
-                crate::hotkey::resume_execute_item_hotkey();
             } else {
                 *LAST_FOCUS_HWND.lock() = None;
             }
@@ -386,12 +399,12 @@ mod tests {
 
     // A3(焦点污染):排除列表必须覆盖全部自身窗口——缺失 quickpaste 时便捷
     // 粘贴窗口可被记为上次焦点,恢复时把焦点设回隐藏窗口。护栏断言 label 数组
-    // 同时含 quickpaste 与 main/context-menu/preview。
+    // 同时含 quickpaste 与 main/context-menu/preview(用标签常量,防字符串漂移)。
     #[test]
     fn excluded_hwnds_cover_all_own_windows_including_quickpaste() {
         let src = strip_line_comments(&focus_source());
         let b = fn_body(&src, "refresh_excluded_hwnds");
-        for label in ["main", "context-menu", "preview", "quickpaste"] {
+        for label in ["main", "context-menu", "PREVIEW_WINDOW_LABEL", "quickpaste"] {
             assert!(
                 b.contains(label),
                 "排除列表必须覆盖 {} 窗口,否则其聚焦事件污染 LAST_FOCUS_HWND",
@@ -405,6 +418,9 @@ mod tests {
     // 挂起的 EXECUTE_ITEM_HOTKEY_SUSPENDED 记录"输入域仍需独占 Enter";
     // 若 LAST_FOCUS_HWND 无有效窗口(记录为空),挂起保持,避免全局 Enter
     // 在输入框仍聚焦时截走输入法组合提交。
+    // r6-hotkey-1(修复不彻底):旧实现丢弃 SetForegroundWindow 返回值,只受
+    // IsWindow 有效保护——句柄有效但前台归还失败(前台锁/非前台线程/跨虚拟
+    // 桌面)时仍 resume,输入被截复现。修复:判定返回值,false 保持挂起。
     #[test]
     fn restore_last_focus_resumes_execute_item_only_after_successful_foreground() {
         let src = strip_line_comments(&focus_source());
@@ -413,20 +429,21 @@ mod tests {
             .find("resume_execute_item_hotkey()")
             .expect("restore_last_focus 必须含恢复执行键调用");
         let set_pos = b
-            .find("SetForegroundWindow(HWND(hwnd_val as *mut c_void));")
+            .find("SetForegroundWindow(")
             .expect("restore_last_focus 必须设置前台窗口");
-        let else_seg = &b[set_pos..];
-        let else_pos = else_seg
-            .find("} else {")
-            .expect("IsWindow 有效分支必须带 else 分支");
-        // resume 必须位于 SetForegroundWindow 与 else 之间,即"焦点归还成功
-        // 分支"内——旧实现 resume 在 if 块外无条件调用(SUSPENDED 记录
-        // "输入域仍需独占 Enter"被静默清掉,输入框仍聚焦时全局 Enter 截输入法)。
-        let success_branch = &b[set_pos..set_pos + else_pos];
         assert!(
-            success_branch.contains("resume_execute_item_hotkey()"),
-            "执行键恢复必须位于焦点归还成功分支内(SetForegroundWindow 与 else 之间),\
-             禁止 if 块外无条件恢复"
+            set_pos < resume_pos,
+            "SetForegroundWindow 必须早于 resume(先归还焦点再恢复执行键)"
+        );
+        let after_set = &b[set_pos..];
+        // 返回值必须被判定:SetForegroundWindow 的返回值(brought.as_bool())分支
+        let brought_branch = after_set
+            .find("brought.as_bool()")
+            .expect("SetForegroundWindow 返回值必须被判定");
+        let resume_after_brought = after_set.find("resume_execute_item_hotkey()");
+        assert!(
+            resume_after_brought.is_some() && brought_branch < resume_after_brought.unwrap(),
+            "resume 必须位于 brought.as_bool() 成功分支内(归还失败保持挂起)"
         );
         let iswindow_pos = b
             .find("IsWindow(")
