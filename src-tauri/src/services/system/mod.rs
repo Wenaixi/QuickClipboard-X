@@ -24,6 +24,7 @@ pub use startup::{
     get_auto_start_status,
     is_admin_task_ready,
     is_running_as_admin,
+    should_skip_elevation_for_admin,
     switch_to_standard_mode,
     try_elevate_and_restart,
 };

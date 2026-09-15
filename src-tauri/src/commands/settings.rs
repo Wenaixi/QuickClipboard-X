@@ -263,7 +263,10 @@ pub fn set_auto_start(enabled: bool) -> Result<(), String> {
 #[tauri::command]
 pub fn get_auto_start_status() -> Result<bool, String> {
     let settings = get_settings();
-    crate::services::system::get_auto_start_status(settings.run_as_admin)
+    // 传真实 auto_start 而非硬编码 true——管理员任务匹配需按用户当前自启开关
+    // 校验触发器/参数(管理员模式自启任务带登录触发器,手动提权任务无触发器),
+    // 硬编码 true 会让"已关闭自启"的状态查询仍按自启任务形状匹配,误报已启用。
+    crate::services::system::get_auto_start_status(settings.auto_start, settings.run_as_admin)
 }
 
 // 重新加载快捷键

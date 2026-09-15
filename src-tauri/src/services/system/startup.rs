@@ -101,6 +101,9 @@ mod platform {
         r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
     const STARTUP_STATE_KEY: &str = r"Software\QuickClipboard\Startup";
     const ADMIN_TASK_NAME_VALUE: &str = "AdminTaskName";
+    // 管理员实例心跳:值 1 表示"有一个管理员提权实例存活"。
+    // 普通权限自启实例据此判定不应重复触发 UAC 提权,避免每次开机静默弹窗。
+    const ADMIN_INSTANCE_ALIVE_KEY: &str = "AdminInstanceAlive";
     const LEGACY_ADMIN_TASK_NAME: &str = "QuickClipboardAdmin";
     const ADMIN_TASK_PREFIX: &str = "QuickClipboardAdmin-";
 
@@ -245,8 +248,14 @@ mod platform {
             ensure_admin_task(auto_start)?;
             disable_registry_auto_start()?;
         } else {
+            // 非管理员分支:无论当前是否启用自启,先删除可能残留的管理员任务。
+            // 任务与注册表 Run 键是两套独立启动机制,若只删任务不清 Run 键,
+            // 双机制并行启动会造成两个实例互相竞争;且 Run 键指向的普通实例
+            // 进程不带提权标识,与用户当前 run_as_admin 配置冲突。
             if stored_admin_task_name()?.is_some() {
-                delete_admin_task()?;
+                if let Err(error) = delete_admin_task() {
+                    eprintln!("修复自启动配置:删除残留管理员任务失败: {error}");
+                }
             }
             if auto_start {
                 ensure_registry_auto_start()?;
@@ -266,9 +275,9 @@ mod platform {
         }
     }
 
-    pub fn get_auto_start_status(run_as_admin: bool) -> Result<bool, String> {
+    pub fn get_auto_start_status(auto_start: bool, run_as_admin: bool) -> Result<bool, String> {
         if run_as_admin {
-            is_admin_task_ready(true)
+            is_admin_task_ready(auto_start)
         } else {
             registry_auto_start_matches()
         }
@@ -296,9 +305,15 @@ mod platform {
     }
 
     pub fn cleanup_startup_entries() -> Result<(), String> {
+        // 两个清理操作必须先各自执行再合并错误——Result::and 会在任务清理
+        // 失败时直接短路,注册表 Run 键/StartupApproved 残留,卸载后仍会自启。
         let task_result = delete_admin_task();
         let registry_result = disable_registry_auto_start();
-        task_result.and(registry_result)
+        if let Err(task_error) = &task_result {
+            eprintln!("清理管理员启动任务失败: {task_error}");
+        }
+        task_result?;
+        registry_result
     }
 
     pub fn try_elevate_and_restart(auto_start: bool) -> Result<bool, String> {
@@ -658,6 +673,41 @@ mod platform {
         Ok(true)
     }
 
+    // 提权实例专用的启动探测标记:写 1 表示管理员实例存活,读取后清空。
+    // 写入必须是无条件的(每次提权实例启动都刷新),读取用 swap(true) 原子
+    // 取走旧值——普通自启实例读到 1 即知道有管理员实例在跑,不会重复提权。
+    pub fn mark_admin_instance_alive() {
+        let current_user = RegKey::predef(HKEY_CURRENT_USER);
+        match current_user.create_subkey(STARTUP_STATE_KEY) {
+            Ok((key, _)) => {
+                let _ = key.set_value(ADMIN_INSTANCE_ALIVE_KEY, &1u32);
+            }
+            Err(error) => eprintln!("打开自启动状态键失败,无法标记管理员实例存活: {error}"),
+        }
+    }
+
+    fn take_admin_instance_alive() -> bool {
+        let current_user = RegKey::predef(HKEY_CURRENT_USER);
+        let key = match current_user.open_subkey_with_flags(STARTUP_STATE_KEY, KEY_READ | KEY_SET_VALUE) {
+            Ok(key) => key,
+            Err(_) => return false,
+        };
+        let is_alive = match key.get_value::<u32, _>(ADMIN_INSTANCE_ALIVE_KEY) {
+            Ok(value) => value == 1,
+            Err(_) => false,
+        };
+        if is_alive {
+            let _ = key.delete_value(ADMIN_INSTANCE_ALIVE_KEY);
+        }
+        is_alive
+    }
+
+    // 普通权限自启入口:只有"已有管理员实例存活"才跳过提权。此处不查
+    // auto_start 之外的任何状态,让 UAC 提权保持用户配置的一致性。
+    pub fn should_skip_elevation_for_admin() -> bool {
+        take_admin_instance_alive()
+    }
+
     fn launch_with_uac(auto_start: bool) -> bool {
         let Ok(exe) = current_exe() else {
             return false;
@@ -810,6 +860,7 @@ mod platform {
     #[cfg(test)]
     mod tests {
         use super::*;
+        use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
 
         #[test]
         fn registry_command_quotes_paths_without_startup_arguments() {
@@ -868,14 +919,43 @@ mod platform {
                 "EXAMPLE-PC"
             ));
         }
+
+        // 清理入口必须无条件执行注册表清理——delete_admin_task 失败(COM 连接
+        // 失败/任务删除权限异常)时若用 Result::and 短路,Run 键残留,卸载后
+        // 开机仍自启。护栏锚定源码字面:cleanup_startup_entries 函数体内
+        // disable_registry_auto_start 调用必须在 delete_admin_task 之后、
+        // 错误合并(task_result?)之前。
+        #[test]
+        fn cleanup_runs_registry_cleanup_even_if_task_cleanup_fails() {
+            let src = strip_line_comments(&source_file("src/services/system/startup.rs"));
+            let body = fn_body(&src, "cleanup_startup_entries");
+            let delete_pos = body
+                .find("delete_admin_task()")
+                .expect("cleanup 必须调用 delete_admin_task");
+            let registry_pos = body
+                .find("disable_registry_auto_start()")
+                .expect("cleanup 必须调用 disable_registry_auto_start");
+            assert!(
+                delete_pos < registry_pos,
+                "注册表清理必须在任务清理之后无条件执行,不得被短路"
+            );
+            assert!(
+                body.contains("task_result?;"),
+                "cleanup 必须用显式 ? 合并错误而非 Result::and"
+            );
+            assert!(
+                !body.contains("task_result.and(registry_result)"),
+                "禁止 Result::and 短路——任务失败不得跳过注册表清理"
+            );
+        }
     }
 }
 
 #[cfg(target_os = "windows")]
 pub use platform::{
     cleanup_startup_entries, configure_auto_start, get_auto_start_status, is_admin_task_ready,
-    is_running_as_admin, repair_startup_configuration, switch_to_standard_mode,
-    try_elevate_and_restart,
+    is_running_as_admin, mark_admin_instance_alive, repair_startup_configuration,
+    should_skip_elevation_for_admin, switch_to_standard_mode, try_elevate_and_restart,
 };
 
 #[cfg(not(target_os = "windows"))]
@@ -899,7 +979,7 @@ pub fn switch_to_standard_mode(_auto_start: bool) -> Result<(), String> {
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn get_auto_start_status(_run_as_admin: bool) -> Result<bool, String> {
+pub fn get_auto_start_status(_auto_start: bool, _run_as_admin: bool) -> Result<bool, String> {
     Ok(false)
 }
 
@@ -912,6 +992,14 @@ pub fn is_admin_task_ready(_auto_start: bool) -> Result<bool, String> {
 pub fn try_elevate_and_restart(_auto_start: bool) -> Result<bool, String> {
     Ok(false)
 }
+
+#[cfg(not(target_os = "windows"))]
+pub fn should_skip_elevation_for_admin() -> bool {
+    false
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn mark_admin_instance_alive() {}
 
 #[cfg(not(target_os = "windows"))]
 pub fn cleanup_startup_entries() -> Result<(), String> {

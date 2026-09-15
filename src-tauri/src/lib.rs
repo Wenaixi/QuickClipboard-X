@@ -78,6 +78,7 @@ pub fn run() {
 
                 if is_admin {
                     startup_diagnostics::set_startup_stage("检查管理员启动：校验用户专属启动任务");
+                    services::system::startup::mark_admin_instance_alive();
                     if let Err(error) = services::system::startup::repair_startup_configuration(
                         settings.auto_start,
                         true,
@@ -85,7 +86,12 @@ pub fn run() {
                         eprintln!("修复管理员启动配置失败: {error}");
                     }
                 } else {
-                    if services::system::startup::is_admin_relaunch() {
+                    if services::system::startup::should_skip_elevation_for_admin() {
+                        // 开机自启被普通权限拉起的场景:写入的 Run 键没有提权标识,
+                        // 且管理员实例恰好先一步存活(自动提权 + 任务计划器补偿启动),
+                        // 此时再触发 UAC 弹窗无意义且扰民,直接以普通权限继续。
+                        eprintln!("检测到已有管理员实例存活,跳过重复提权,以普通权限继续启动");
+                    } else if services::system::startup::is_admin_relaunch() {
                         eprintln!("管理员重启后的进程仍未获得管理员权限，已停止重复提权");
                     } else {
                         startup_diagnostics::set_startup_stage("检查管理员启动：准备启动管理员实例");
@@ -460,7 +466,14 @@ pub fn run() {
                 startup_diagnostics::set_startup_stage("执行 setup：创建托盘图标");
                 setup_tray(app.handle())?;
                 startup_diagnostics::set_startup_stage("执行 setup：加载全局快捷键");
-                hotkey::reload_from_settings()?;
+                if let Err(error) = hotkey::reload_from_settings() {
+                    // 单个快捷键注册失败不得阻断整个应用启动——用户配置的某个
+                    // 组合键可能被其他程序占用或被系统拒绝,若将其作为强错误
+                    // 上抛,setup 整体失败导致应用起不来,也无法进入界面去改
+                    // 错误的快捷键。reload 内部各快捷键已逐个容忍失败并 eprintln,
+                    // 仅在极端情况(unregister 阶段锁异常)下整体返回 Err。
+                    eprintln!("加载全局快捷键失败(应用继续启动): {error}");
+                }
                 startup_diagnostics::set_startup_stage("执行 setup：初始化扩展窗口状态");
                 windows::plugins::input_dialog::init();
                 quickpaste::init_quickpaste_state();
@@ -483,7 +496,11 @@ pub fn run() {
                 }
 
                 if settings.clipboard_monitor {
-                    let _ = start_clipboard_monitor();
+                    if let Err(error) = start_clipboard_monitor() {
+                        // 剪贴板监听是核心功能,启动失败不可静默——否则用户以为
+                        // 在监听,实际历史列表永远不更新。eprintln 至少留下痕迹。
+                        eprintln!("启动剪贴板监听失败: {error}");
+                    }
                 }
 
                 let _ = windows::main_window::restore_edge_snap_on_startup(&window);
