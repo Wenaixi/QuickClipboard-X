@@ -561,6 +561,11 @@ pub fn hide_snapped_window(window: &WebviewWindow) -> Result<(), String> {
         return Ok(());
     }
 
+    // w2:取消在飞 show 动画——动画中 toggle hide 时窗口停在中间帧坐标,
+    // 若以其计算比例会污染落盘。cancel 后窗口停在当前帧,ratio 走 state
+    // 稳定值,记账坐标即当前真实位置。
+    cancel_pending_animation();
+
     crate::windows::preview_window::suppress_preview_for_main_window_hide(&window.app_handle());
     let _ = crate::windows::pin_image_window::close_image_preview(window.app_handle().clone());
     let _ = crate::windows::preview_window::close_preview_window(window.app_handle().clone());
@@ -1435,6 +1440,28 @@ mod tests {
         assert!(
             after_cleanup.contains("get_window_state()") && after_cleanup.contains("is_hidden"),
             "关热键前必须再读 is_hidden,避免并发 show 后把刚恢复的导航键关掉"
+        );
+    }
+
+    // w2(动画中 toggle 污染贴边比例):hide_snapped_window 必须先
+    // cancel_pending_animation 再读窗口坐标算比例——show 动画中 toggle hide,
+    // 窗口停在中间帧坐标,若以其算 ratio 会落盘被污染(如 0.4 比例),下次
+    // show 从错误比例恢复。cancel 后窗口停在当前帧,ratio 走 state 稳定值。
+    #[test]
+    fn hide_snapped_window_cancels_in_flight_show_animation_before_ratio() {
+        let body = strip_line_comments(fn_body(snap_source(), "hide_snapped_window"));
+        let cancel_pos = body
+            .find("cancel_pending_animation()")
+            .expect("hide_snapped_window 必须先取消在飞 show 动画");
+        let emit_pos = body
+            .find("window.emit(\"edge-snap-hide\"")
+            .expect("hide 必须发射 edge-snap-hide 事件");
+        let ratio_pos = body
+            .find("compute_snap_ratio(")
+            .expect("hide 必须计算贴边比例");
+        assert!(
+            cancel_pos < emit_pos && cancel_pos < ratio_pos,
+            "cancel_pending_animation 必须早于任何坐标读取(emit 与 compute_snap_ratio)"
         );
     }
 }
