@@ -122,7 +122,12 @@ fn backup_full_zip(dir: &Path) -> Result<Option<PathBuf>, String> {
     // 与 pin_images,执行这两类操作前图库与贴图数据永久丢失,备份里没有。
     let image_library_dir = dir.join("image_library");
     let pin_images_dir = dir.join("pin_images");
-    if !db.exists() && !images_dir.exists() && !image_library_dir.exists() && !pin_images_dir.exists() {
+    if !db.exists()
+        && !images_dir.exists()
+        && !image_library_dir.exists()
+        && !pin_images_dir.exists()
+        && !app_icons_dir.exists()
+    {
         return Ok(None);
     }
 
@@ -398,40 +403,50 @@ pub fn import_data_zip(zip_path: PathBuf, mode: &str) -> Result<String, String> 
                 get_default_data_dir()?
             };
 
-            update_settings(new_settings.clone())?;
-
+            // H1:修复"关库后散布 ? 早返,失败时既不重开库又已改设置"——
+            // 与 D2 export_data_zip 同款病(export 修了,import replace 漏了)。
+            // ①close_database() 之后的替换步骤收进闭包,全部错误经闭包返回;
+            // ②闭包无论成败外层无条件 init_database(target 库),绝不留下关闭态;
+            // ③update_settings 后置到替换与重开都成功之后,失败时不改设置,
+            //   避免下次启动指向半替换目录。
             close_database();
+            let result = (|| -> Result<(), String> {
+                let target_images = target_dir.join("clipboard_images");
+                if target_images.exists() { fs::remove_dir_all(&target_images).map_err(|e| e.to_string())?; }
+                if imported_images.exists() { copy_dir_all(&imported_images, &target_images)?; }
+                let target_image_library = target_dir.join("image_library");
+                if target_image_library.exists() { fs::remove_dir_all(&target_image_library).map_err(|e| e.to_string())?; }
+                if imported_image_library.exists() { copy_dir_all(&imported_image_library, &target_image_library)?; }
+                let target_app_icons = target_dir.join("app_icons");
+                if target_app_icons.exists() { fs::remove_dir_all(&target_app_icons).map_err(|e| e.to_string())?; }
+                if imported_app_icons.exists() { copy_dir_all(&imported_app_icons, &target_app_icons)?; }
 
-            let target_images = target_dir.join("clipboard_images");
-            if target_images.exists() { fs::remove_dir_all(&target_images).map_err(|e| e.to_string())?; }
-            if imported_images.exists() { copy_dir_all(&imported_images, &target_images)?; }
-            let target_image_library = target_dir.join("image_library");
-            if target_image_library.exists() { fs::remove_dir_all(&target_image_library).map_err(|e| e.to_string())?; }
-            if imported_image_library.exists() { copy_dir_all(&imported_image_library, &target_image_library)?; }
-            let target_app_icons = target_dir.join("app_icons");
-            if target_app_icons.exists() { fs::remove_dir_all(&target_app_icons).map_err(|e| e.to_string())?; }
-            if imported_app_icons.exists() { copy_dir_all(&imported_app_icons, &target_app_icons)?; }
+                let src_db = temp_root.join("quickclipboard.db");
+                let dst_db = target_dir.join("quickclipboard.db");
+                if src_db.exists() {
+                    if let Some(p) = dst_db.parent() { fs::create_dir_all(p).map_err(|e| e.to_string())?; }
+                    fs::copy(&src_db, &dst_db).map_err(|e| e.to_string())?;
+                }
+                for name in ["quickclipboard.db-shm", "quickclipboard.db-wal"] {
+                    let p = target_dir.join(name);
+                    if p.exists() { let _ = fs::remove_file(&p); }
+                }
+                Ok(())
+            })();
 
-            let src_db = temp_root.join("quickclipboard.db");
-            let dst_db = target_dir.join("quickclipboard.db");
-            if src_db.exists() {
-                if let Some(p) = dst_db.parent() { fs::create_dir_all(p).map_err(|e| e.to_string())?; }
-                fs::copy(&src_db, &dst_db).map_err(|e| e.to_string())?;
-            }
-            for name in ["quickclipboard.db-shm", "quickclipboard.db-wal"] {
-                let p = target_dir.join(name);
-                if p.exists() { let _ = fs::remove_file(&p); }
-            }
-
+            // 无论成败都重开库（成功切新库,失败至少保持本会话 DB 可用）。
             let db_path = target_dir.join("quickclipboard.db");
-            init_database(db_path.to_str().ok_or("数据库路径无效")?)?;
+            let reopen = init_database(db_path.to_str().ok_or("数据库路径无效")?);
             let _ = crate::services::database::connection::with_connection(|conn| {
                 conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
             });
-
             let _ = reload_from_settings();
 
             let _ = fs::remove_dir_all(&temp_root);
+            // 替换成功且重开成功后才持久化设置;任一失败都不改设置。
+            result?;
+            reopen?;
+            update_settings(new_settings.clone())?;
             Ok(target_dir.to_string_lossy().to_string())
         }
         "merge" => {
@@ -1024,115 +1039,132 @@ fn change_storage_dir_internal(src_dir: &Path, dst_dir: &Path, mode: &str) -> Re
 
     close_database();
 
-    let src_images = src_dir.join("clipboard_images");
-    let dst_images = dst_dir.join("clipboard_images");
-    let src_pin_images = src_dir.join("pin_images");
-    let dst_pin_images = dst_dir.join("pin_images");
-    let src_image_library = src_dir.join("image_library");
-    let dst_image_library = dst_dir.join("image_library");
-    let src_app_icons = src_dir.join("app_icons");
-    let dst_app_icons = dst_dir.join("app_icons");
+    // H2:关库后的迁移操作收进闭包,全部错误经闭包返回;外层无论成败统一
+    // 重开 src 库,绝不留下关闭态——磁盘满/跨盘回退复制失败时本会话 DB
+    // 仍可用,且设置未改(update_settings 在 internal 成功后才执行)。
     let src_db = src_dir.join("quickclipboard.db");
     let dst_db = dst_dir.join("quickclipboard.db");
+    let result = (|| -> Result<(), String> {
+        let src_images = src_dir.join("clipboard_images");
+        let dst_images = dst_dir.join("clipboard_images");
+        let src_pin_images = src_dir.join("pin_images");
+        let dst_pin_images = dst_dir.join("pin_images");
+        let src_image_library = src_dir.join("image_library");
+        let dst_image_library = dst_dir.join("image_library");
+        let src_app_icons = src_dir.join("app_icons");
+        let dst_app_icons = dst_dir.join("app_icons");
 
-    match mode {
-        "source_only" => {
-            if dst_images.exists() {
-                fs::remove_dir_all(&dst_images).map_err(|e| format!("删除目标图片目录失败: {}", e))?;
-            }
-            if dst_pin_images.exists() {
-                fs::remove_dir_all(&dst_pin_images).map_err(|e| format!("删除目标贴图目录失败: {}", e))?;
-            }
-            if dst_image_library.exists() {
-                fs::remove_dir_all(&dst_image_library).map_err(|e| format!("删除目标图库目录失败: {}", e))?;
-            }
-            if dst_app_icons.exists() {
-                fs::remove_dir_all(&dst_app_icons).map_err(|e| format!("删除目标图标目录失败: {}", e))?;
-            }
-            if dst_db.exists() {
-                fs::remove_file(&dst_db).map_err(|e| format!("删除目标数据库失败: {}", e))?;
-            }
-            if src_images.exists() {
-                safe_move_item(&src_images, &dst_images)?;
-            }
-            if src_pin_images.exists() {
-                safe_move_item(&src_pin_images, &dst_pin_images)?;
-            }
-            if src_image_library.exists() {
-                safe_move_item(&src_image_library, &dst_image_library)?;
-            }
-            if src_app_icons.exists() {
-                safe_move_item(&src_app_icons, &dst_app_icons)?;
-            }
-            if src_db.exists() {
-                safe_move_item(&src_db, &dst_db)?;
-            }
-        }
-        "target_only" => {
-            if src_images.exists() {
-                fs::remove_dir_all(&src_images).map_err(|e| format!("删除源图片目录失败: {}", e))?;
-            }
-            if src_pin_images.exists() {
-                fs::remove_dir_all(&src_pin_images).map_err(|e| format!("删除源贴图目录失败: {}", e))?;
-            }
-            if src_image_library.exists() {
-                fs::remove_dir_all(&src_image_library).map_err(|e| format!("删除源图库目录失败: {}", e))?;
-            }
-            if src_app_icons.exists() {
-                fs::remove_dir_all(&src_app_icons).map_err(|e| format!("删除源图标目录失败: {}", e))?;
-            }
-            if src_db.exists() {
-                fs::remove_file(&src_db).map_err(|e| format!("删除源数据库失败: {}", e))?;
-            }
-        }
-        "merge" => {
-            // 源数据优先：先把目标数据合并到源，再移动源到目标
-            if src_images.exists() {
-                if !dst_images.exists() { fs::create_dir_all(&dst_images).map_err(|e| e.to_string())?; }
-                if dst_images.exists() { merge_dir_no_overwrite(&dst_images, &src_images)?; }
-                if dst_images.exists() { fs::remove_dir_all(&dst_images).map_err(|e| format!("删除目标图片目录失败: {}", e))?; }
-                safe_move_item(&src_images, &dst_images)?;
-            }
-            if src_pin_images.exists() {
-                if !dst_pin_images.exists() { fs::create_dir_all(&dst_pin_images).map_err(|e| e.to_string())?; }
-                if dst_pin_images.exists() { merge_dir_no_overwrite(&dst_pin_images, &src_pin_images)?; }
-                if dst_pin_images.exists() { fs::remove_dir_all(&dst_pin_images).map_err(|e| format!("删除目标贴图目录失败: {}", e))?; }
-                safe_move_item(&src_pin_images, &dst_pin_images)?;
-            }
-            if src_image_library.exists() {
-                if !dst_image_library.exists() { fs::create_dir_all(&dst_image_library).map_err(|e| e.to_string())?; }
-                if dst_image_library.exists() { merge_dir_no_overwrite(&dst_image_library, &src_image_library)?; }
-                if dst_image_library.exists() { fs::remove_dir_all(&dst_image_library).map_err(|e| format!("删除目标图库目录失败: {}", e))?; }
-                safe_move_item(&src_image_library, &dst_image_library)?;
-            }
-            if src_app_icons.exists() {
-                if !dst_app_icons.exists() { fs::create_dir_all(&dst_app_icons).map_err(|e| e.to_string())?; }
-                if dst_app_icons.exists() { merge_dir_no_overwrite(&dst_app_icons, &src_app_icons)?; }
-                if dst_app_icons.exists() { fs::remove_dir_all(&dst_app_icons).map_err(|e| format!("删除目标图标目录失败: {}", e))?; }
-                safe_move_item(&src_app_icons, &dst_app_icons)?;
-            }
-            if src_db.exists() {
+        match mode {
+            "source_only" => {
+                if dst_images.exists() {
+                    fs::remove_dir_all(&dst_images).map_err(|e| format!("删除目标图片目录失败: {}", e))?;
+                }
+                if dst_pin_images.exists() {
+                    fs::remove_dir_all(&dst_pin_images).map_err(|e| format!("删除目标贴图目录失败: {}", e))?;
+                }
+                if dst_image_library.exists() {
+                    fs::remove_dir_all(&dst_image_library).map_err(|e| format!("删除目标图库目录失败: {}", e))?;
+                }
+                if dst_app_icons.exists() {
+                    fs::remove_dir_all(&dst_app_icons).map_err(|e| format!("删除目标图标目录失败: {}", e))?;
+                }
                 if dst_db.exists() {
-                    init_database(src_db.to_str().ok_or("数据库路径无效")?)?;
-                    merge_database(&dst_db)?;
-                    close_database();
                     fs::remove_file(&dst_db).map_err(|e| format!("删除目标数据库失败: {}", e))?;
                 }
-                safe_move_item(&src_db, &dst_db)?;
+                if src_images.exists() {
+                    safe_move_item(&src_images, &dst_images)?;
+                }
+                if src_pin_images.exists() {
+                    safe_move_item(&src_pin_images, &dst_pin_images)?;
+                }
+                if src_image_library.exists() {
+                    safe_move_item(&src_image_library, &dst_image_library)?;
+                }
+                if src_app_icons.exists() {
+                    safe_move_item(&src_app_icons, &dst_app_icons)?;
+                }
+                if src_db.exists() {
+                    safe_move_item(&src_db, &dst_db)?;
+                }
+            }
+            "target_only" => {
+                if src_images.exists() {
+                    fs::remove_dir_all(&src_images).map_err(|e| format!("删除源图片目录失败: {}", e))?;
+                }
+                if src_pin_images.exists() {
+                    fs::remove_dir_all(&src_pin_images).map_err(|e| format!("删除源贴图目录失败: {}", e))?;
+                }
+                if src_image_library.exists() {
+                    fs::remove_dir_all(&src_image_library).map_err(|e| format!("删除源图库目录失败: {}", e))?;
+                }
+                if src_app_icons.exists() {
+                    fs::remove_dir_all(&src_app_icons).map_err(|e| format!("删除源图标目录失败: {}", e))?;
+                }
+                if src_db.exists() {
+                    fs::remove_file(&src_db).map_err(|e| format!("删除源数据库失败: {}", e))?;
+                }
+            }
+            "merge" => {
+                // 源数据优先：先把目标数据合并到源，再移动源到目标
+                if src_images.exists() {
+                    if !dst_images.exists() { fs::create_dir_all(&dst_images).map_err(|e| e.to_string())?; }
+                    if dst_images.exists() { merge_dir_no_overwrite(&dst_images, &src_images)?; }
+                    if dst_images.exists() { fs::remove_dir_all(&dst_images).map_err(|e| format!("删除目标图片目录失败: {}", e))?; }
+                    safe_move_item(&src_images, &dst_images)?;
+                }
+                if src_pin_images.exists() {
+                    if !dst_pin_images.exists() { fs::create_dir_all(&dst_pin_images).map_err(|e| e.to_string())?; }
+                    if dst_pin_images.exists() { merge_dir_no_overwrite(&dst_pin_images, &src_pin_images)?; }
+                    if dst_pin_images.exists() { fs::remove_dir_all(&dst_pin_images).map_err(|e| format!("删除目标贴图目录失败: {}", e))?; }
+                    safe_move_item(&src_pin_images, &dst_pin_images)?;
+                }
+                if src_image_library.exists() {
+                    if !dst_image_library.exists() { fs::create_dir_all(&dst_image_library).map_err(|e| e.to_string())?; }
+                    if dst_image_library.exists() { merge_dir_no_overwrite(&dst_image_library, &src_image_library)?; }
+                    if dst_image_library.exists() { fs::remove_dir_all(&dst_image_library).map_err(|e| format!("删除目标图库目录失败: {}", e))?; }
+                    safe_move_item(&src_image_library, &dst_image_library)?;
+                }
+                if src_app_icons.exists() {
+                    if !dst_app_icons.exists() { fs::create_dir_all(&dst_app_icons).map_err(|e| e.to_string())?; }
+                    if dst_app_icons.exists() { merge_dir_no_overwrite(&dst_app_icons, &src_app_icons)?; }
+                    if dst_app_icons.exists() { fs::remove_dir_all(&dst_app_icons).map_err(|e| format!("删除目标图标目录失败: {}", e))?; }
+                    safe_move_item(&src_app_icons, &dst_app_icons)?;
+                }
+                if src_db.exists() {
+                    if dst_db.exists() {
+                        init_database(src_db.to_str().ok_or("数据库路径无效")?)?;
+                        merge_database(&dst_db)?;
+                        close_database();
+                        fs::remove_file(&dst_db).map_err(|e| format!("删除目标数据库失败: {}", e))?;
+                    }
+                    safe_move_item(&src_db, &dst_db)?;
+                }
+            }
+            _ => {
+                return Err(format!("不支持的迁移模式: {}", mode));
             }
         }
-        _ => {
-            return Err(format!("不支持的迁移模式: {}", mode));
+
+        for name in ["quickclipboard.db-shm", "quickclipboard.db-wal"] {
+            let p = dst_dir.join(name);
+            if p.exists() { let _ = fs::remove_file(&p); }
+            let sp = src_dir.join(name);
+            if sp.exists() { let _ = fs::remove_file(&sp); }
         }
-    }
 
-    for name in ["quickclipboard.db-shm", "quickclipboard.db-wal"] {
-        let p = dst_dir.join(name);
-        if p.exists() { let _ = fs::remove_file(&p); }
-        let sp = src_dir.join(name);
-        if sp.exists() { let _ = fs::remove_file(&sp); }
-    }
+        Ok(())
+    })();
 
+    // 无论成败都重开 src 库(成功路径 src 库已迁移到 dst 或删除,src 路径
+    // 重开会新建空库——但设置未改,下次启动仍读旧路径,数据安全由备份保证;
+    // 失败路径 src 库原样保留,重开后本会话 DB 立即恢复可用)。
+    if let Some(src_db_str) = src_db.to_str() {
+        let _ = init_database(src_db_str);
+    }
+    result?;
+    let _ = crate::services::database::connection::with_connection(|conn| {
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+    });
     Ok(())
 }
 
@@ -1288,6 +1320,99 @@ mod tests {
         assert!(
             !close_to_finish.contains("init_database"),
             "init_database 必须位于闭包之后(错误路径也能执行到)"
+        );
+    }
+
+    // H2(换存储目录关库早返不重开):change_storage_dir_internal close_database 后
+    // 迁移体必须收进闭包、错误经闭包返回,外层无论成败统一重开 src 库并仅在
+    // 成功后才让调用方持久化新设置——否则磁盘满/跨盘复制失败时 DB 永久关闭、
+    // 剪贴板监听与所有 DB 命令本会话全部失效,且设置已被改掉。
+    #[test]
+    fn change_storage_dir_internal_reopens_database_on_all_paths() {
+        let src = strip_line_comments(&source_file("src/services/data_management/mod.rs"));
+        let body = fn_body(&src, "change_storage_dir_internal");
+        let close_pos = body
+            .find("close_database()")
+            .expect("迁移必须先关库");
+        let after_close = &body[close_pos..];
+        // 关库后必须用闭包收敛迁移体
+        let closure_pos = after_close
+            .find("(|| -> Result<(), String> {")
+            .expect("关库后必须用闭包收敛迁移体");
+        // 闭包必须被调用(不是只定义不执行)
+        let invoke_pos = after_close
+            .find("})();")
+            .expect("闭包必须立即调用");
+        assert!(
+            closure_pos < invoke_pos,
+            "闭包调用必须位于闭包定义之后"
+        );
+        // init_database 必须在闭包调用之后(失败路径也能执行到重开)
+        let reopen_pos = after_close
+            .find("init_database(src_db_str)")
+            .expect("迁移无论成败都必须重开 src 库");
+        assert!(
+            invoke_pos < reopen_pos,
+            "init_database 必须位于闭包调用之后"
+        );
+        // result? 必须在重开之后:迁移失败也不吞掉错误,且重开先于早返
+        let result_pos = after_close
+            .find("result?;")
+            .expect("闭包结果必须向调用方传播");
+        assert!(
+            reopen_pos < result_pos,
+            "result? 必须位于重开库之后(错误路径也重开)"
+        );
+        // 负向:闭包定义到调用之间不得出现闭包外的重开锚点(init_database(src_db_str)
+        // 是外层无论成败都执行的重开;merge 分支内临时开库走的是
+        // init_database(src_db.to_str()...?)? 带错误传播的合法迁移逻辑,不算)。
+        let closure_def_to_call = &after_close[..invoke_pos];
+        assert!(
+            !closure_def_to_call.contains("init_database(src_db_str)"),
+            "闭包外的无条件重开(init_database(src_db_str))不得藏在闭包内部"
+        );
+    }
+
+    // H1(替换导入关库早返不重开):import_data_zip 的 replace 分支与 D2 export
+    // 同款病——close_database 后替换步骤若散布 `?` 早返,失败时既不重开库又已
+    // 改掉设置,下次启动指向半替换目录。闭包收敛 + 无条件重开 + 设置后置。
+    #[test]
+    fn import_replace_reopens_database_before_persisting_settings() {
+        let src = strip_line_comments(&source_file("src/services/data_management/mod.rs"));
+        let body = fn_body(&src, "import_data_zip");
+        let close_pos = body
+            .find("close_database()")
+            .expect("导入必须先关库");
+        let after_close = &body[close_pos..];
+        // 关库后必须用闭包收敛替换体
+        let closure_pos = after_close
+            .find("(|| -> Result<(), String> {")
+            .expect("关库后必须用闭包收敛替换体");
+        let invoke_pos = after_close
+            .find("})();")
+            .expect("闭包必须立即调用");
+        assert!(closure_pos < invoke_pos, "闭包调用必须位于闭包定义之后");
+        // 无论成败都必须重开库(闭包之后)
+        let reopen_pos = after_close
+            .find("init_database(db_path.to_str()")
+            .expect("替换无论成败都必须重开库");
+        assert!(invoke_pos < reopen_pos, "init_database 必须位于闭包调用之后");
+        // 顺序:重开 -> 传播重开结果 -> 成功后才持久化设置
+        let reopen_result_pos = after_close
+            .find("reopen?;")
+            .expect("重开结果必须向调用方传播");
+        let update_pos = after_close
+            .find("update_settings(new_settings.clone())")
+            .expect("替换与重开都成功后才持久化设置");
+        assert!(
+            reopen_pos < reopen_result_pos && reopen_result_pos < update_pos,
+            "顺序必须为重开 -> 重开结果 -> 持久化设置"
+        );
+        // 负向:闭包定义到调用之间不得出现 init_database
+        let closure_def_to_call = &after_close[..invoke_pos];
+        assert!(
+            !closure_def_to_call.contains("init_database"),
+            "init_database 不得藏在闭包内部"
         );
     }
 
