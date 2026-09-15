@@ -116,31 +116,67 @@ fn backup_full_zip(dir: &Path) -> Result<Option<PathBuf>, String> {
     let db = dir.join("quickclipboard.db");
     let images_dir = dir.join("clipboard_images");
     let app_icons_dir = dir.join("app_icons");
-    if !db.exists() && !images_dir.exists() { return Ok(None); }
-    
+    // D3:备份清单必须覆盖全部会被 reset/替换导入清理的目录——重置全部数据
+    // 会删 clipboard_images + image_library + app_icons + db,替换导入会删
+    // clipboard_images + image_library + app_icons;若备份缺 image_library
+    // 与 pin_images,执行这两类操作前图库与贴图数据永久丢失,备份里没有。
+    let image_library_dir = dir.join("image_library");
+    let pin_images_dir = dir.join("pin_images");
+    if !db.exists() && !images_dir.exists() && !image_library_dir.exists() && !pin_images_dir.exists() {
+        return Ok(None);
+    }
+
     let backups = dir.join("backups");
     fs::create_dir_all(&backups).map_err(|e| e.to_string())?;
     let ts_str = Local::now().format("%Y%m%d-%H%M%S").to_string();
     let name = format!("quickclipboard-backup-{}.zip", ts_str);
     let target = backups.join(&name);
-    
+
     let file = fs::File::create(&target).map_err(|e| e.to_string())?;
     let mut zip = zip::ZipWriter::new(file);
     let options = zip::write::SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated);
-    
+
     if db.exists() {
         let mut f = fs::File::open(&db).map_err(|e| e.to_string())?;
         zip.start_file("quickclipboard.db", options).map_err(|e| e.to_string())?;
         std::io::copy(&mut f, &mut zip).map_err(|e| e.to_string())?;
     }
-    
+
     if images_dir.exists() {
         for entry in fs::read_dir(&images_dir).into_iter().flatten().flatten() {
             let path = entry.path();
             if path.is_file() {
                 if let Some(fname) = path.file_name().and_then(|s| s.to_str()) {
                     let zip_path = format!("clipboard_images/{}", fname);
+                    let mut f = fs::File::open(&path).map_err(|e| e.to_string())?;
+                    zip.start_file(&zip_path, options).map_err(|e| e.to_string())?;
+                    std::io::copy(&mut f, &mut zip).map_err(|e| e.to_string())?;
+                }
+            }
+        }
+    }
+
+    if image_library_dir.exists() {
+        for entry in fs::read_dir(&image_library_dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(fname) = path.file_name().and_then(|s| s.to_str()) {
+                    let zip_path = format!("image_library/{}", fname);
+                    let mut f = fs::File::open(&path).map_err(|e| e.to_string())?;
+                    zip.start_file(&zip_path, options).map_err(|e| e.to_string())?;
+                    std::io::copy(&mut f, &mut zip).map_err(|e| e.to_string())?;
+                }
+            }
+        }
+    }
+
+    if pin_images_dir.exists() {
+        for entry in fs::read_dir(&pin_images_dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(fname) = path.file_name().and_then(|s| s.to_str()) {
+                    let zip_path = format!("pin_images/{}", fname);
                     let mut f = fs::File::open(&path).map_err(|e| e.to_string())?;
                     zip.start_file(&zip_path, options).map_err(|e| e.to_string())?;
                     std::io::copy(&mut f, &mut zip).map_err(|e| e.to_string())?;
@@ -162,7 +198,7 @@ fn backup_full_zip(dir: &Path) -> Result<Option<PathBuf>, String> {
             }
         }
     }
-    
+
     if let Ok(settings_path) = SettingsStorage::get_settings_path() {
         if settings_path.exists() {
             if let Ok(mut f) = fs::File::open(&settings_path) {
@@ -171,7 +207,7 @@ fn backup_full_zip(dir: &Path) -> Result<Option<PathBuf>, String> {
             }
         }
     }
-    
+
     zip.finish().map_err(|e| e.to_string())?;
     enforce_backup_retention(&backups, 10)?;
     Ok(Some(target))
@@ -1189,6 +1225,32 @@ pub fn export_data_zip(target_path: PathBuf) -> Result<PathBuf, String> {
 mod tests {
     use super::safe_zip_entry_name;
     use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+    // D3(备份缺图库/贴图):backup_full_zip 必须覆盖全部会被 reset/替换导入
+    // 清理的目录——清理侧删 clipboard_images + image_library + app_icons,
+    // 备份若缺 image_library 与 pin_images,执行重置/替换导入前图库与贴图
+    // 数据永久丢失,备份里没有可回滚。
+    #[test]
+    fn backup_full_zip_covers_image_library_and_pin_images() {
+        let src = strip_line_comments(&source_file("src/services/data_management/mod.rs"));
+        let body = fn_body(&src, "backup_full_zip");
+        // 早返守卫必须覆盖新增目录:任一存在就要备份
+        for dir in ["image_library", "pin_images"] {
+            assert!(
+                body.contains(&format!("{dir}_dir")),
+                "备份必须声明 {} 目录变量",
+                dir
+            );
+        }
+        // 每个被清目录都必须出现在 zip 前缀里(format!("xxx/{{}}", fname))
+        for prefix in ["clipboard_images/", "image_library/", "pin_images/", "app_icons/"] {
+            assert!(
+                body.contains(&format!("{prefix}{{}}")),
+                "备份必须写入 {} 前缀的 zip 条目",
+                prefix
+            );
+        }
+    }
 
     // D2(关库早返不重开):export_data_zip close_database 后必须保证
     // init_database 一定执行——错误路径一律经闭包收敛,外层统一重开库。
