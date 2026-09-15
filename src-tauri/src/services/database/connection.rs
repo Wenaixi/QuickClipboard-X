@@ -612,9 +612,42 @@ fn migrate_favorites_auto_titles(conn: &Connection) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
 
     fn mem() -> rusqlite::Connection {
         rusqlite::Connection::open_in_memory().expect("内存库打开失败")
+    }
+
+    // M3(编排护栏):三个 dedupe 调用必须出现在对应 CREATE UNIQUE INDEX 之前。
+    // 行为测试只调 dedupe 函数本身、不经过 create_tables,注释掉 create_tables
+    // 里的 dedupe 调用照样 ok——无法防回归。此护栏读 create_tables 真源码,
+    // 按 find() 下标断言"去重先于建索引"的编排,§10.3 铁律反证见红。
+    #[test]
+    fn create_tables_dedupes_before_each_unique_index() {
+        let src = strip_line_comments(&source_file("src/services/database/connection.rs"));
+        let body = fn_body(&src, "create_tables");
+        for (dedupe_call, index_stmt) in [
+            (
+                "dedupe_clipboard_data_unique_key(conn)",
+                "idx_clipboard_data_unique",
+            ),
+            (
+                "dedupe_clipboard_uuid(conn)",
+                "idx_clipboard_uuid_unique",
+            ),
+            (
+                "dedupe_favorites_source_clipboard_uuid(conn)",
+                "idx_favorites_source_clipboard_uuid",
+            ),
+        ] {
+            let d = body.find(dedupe_call).unwrap_or_else(|| {
+                panic!("create_tables 必须先调用 {}", dedupe_call)
+            });
+            let i = body.find(index_stmt).unwrap_or_else(|| {
+                panic!("create_tables 必须创建 {}", index_stmt)
+            });
+            assert!(d < i, "{} 必须先于 {} 执行", dedupe_call, index_stmt);
+        }
     }
 
     // M3:clipboard_data 重复 (target_kind,target_id,format_name) 只保留 id 最大
