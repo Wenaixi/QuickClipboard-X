@@ -59,7 +59,9 @@ mod windows_impl {
 
     // 启动剪贴板来源监控
     pub fn start_clipboard_source_monitor() {
+        use std::sync::mpsc;
         use std::thread;
+        use std::time::Duration;
         use windows::Win32::Foundation::{
             GetLastError, ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, WPARAM,
         };
@@ -80,12 +82,15 @@ mod windows_impl {
             return;
         }
 
+        // 线程 id 在线程体内才写入,start 若不等待就绪就返回,紧随其后的
+        // stop 会读到 0 跳过投递 WM_QUIT,线程永久阻塞在 GetMessageW。
+        let (thread_id_sender, thread_id_receiver) = mpsc::channel::<u32>();
+
         thread::spawn(move || {
             unsafe {
-                SOURCE_MONITOR_THREAD_ID.store(
-                    windows::Win32::System::Threading::GetCurrentThreadId(),
-                    Ordering::SeqCst,
-                );
+                let thread_id = windows::Win32::System::Threading::GetCurrentThreadId();
+                SOURCE_MONITOR_THREAD_ID.store(thread_id, Ordering::SeqCst);
+                let _ = thread_id_sender.send(thread_id);
                 unsafe extern "system" fn wnd_proc(
                     hwnd: HWND,
                     msg: u32,
@@ -150,6 +155,10 @@ mod windows_impl {
                 SOURCE_MONITOR_THREAD_ID.store(0, Ordering::SeqCst);
             }
         });
+
+        // 等待线程 id 就绪,start 返回后 stop 一定投递得到 WM_QUIT;
+        // 若线程启动失败,最多阻塞 1 秒后带着 RUNNING=false 返回。
+        let _ = thread_id_receiver.recv_timeout(Duration::from_millis(1000));
     }
 
     // 停止剪贴板来源监控
@@ -626,6 +635,51 @@ mod tests {
         assert!(
             !start_body.contains("GetMessageW(&mut msg, Some(hwnd), 0, 0)"),
             "GetMessageW 不得用窗口句柄，窗口消息循环收不到 WM_QUIT"
+        );
+    }
+
+    // §10.3 源码护栏：start 必须在返回前等线程 id 就绪——线程 id 在线程
+    // 体内才写入,若 start 不等就绪就返回,紧随其后的 stop 会读到 0 而
+    // 跳过投递 WM_QUIT,线程永久阻塞在 GetMessageW 成为泄漏线程。
+    #[test]
+    fn source_monitor_start_waits_for_thread_id_ready() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/system/app_filter.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 app_filter.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start_pos = stripped
+            .find("pub fn start_clipboard_source_monitor")
+            .expect("缺 start_clipboard_source_monitor");
+        let start_end = stripped[start_pos + 1..]
+            .find("\n    pub fn ")
+            .map(|i| start_pos + 1 + i)
+            .unwrap_or(stripped.len());
+        let start_body = &stripped[start_pos..start_end];
+        let store_pos = start_body
+            .find("SOURCE_MONITOR_THREAD_ID.store(thread_id")
+            .expect("start 必须把当前线程 id 写入静态变量");
+        let send_pos = start_body
+            .find("thread_id_sender.send(thread_id)")
+            .expect("start 必须在线程 id 写入后发送就绪信号");
+        let spawn_pos = start_body
+            .find("thread::spawn")
+            .expect("start 必须启动线程");
+        let recv_pos = start_body
+            .find("recv_timeout")
+            .expect("start 必须等待线程 id 就绪信号");
+        assert!(
+            store_pos < send_pos,
+            "必须先写线程 id 再发就绪信号,否则等待方收到信号时 id 可能尚未写入"
+        );
+        assert!(
+            spawn_pos < recv_pos,
+            "必须在线程启动之后等待就绪信号,start 返回时线程 id 才可用"
         );
     }
 
