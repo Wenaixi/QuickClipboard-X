@@ -130,20 +130,15 @@ export async function addToFavorites(id) {
 
 
 // 贴图片到屏幕
+// r6-window-3:原实现 catch 里再调同一个 pin_image_from_file 充当"回退",
+// 与主分支完全相同,fallback 永不成功,纯冗余;贴图失败直接向上抛错。
 export async function pinImageToScreen(filePath) {
   try {
     await invoke('pin_image_from_file', { filePath })
     return true
   } catch (error) {
-    console.error('原生贴图失败，回退到 Tauri WebView 版:', error)
-    try {
-      await invoke('pin_image_from_file', { filePath })
-      return true
-    } catch (fallbackError) {
-      console.error('贴图到屏幕失败（原生版和Tauri版均失败）:', error, fallbackError)
-      const combinedError = new Error(`贴图到屏幕失败: 原生版 - ${error?.message || error}; Tauri WebView 版 - ${fallbackError?.message || fallbackError}`)
-      throw combinedError
-    }
+    console.error('贴图到屏幕失败:', error)
+    throw error
   }
 }
 
