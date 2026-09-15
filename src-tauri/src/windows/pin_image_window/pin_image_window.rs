@@ -9,6 +9,11 @@ use tauri::{AppHandle, Listener, Manager, WebviewWindow, WebviewWindowBuilder, S
 static PIN_IMAGE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 static PIN_IMAGE_DATA_MAP: OnceCell<Mutex<HashMap<String, PinImageData>>> = OnceCell::new();
 
+// w7:预览窗口建窗流程串行化锁——固定标签 "image-preview" 下并发请求会交错
+// close/insert/create,数据与窗口错位(详见 pin_image_from_file 注释)。tokio
+// 锁可跨 await 持有,命令 future 保持 Send;OnceCell 惰性初始化同 PIN_IMAGE_DATA_MAP。
+static PREVIEW_WINDOW_LOCK: OnceCell<tokio::sync::Mutex<()>> = OnceCell::new();
+
 // 锁 helper:OnceCell + Mutex poison 双重处理
 // ponytail:9 个调用点都走这里,统一 poison 恢复语义
 fn lock_pin_data() -> std::sync::MutexGuard<'static, HashMap<String, PinImageData>> {
@@ -114,6 +119,17 @@ pub async fn pin_image_from_file(
         "image-preview".to_string()
     } else {
         format!("pin-image-{}", PIN_IMAGE_COUNTER.fetch_add(1, Ordering::SeqCst))
+    };
+
+    // w7:预览窗口整个建窗流程串行化(建窗前就取锁)——固定标签 "image-preview"
+    // 下两个并发请求(如预览与真实贴图交错、或 menu hover 连续触发)会交错执行:
+    // A 关闭旧窗、A 写入数据、B 关闭 A 新窗、A/B 各自 create 同一标签(第二个
+    // WebviewWindowBuilder::build 对已存在 label 抛错或复用),窗口与其数据错位。
+    // 非预览窗口标签唯一(PIN_IMAGE_COUNTER 递增),无此竞态,不需要取锁。
+    let _preview_guard = if is_preview {
+        Some(PREVIEW_WINDOW_LOCK.get_or_init(|| tokio::sync::Mutex::new(())).lock().await)
+    } else {
+        None
     };
 
     if is_preview {
@@ -571,6 +587,61 @@ mod tests {
         assert!(
             fn_body.contains("Err(\"贴图编辑功能当前不可用\".to_string())"),
             "必须直接返回不可用"
+        );
+    }
+
+    // w7(预览并发建窗数据错位):pin_image_from_file 的预览分支必须先取
+    // PREVIEW_WINDOW_LOCK 再执行 close/insert/create 整个流程——固定标签
+    // "image-preview" 下并发请求交错会导致窗口与其数据错位(详见函数注释)。
+    // 护栏断言:取锁位于窗口标签确定之后、窗口创建调用之前。
+    #[test]
+    fn preview_window_creation_is_serialized_before_create() {
+        let src = std::fs::read_to_string(format!(
+            "{}/src/windows/pin_image_window/pin_image_window.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读取贴图窗口源码失败");
+        let stripped: String = src
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = stripped
+            .find("pub async fn pin_image_from_file")
+            .expect("缺 pin_image_from_file");
+        let rest = &stripped[start..];
+        let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(stripped.len());
+        let body = &stripped[start..end];
+        // 锁必须被实际获取(变量名以 _preview_guard 开头,get_or_init 惰性初始化)
+        let lock_pos = body
+            .find("PREVIEW_WINDOW_LOCK")
+            .expect("预览分支必须先取 PREVIEW_WINDOW_LOCK 串行化");
+        // 取锁必须早于窗口创建(create_pin_image_window)——串行化覆盖整个建窗流程
+        let create_pos = body
+            .find("create_pin_image_window(&app, &window_label")
+            .expect("必须创建贴图窗口");
+        assert!(
+            lock_pos < create_pos,
+            "PREVIEW_WINDOW_LOCK 必须在 create_pin_image_window 之前获取"
+        );
+        // 取锁必须晚于标签确定——非预览窗口不走锁,锁只保护固定标签
+        let label_pos = body
+            .find("let window_label = if is_preview")
+            .expect("必须先确定窗口标签");
+        assert!(
+            label_pos < lock_pos,
+            "窗口标签确定必须先于取锁(锁只保护预览固定标签)"
+        );
+        // 取锁必须仅出现一次,且以 Some(PREVIEW_WINDOW_LOCK 形态被 if is_preview
+        // 守卫——非预览分支 else 为 None,标签唯一无需串行化。
+        assert_eq!(
+            body.matches("PREVIEW_WINDOW_LOCK").count(),
+            1,
+            "取锁必须仅出现一次(仅预览分支)"
+        );
+        assert!(
+            body.contains("Some(PREVIEW_WINDOW_LOCK"),
+            "取锁必须位于 if is_preview 的 Some 分支(非预览为 None)"
         );
     }
 }
