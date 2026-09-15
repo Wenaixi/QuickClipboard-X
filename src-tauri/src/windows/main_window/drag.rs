@@ -78,19 +78,19 @@ mod platform {
                     let vy = BOUND_TOP.load(Ordering::Relaxed);
                     let vright = BOUND_RIGHT.load(Ordering::Relaxed);
                     let vbottom = BOUND_BOTTOM.load(Ordering::Relaxed);
-                    wp.x = wp.x.clamp(vx, vright);
-                    wp.y = wp.y.clamp(vy, vbottom);
+                    wp.x = wp.x.max(vx).min(vright);
+                    wp.y = wp.y.max(vy).min(vbottom);
                 }
             } else {
                 let vx = BOUND_LEFT.load(Ordering::Relaxed);
                 let vy = BOUND_TOP.load(Ordering::Relaxed);
                 let vright = BOUND_RIGHT.load(Ordering::Relaxed);
                 let vbottom = BOUND_BOTTOM.load(Ordering::Relaxed);
-                wp.x = wp.x.clamp(vx, vright);
-                // w8:兜底分支与上方 monitor 分支同款 clamp(vy, vbottom)——旧实现
+                wp.x = wp.x.max(vx).min(vright);
+                // w8:兜底分支与上方 monitor 分支同款钳制(vy, vbottom)——旧实现
                 // 只 wp.y.max(vy) 钳上边,缺下边,锁竞争/无 monitor 命中时窗口可被
                 // 拖出虚拟屏底边之外。
-                wp.y = wp.y.clamp(vy, vbottom);
+                wp.y = wp.y.max(vy).min(vbottom);
             }
         }
 
@@ -339,17 +339,18 @@ mod w6_restore_wndproc_guard {
             "兜底分支与 monitor 分支必须都读 BOUND_BOTTOM,当前只读 {} 次",
             vbottom_count
         );
-        // 兜底分支(clamp(vx, vright) 出现两次)必须用 clamp(vy, vbottom)
-        let clamp_count = body.matches("wp.y.clamp(vy, vbottom)").count();
+        // 兜底分支必须用 max/min 组合钳制上下左右,与 monitor 分支同款
+        let clamp_count = body.matches("wp.y.max(vy).min(vbottom)").count();
         assert!(
             clamp_count >= 2,
-            "monitor 分支与兜底分支都必须用 clamp(vy, vbottom),当前 {} 次",
+            "monitor 分支与兜底分支都必须用 max(vy).min(vbottom),当前 {} 次",
             clamp_count
         );
-        // 负向:禁止兜底分支退回 max(vy)(只钳上边)
+        // 负向:禁止用 i32::clamp——min>max(窗口大于虚拟屏)时 clamp 直接 panic,
+        // 在 WndProc 回调里 panic 会跨 FFI 中止整个进程。x/y 都不得回退 clamp。
         assert!(
-            !body.contains("wp.y = wp.y.max(vy)"),
-            "兜底分支禁止只钳上边(wp.y.max(vy)),必须与 monitor 分支同款 clamp 底边"
+            !body.contains("clamp("),
+            "window_proc 禁止 i32::clamp(min>max 时 panic),必须用 max/min 组合"
         );
     }
 }
