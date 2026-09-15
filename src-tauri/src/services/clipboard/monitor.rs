@@ -263,6 +263,13 @@ pub fn start_clipboard_monitor() -> Result<(), String> {
 
 pub fn stop_clipboard_monitor() -> Result<(), String> {
     let was_running = IS_RUNNING.swap(false, Ordering::SeqCst);
+    // 推进代数使在飞 capture worker 下一轮自检退出——stop 只 join watcher,
+    // worker 是 fire-and-forget 线程,依赖代数检查自行终止。
+    // 同时复位在飞标志:stop→start 后若 CAPTURE_IN_FLIGHT 仍为 true,
+    // schedule_capture_worker 的 CAS 永远失败,新捕获只置 PENDING 不启动
+    // worker,监控永久停摆。
+    GENERATION.fetch_add(1, Ordering::SeqCst);
+    CAPTURE_IN_FLIGHT.store(false, Ordering::SeqCst);
     if was_running {
         // 停止剪贴板来源监控
         #[cfg(target_os = "windows")]
@@ -288,9 +295,18 @@ pub fn is_monitor_running() -> bool {
     IS_RUNNING.load(Ordering::Relaxed)
 }
 
+// 在启动时快照代数;每轮捕获前校验运行标志与本代代数——
+// stop_clipboard_monitor 只 join watcher 不 join worker,停止后 worker
+// 若继续执行会把剪贴板写进历史;stop→start 后旧代捕获也会污染新代。
 fn spawn_capture_worker_loop() {
+    let worker_generation = GENERATION.load(Ordering::SeqCst);
     thread::spawn(move || {
         loop {
+            if !IS_RUNNING.load(Ordering::SeqCst)
+                || GENERATION.load(Ordering::SeqCst) != worker_generation
+            {
+                break;
+            }
             CAPTURE_PENDING.store(false, Ordering::SeqCst);
             process_clipboard_change_once();
 
@@ -501,6 +517,83 @@ mod tests {
             created_at: 1,
             updated_at: 1,
         }
+    }
+
+    // §10.3 源码护栏：capture worker 必须在每轮捕获前检查运行标志与代数。
+    // stop_clipboard_monitor 只 join watcher 不 join worker(worker 是
+    // fire-and-forget 线程)——不检查则停止后 worker 仍把剪贴板写进历史,
+    // stop→start 后旧代捕获污染新代。stop 侧必须推进代数并复位在飞标志,
+    // 否则 stop→start 后 schedule_capture_worker 的 CAS 永远失败,
+    // 新捕获只置 PENDING 不启动 worker,监控永久停摆。
+    #[test]
+    fn capture_worker_checks_generation_and_stop_resets_inflight() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/clipboard/monitor.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 monitor.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let worker_start = stripped
+            .find("fn spawn_capture_worker_loop")
+            .expect("缺 spawn_capture_worker_loop");
+        let worker_end = stripped[worker_start + 1..]
+            .find("\nfn schedule_capture_worker")
+            .map(|i| worker_start + 1 + i)
+            .unwrap_or(stripped.len());
+        let worker_body = &stripped[worker_start..worker_end];
+        // 循环守卫必须以运行标志开头,且代数校验用"不匹配比较"明确出现在
+        // 同一守卫里——快照行 let worker_generation = GENERATION.load(...)
+        // 也含 GENERATION.load 字面,存在性断言区分不了"快照"与"一致性检查",
+        // 必须锚定 `!= worker_generation` 比较。
+        let guard_start = worker_body
+            .find("if !IS_RUNNING.load(Ordering::SeqCst)")
+            .expect("worker 循环守卫必须以运行标志检查开头");
+        let guard_end = worker_body[guard_start..]
+            .find("{\n")
+            .map(|i| guard_start + i + 1)
+            .unwrap_or(worker_body.len());
+        let guard = &worker_body[guard_start..guard_end];
+        assert!(
+            guard.contains("IS_RUNNING.load("),
+            "循环守卫必须校验运行标志,否则停止后 worker 仍把剪贴板写进历史"
+        );
+        assert!(
+            guard.contains("!= worker_generation"),
+            "循环守卫必须含代数不匹配比较,否则 stop→start 后旧代捕获污染新代"
+        );
+        assert!(
+            worker_body[..guard_start].contains("worker_generation = GENERATION.load("),
+            "worker 必须在守卫前快照代数供一致性比较"
+        );
+        let capture_call = worker_body
+            .find("process_clipboard_change_once(")
+            .expect("worker 必须执行捕获");
+        assert!(
+            guard_start < capture_call,
+            "守卫必须早于捕获调用,否则停止后仍执行捕获"
+        );
+
+        let stop_start = stripped
+            .find("pub fn stop_clipboard_monitor")
+            .expect("缺 stop_clipboard_monitor");
+        let stop_end = stripped[stop_start + 1..]
+            .find("\npub fn ")
+            .map(|i| stop_start + 1 + i)
+            .unwrap_or(stripped.len());
+        let stop_body = &stripped[stop_start..stop_end];
+        assert!(
+            stop_body.contains("GENERATION.fetch_add(1,"),
+            "stop 必须推进代数使在飞 worker 失效"
+        );
+        assert!(
+            stop_body.contains("CAPTURE_IN_FLIGHT.store(false,"),
+            "stop 必须复位在飞标志,否则 CAS 永久失败、监控停摆"
+        );
     }
 
     #[test]
