@@ -42,6 +42,7 @@ function App() {
   const [shortcutsTab, setShortcutsTab] = useState('globalHotkey');
   const shortcutsTabs = [
     { id: 'globalHotkey', label: t('settings.shortcuts.tabs.globalHotkey') },
+    { id: 'screenshotHotkey', label: t('settings.shortcuts.tabs.screenshotHotkey') },
     { id: 'pinOps', label: t('settings.shortcuts.tabs.pinOps') },
     { id: 'navigation', label: t('settings.shortcuts.tabs.navigation') },
     { id: 'quickActions', label: t('settings.shortcuts.tabs.quickActions') },

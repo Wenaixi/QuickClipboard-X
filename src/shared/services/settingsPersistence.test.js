@@ -91,6 +91,16 @@ test('全部截图与 AI 字段在 Rust 模型与前端默认值三处同步且 
   for (const key of ['screenshotShortcut', 'screenshotQuickSaveShortcut', 'screenshotQuickPinShortcut', 'screenshotQuickOcrShortcut']) {
     assert.ok(shortcutsUi.includes(`settings.${key}`), `ShortcutsSection 必须消费 ${key}`);
   }
+  // 截图热键必须挂到设置页 Tab 栏(shortcutsTabs),否则用户无入口编辑。
+  const settingsAppSource = fs.readFileSync(
+    path.join(root, 'src/windows/settings/App.jsx'),
+    'utf8'
+  );
+  assert.match(
+    settingsAppSource,
+    /\{ id: 'screenshotHotkey', label: t\('settings\.shortcuts\.tabs\.screenshotHotkey'\) \}/,
+    'App.jsx shortcutsTabs 必须含 screenshotHotkey 导航入口'
+  );
   // 截图功能字段在 ScreenshotSection 消费。
   const screenshotUi = fs.readFileSync(
     path.join(root, 'src/windows/settings/sections/ScreenshotSection.jsx'),
