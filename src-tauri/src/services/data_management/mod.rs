@@ -6,6 +6,7 @@ use crate::services::{get_data_directory, get_settings, update_settings};
 use crate::services::settings::storage::SettingsStorage;
 use crate::services::database::{init_database};
 use crate::services::database::connection::{close_database, with_connection};
+use crate::services::database::tombstones::record_sync_tombstone_in_conn;
 use crate::services::system::hotkey::reload_from_settings;
 
 #[derive(Debug, Clone, Serialize)]
@@ -604,6 +605,39 @@ fn merge_database(src_db: &Path) -> Result<(), String> {
         // 记录导入库 clipboard.id 到当前库新 id 的映射，用于迁移 clipboard_data。
         let id_mapping = merge_clipboard_from_importdb(&tx)?;
         merge_clipboard_data_from_importdb(&tx, &id_mapping)?;
+
+        // r7-db-4:删除墓碑也必须并入——源库已删除的记录不能在导入后复活。
+        // 只同步"比本地更新的墓碑"(源端 deleted_at > 本地),避免旧的删除
+        // 反向盖掉本地较新的复活。逐行取源端 deleted_at,应用全部是
+        // LWW 语义(每行最少删一次>插入一次)。
+        if importdb_has_table(conn, "sync_tombstones")? {
+            let mut tombstone_stmt = conn.prepare(
+                "SELECT collection, item_id, source_device_id, deleted_at
+                 FROM importdb.sync_tombstones",
+            )?;
+            let tombstones = tombstone_stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            })?;
+            for tombstone in tombstones {
+                let (collection, item_id, source_device_id, deleted_at) = tombstone?;
+                if collection.trim().is_empty() || item_id.trim().is_empty() {
+                    continue;
+                }
+                // 应用墓碑(含 LWW 语义:源端 deleted_at > 本地才生效)
+                let _ = record_sync_tombstone_in_conn(
+                    conn,
+                    &collection,
+                    &item_id,
+                    &source_device_id,
+                    deleted_at,
+                );
+            }
+        }
 
         reorder_clipboard_by_time(&tx);
         tx.commit()?;
@@ -1481,6 +1515,15 @@ mod tests {
         assert!(
             commit_pos < detach_pos,
             "DETACH 必须位于 commit 之后(失败时事务回滚仍需 importdb)"
+        );
+        // r7-db-4:删除墓碑必须并入合并——源库已删除记录不能在导入后复活。
+        // 复用的 record_sync_tombstone_in_conn 自带 LWW 语义,必须出现在事务内。
+        let tombstone_pos = body
+            .find("record_sync_tombstone_in_conn")
+            .expect("合并必须并入源库删除墓碑(sync_tombstones)");
+        assert!(
+            tx_pos < tombstone_pos && tombstone_pos < commit_pos,
+            "墓碑合并必须在事务内、且先于提交(否则导入后删除复活)"
         );
     }
 
