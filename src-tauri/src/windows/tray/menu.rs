@@ -256,6 +256,11 @@ fn handle_tray_menu_selection(app: &AppHandle, selected_id: &str) {
             super::restart_app_gracefully(app);
         }
         "quit" => {
+            // 退出前必须标记用户主动退出,否则低占用模式下 ExitRequested
+            // 会走 prevent_exit() 保活(is_low_memory_mode && !user_requested),
+            // 点退出后进程僵死无任何提示。与 native_menu/handlers.rs 的
+            // quit 分支(mark → exit)保持同一口径。
+            crate::services::low_memory::set_user_requested_exit(true);
             app.exit(0);
         }
         "pin-open-folder" => {
@@ -398,6 +403,36 @@ mod display_name_guard {
         assert!(
             !handle_body.contains("images.get(idx)"),
             "禁止用排序下标 get 定位贴图"
+        );
+    }
+
+    // WebView 托盘菜单 quit 分支必须与 native 菜单同一口径:先标记用户主动
+    // 退出再 exit。ExitRequested 在低占用模式且未标记用户主动退出时
+    // prevent_exit() 保活——缺 mark 会让「退出」变成僵尸进程。
+    #[test]
+    fn webview_tray_quit_marks_user_requested_exit_before_exit() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/windows/tray/menu.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读 menu.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        // 定位 quit 分支:选 quit 标签行到本函数最外层的闭包收尾前的片段。
+        let quit_at = stripped.find("\"quit\" => {").expect("缺 quit 分支");
+        let quit_body = &stripped[quit_at..];
+        let end = quit_body.find("\n        \"pin-open-folder\"").map(|i| quit_at + i).unwrap_or(stripped.len());
+        let body = &stripped[quit_at..end];
+        assert!(
+            body.contains("set_user_requested_exit(true)"),
+            "quit 分支必须先标记用户主动退出,否则低占用模式退出变僵尸"
+        );
+        assert!(
+            body.contains("app.exit(0)"),
+            "quit 分支必须以 app.exit(0) 结束,不得只标记不退出"
         );
     }
 }
