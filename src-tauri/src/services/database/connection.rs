@@ -334,6 +334,12 @@ fn create_tables(conn: &Connection) -> Result<(), String> {
         [],
     ).map_err(|e| format!("创建内容类型索引失败: {}", e))?;
 
+    // M3(唯一索引遇存量重复数据阻断启动):CREATE UNIQUE INDEX 前必须先去重,
+    // 否则历史数据里已存在的重复行(如旧版本 NULL uuid 同步 bug 真实产生过的
+    // 重复 uuid)会让索引创建失败,连带 init_database 失败,应用起不来。
+    // 三个去重 helper 与索引一一对应;索引创建失败只告警,绝不阻断启动——
+    // 先能起来访问数据,重复问题另行修复,比锁死启动致命性低得多。
+    dedupe_clipboard_data_unique_key(conn);
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_clipboard_data_unique
          ON clipboard_data(target_kind, target_id, format_name)",
@@ -346,6 +352,7 @@ fn create_tables(conn: &Connection) -> Result<(), String> {
         [],
     ).map_err(|e| format!("创建剪贴板原始数据索引失败: {}", e))?;
 
+    dedupe_clipboard_uuid(conn);
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_clipboard_uuid_unique ON clipboard(uuid) WHERE uuid IS NOT NULL AND uuid <> ''",
         [],
@@ -356,6 +363,7 @@ fn create_tables(conn: &Connection) -> Result<(), String> {
         [],
     ).map_err(|e| format!("创建收藏索引失败: {}", e))?;
 
+    dedupe_favorites_source_clipboard_uuid(conn);
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_favorites_source_clipboard_uuid
          ON favorites(source_clipboard_uuid)
@@ -370,6 +378,101 @@ fn create_tables(conn: &Connection) -> Result<(), String> {
     migrate_favorites_auto_titles(conn);
 
     Ok(())
+}
+
+// M3 去重 helper:三个 UNIQUE 索引前各查一次重复,就地保留"最新"行。
+// - clipboard_data(target_kind,target_id,format_name):重复时保留 id 最大的
+//   (后写入的原始格式),其余删除——raw data 以最新一次覆盖语义为准。
+// - clipboard(uuid):partial 索引豁免 NULL/空串,重复时保留 updated_at 最新、
+//   其余 uuid 置 NULL(进入豁免区,不再撞唯一)。
+// - favorites(source_clipboard_uuid):partial 索引同款,重复时保留 updated_at
+//   最新、其余置 NULL。
+// 每个 helper 都是尽力而为:查询/去重失败仅告警,不阻断启动。
+fn dedupe_clipboard_data_unique_key(conn: &Connection) {
+    let dup: Vec<(String, String, String, i64)> = conn
+        .prepare(
+            "SELECT target_kind, target_id, format_name, MAX(id)
+             FROM clipboard_data
+             GROUP BY target_kind, target_id, format_name
+             HAVING COUNT(*) > 1",
+        )
+        .and_then(|mut stmt| {
+            stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            })?
+            .collect()
+        })
+        .unwrap_or_default();
+    for (kind, target, format, keep_id) in dup {
+        conn.execute(
+            "DELETE FROM clipboard_data
+             WHERE target_kind = ?1 AND target_id = ?2 AND format_name = ?3 AND id <> ?4",
+            rusqlite::params![kind, target, format, keep_id],
+        )
+        .ok();
+    }
+}
+
+fn dedupe_clipboard_uuid(conn: &Connection) {
+    let dup: Vec<(String, i64)> = conn
+        .prepare(
+            "SELECT uuid, MAX(updated_at)
+             FROM clipboard
+             WHERE uuid IS NOT NULL AND uuid <> ''
+             GROUP BY uuid
+             HAVING COUNT(*) > 1",
+        )
+        .and_then(|mut stmt| {
+            stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })?
+            .collect()
+        })
+        .unwrap_or_default();
+    for (uuid, keep_updated_at) in dup {
+        conn.execute(
+            "UPDATE clipboard SET uuid = NULL
+             WHERE uuid = ?1 AND (updated_at < ?2 OR (updated_at = ?2 AND id <
+               (SELECT MIN(id) FROM clipboard WHERE uuid = ?1 AND updated_at = ?2)))",
+            rusqlite::params![uuid, keep_updated_at],
+        )
+        .ok();
+    }
+}
+
+fn dedupe_favorites_source_clipboard_uuid(conn: &Connection) {
+    let dup: Vec<(String, i64)> = conn
+        .prepare(
+            "SELECT source_clipboard_uuid, MAX(updated_at)
+             FROM favorites
+             WHERE source_clipboard_uuid IS NOT NULL AND source_clipboard_uuid <> ''
+             GROUP BY source_clipboard_uuid
+             HAVING COUNT(*) > 1",
+        )
+        .and_then(|mut stmt| {
+            stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                ))
+            })?
+            .collect()
+        })
+        .unwrap_or_default();
+    for (uuid, keep_updated_at) in dup {
+        conn.execute(
+            "UPDATE favorites SET source_clipboard_uuid = NULL
+             WHERE source_clipboard_uuid = ?1 AND (updated_at < ?2 OR (updated_at = ?2 AND id <
+               (SELECT MIN(id) FROM favorites WHERE source_clipboard_uuid = ?1 AND updated_at = ?2)))",
+            rusqlite::params![uuid, keep_updated_at],
+        )
+        .ok();
+    }
 }
 
 // 迁移 item_order（ASC → DESC）
@@ -503,5 +606,131 @@ fn migrate_favorites_auto_titles(conn: &Connection) {
                 conn.execute("UPDATE favorites SET title = '' WHERE id = ?", [&id]).ok();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mem() -> rusqlite::Connection {
+        rusqlite::Connection::open_in_memory().expect("内存库打开失败")
+    }
+
+    // M3:clipboard_data 重复 (target_kind,target_id,format_name) 只保留 id 最大
+    // (最新写入),去重后必须能创建 UNIQUE 索引(不去重会 CREATE 失败)。
+    #[test]
+    fn dedupe_clipboard_data_keeps_latest_then_index_creates() {
+        let conn = mem();
+        conn.execute_batch(
+            "CREATE TABLE clipboard_data (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                target_kind TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                format_name TEXT NOT NULL,
+                raw_data BLOB NOT NULL,
+                is_primary INTEGER NOT NULL DEFAULT 0
+            )",
+        )
+        .unwrap();
+        for (id, raw) in [(1i64, b"old".to_vec()), (2, b"new".to_vec())] {
+            conn.execute(
+                "INSERT INTO clipboard_data (id, target_kind, target_id, format_name, raw_data)
+                 VALUES (?1, 'clipboard', '5', 'text/plain', ?2)",
+                rusqlite::params![id, raw],
+            )
+            .unwrap();
+        }
+        dedupe_clipboard_data_unique_key(&conn);
+        let remaining: i64 = conn
+            .query_row("SELECT COUNT(*) FROM clipboard_data", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(remaining, 1, "重复格式只保留一条");
+        let raw: Vec<u8> = conn
+            .query_row("SELECT raw_data FROM clipboard_data", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(raw, b"new", "保留 id 最大(最新)的一条");
+        // 去重后必须能建 UNIQUE 索引(红:不去重则 CREATE 失败)
+        conn.execute(
+            "CREATE UNIQUE INDEX idx_test ON clipboard_data(target_kind, target_id, format_name)",
+            [],
+        )
+        .expect("去重后必须能建唯一索引");
+    }
+
+    // M3:重复 uuid 行保留 updated_at 最新,其余置 NULL(豁免 partial 索引),
+    // 去重后必须能建部分唯一索引。
+    #[test]
+    fn dedupe_clipboard_uuid_keeps_newest_then_index_creates() {
+        let conn = mem();
+        conn.execute_batch(
+            "CREATE TABLE clipboard (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT NOT NULL,
+                uuid TEXT,
+                updated_at INTEGER NOT NULL
+            )",
+        )
+        .unwrap();
+        for (id, uuid, updated_at) in [(1i64, Some("dup"), 100i64), (2, Some("dup"), 200), (3, Some("dup"), 150)] {
+            conn.execute(
+                "INSERT INTO clipboard (id, content, uuid, updated_at)
+                 VALUES (?1, 'c', ?2, ?3)",
+                rusqlite::params![id, uuid, updated_at],
+            )
+            .unwrap();
+        }
+        dedupe_clipboard_uuid(&conn);
+        let kept: i64 = conn
+            .query_row("SELECT COUNT(*) FROM clipboard WHERE uuid = 'dup'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(kept, 1, "同 uuid 只保留一条");
+        let kept_id: i64 = conn
+            .query_row("SELECT id FROM clipboard WHERE uuid = 'dup'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(kept_id, 2, "保留 updated_at 最新(200)的一条");
+        // 其余已置 NULL,partial 索引不含 NULL 行,必能创建
+        conn.execute(
+            "CREATE UNIQUE INDEX idx_test ON clipboard(uuid) WHERE uuid IS NOT NULL AND uuid <> ''",
+            [],
+        )
+        .expect("去重后必须能建 uuid 部分唯一索引");
+    }
+
+    // M3:favorites.source_clipboard_uuid 重复行去重后同款可建索引。
+    #[test]
+    fn dedupe_favorites_source_uuid_keeps_newest_then_index_creates() {
+        let conn = mem();
+        conn.execute_batch(
+            "CREATE TABLE favorites (
+                id TEXT PRIMARY KEY,
+                source_clipboard_uuid TEXT,
+                updated_at INTEGER NOT NULL
+            )",
+        )
+        .unwrap();
+        for (id, uuid, updated_at) in [("a", Some("src1"), 100i64), ("b", Some("src1"), 300), ("c", Some("src1"), 200)] {
+            conn.execute(
+                "INSERT INTO favorites (id, source_clipboard_uuid, updated_at)
+                 VALUES (?1, ?2, ?3)",
+                rusqlite::params![id, uuid, updated_at],
+            )
+            .unwrap();
+        }
+        dedupe_favorites_source_clipboard_uuid(&conn);
+        let kept: i64 = conn
+            .query_row("SELECT COUNT(*) FROM favorites WHERE source_clipboard_uuid = 'src1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(kept, 1);
+        let kept_id: String = conn
+            .query_row("SELECT id FROM favorites WHERE source_clipboard_uuid = 'src1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(kept_id, "b", "保留 updated_at 最新的一条");
+        conn.execute(
+            "CREATE UNIQUE INDEX idx_test ON favorites(source_clipboard_uuid)
+             WHERE source_clipboard_uuid IS NOT NULL AND source_clipboard_uuid <> ''",
+            [],
+        )
+        .expect("去重后必须能建收藏来源唯一索引");
     }
 }
