@@ -975,7 +975,25 @@ fn merge_clipboard_from_importdb(
         ])?;
 
         if let Some(old_id) = old_id {
-            id_map.insert(old_id, conn.last_insert_rowid());
+            // r7-db-2:INSERT OR IGNORE 撞 uuid 唯一索引被忽略的行不分配新 rowid,
+            // last_insert_rowid() 仍是上一条成功插入的 rowid——无条件取会把旧库
+            // raw formats 挂到错误本地点,粘贴格式错乱不可自愈。真实 id 按 uuid
+            // 回查(该行可能已被忽略,data 表必须重挂到既有本地点)。
+            let actual_id = if let Some(uuid) = uuid.as_deref() {
+                if uuid.is_empty() {
+                    conn.last_insert_rowid()
+                } else {
+                    conn.query_row(
+                        "SELECT id FROM clipboard WHERE uuid = ?1 LIMIT 1",
+                        rusqlite::params![uuid],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .unwrap_or_else(|_| conn.last_insert_rowid())
+                }
+            } else {
+                conn.last_insert_rowid()
+            };
+            id_map.insert(old_id, actual_id);
         }
     }
 
@@ -1543,6 +1561,25 @@ mod tests {
         assert!(
             tx_pos < tombstone_pos && tombstone_pos < commit_pos,
             "墓碑合并必须在事务内、且先于提交(否则导入后删除复活)"
+        );
+    }
+
+    // r7-db-2(merge id 映射错位):INSERT OR IGNORE 撞 uuid 唯一索引被忽略的行
+    // 不分配新 rowid,last_insert_rowid() 仍是上一条成功插入的 rowid——无条件
+    // 取会把旧库 raw formats 挂到错误本地点。真实 id 必须按 uuid 回查已存在
+    // 行(INSERT OR IGNORE 幂等合并的既有行)。反证:回退 last_insert_rowid
+    // 直取 → FAILED。
+    #[test]
+    fn merge_clipboard_remaps_id_by_uuid_not_last_insert_rowid() {
+        let src = strip_line_comments(&source_file("src/services/data_management/mod.rs"));
+        let body = fn_body(&src, "merge_clipboard_from_importdb");
+        assert!(
+            body.contains("SELECT id FROM clipboard WHERE uuid = ?1 LIMIT 1"),
+            "被忽略行的真实 id 必须按 uuid 回查(INSERT OR IGNORE 幂等合并的既有行)"
+        );
+        assert!(
+            !body.contains("id_map.insert(old_id, conn.last_insert_rowid())"),
+            "禁止无条件用 last_insert_rowid 映射(忽略行不更新它,会映射到上一条行)"
         );
     }
 
