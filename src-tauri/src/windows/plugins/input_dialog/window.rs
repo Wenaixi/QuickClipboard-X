@@ -86,6 +86,14 @@ pub async fn show_dialog(
     std::thread::spawn(move || {
         loop {
             std::thread::sleep(std::time::Duration::from_millis(100));
+
+            // 调用方已放弃等待(rx drop,如对话框窗口被用户关闭后 async
+            // 任务取消)——发送端立即感知并退出,不再为已无人等待的窗口
+            // 空转轮询。
+            if tx.is_closed() {
+                break;
+            }
+
             if app_clone.get_webview_window(&window_label).is_none() {
                 // 窗口已关闭，返回结果
                 let _ = tx.send(());
@@ -99,5 +107,39 @@ pub async fn show_dialog(
 
     // 获取结果
     Ok(super::get_result())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+    // 对话框等待轮询线程不能只盯着窗口——调用方已放弃等待(rx drop)时
+    // 发送端必须感知并退出,否则为已无人等待的窗口空转轮询,线程泄漏。
+    #[test]
+    fn input_dialog_poll_thread_exits_when_receiver_dropped() {
+        let src = strip_line_comments(&source_file("src/windows/plugins/input_dialog/window.rs"));
+        let body = fn_body(&src, "show_dialog");
+        let spawn_pos = body
+            .find("std::thread::spawn")
+            .expect("缺轮询线程");
+        let closed_pos = body
+            .find("tx.is_closed()")
+            .expect("轮询线程必须感知调用方已放弃等待(rx drop)");
+        assert!(
+            spawn_pos < closed_pos,
+            "轮询线程必须在循环内检查 tx.is_closed()"
+        );
+        let closed_seg = &body[spawn_pos..];
+        let window_check_pos = closed_seg
+            .find("get_webview_window(&window_label).is_none()")
+            .expect("轮询线程必须检查窗口是否关闭");
+        let closed_first = closed_seg
+            .find("tx.is_closed()")
+            .expect("缺 tx.is_closed 检查");
+        assert!(
+            closed_first < window_check_pos,
+            "rx drop 检查必须早于窗口轮询检查,避免空转"
+        );
+    }
 }
 
