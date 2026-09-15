@@ -286,6 +286,14 @@ pub fn add_group(name: String, icon: String, color: String) -> Result<GroupInfo,
 // 更新分组
 pub fn update_group(old_name: String, new_name: String, new_icon: String, new_color: String) -> Result<GroupInfo, String> {
     with_connection(|conn| {
+        // "全部"是收藏分组结构的哨兵行(前端按此筛选所有分组),禁止改名——
+        // 改名会让"全部"语义丢失、前端过滤条件失效。与 delete_group 同款拒绝。
+        if old_name == "全部" {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "不能修改'全部'分组".to_string()
+            ));
+        }
+
         if old_name != new_name {
             let exists: i64 = conn.query_row(
                 "SELECT COUNT(*) FROM groups WHERE name = ?1",
@@ -496,6 +504,7 @@ fn is_empty_or_transparent_group_color(raw: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{merge_group_icon, normalize_group_color, normalize_group_icon};
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
 
     #[test]
     fn normalizes_group_color_variants() {
@@ -520,6 +529,32 @@ mod tests {
         assert_eq!(merge_group_icon("ti ti-star", ""), "ti ti-star");
         assert_eq!(merge_group_icon("", ""), "ti ti-folder");
         assert_eq!(merge_group_icon("ti ti-star", "ti ti-tag"), "ti ti-tag");
+    }
+
+    // "全部"是收藏分组结构的哨兵行,前端按 group_name==="全部" 筛选所有分组。
+    // delete_group 已拒绝删除;update_group 若不拒绝改名,把"全部"改掉会让
+    // 哨兵语义丢失、收藏过滤条件失效,同步出去还会污染其他设备的分组结构。
+    #[test]
+    fn update_group_rejects_renaming_all_group() {
+        let src = strip_line_comments(&source_file("src/services/database/groups.rs"));
+        let body = fn_body(&src, "update_group");
+        let reject_pos = body
+            .find("old_name == \"全部\"")
+            .expect("update_group 必须拒绝把'全部'改名");
+        // 拒绝必须发生在任何 UPDATE 之前(函数体顶部)
+        let insert_pos = body
+            .find("SELECT COUNT(*) FROM groups WHERE name = ?1")
+            .expect("缺分组存在性检查");
+        assert!(
+            reject_pos < insert_pos,
+            "'全部'拒绝必须早于分组存在性检查与 UPDATE"
+        );
+        let delete_src = strip_line_comments(&source_file("src/services/database/groups.rs"));
+        let delete_body = fn_body(&delete_src, "delete_group");
+        assert!(
+            delete_body.contains("name == \"全部\""),
+            "delete_group 必须保留对'全部'的拒绝"
+        );
     }
 }
 
