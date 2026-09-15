@@ -66,7 +66,10 @@ pub async fn download_all(
         if settings.webdav_sync_images {
             let mut image_ids = collect_record_image_ids(&records_for_images);
             image_ids.extend(history_image_ids_from_metas()?);
-            download_images(client, image_ids).await?;
+            // 图片下载失败不得中止整个同步报告——单张图片缺失/网络抖动只
+            // 记入 report.errors,已拉取的历史记录仍正常返回,scheduler 不会
+            // 因一张图失败而整体重试。原 `?` 会跳过 store_report,同步白跑。
+            report.errors.extend(download_images(client, image_ids).await);
         }
     }
 
@@ -106,7 +109,7 @@ pub async fn download_all(
         if settings.webdav_sync_images {
             let mut image_ids = collect_record_image_ids(&records_for_images);
             image_ids.extend(favorite_image_ids_from_metas()?);
-            download_images(client, image_ids).await?;
+            report.errors.extend(download_images(client, image_ids).await);
         }
 
         match super::groups_sync::download_groups(client, force_download, &tombstone_states).await {
@@ -209,14 +212,26 @@ async fn download_collection(
     Ok(out)
 }
 
-async fn download_images(client: &WebdavClient, image_ids: HashSet<String>) -> Result<(), String> {
+// 下载记录引用的图片,收集每条失败错误返回——单张图片缺失/网络抖动
+// 不中止整个同步(调用方把错误并入 report.errors),已拉取记录仍正常。
+async fn download_images(client: &WebdavClient, image_ids: HashSet<String>) -> Vec<String> {
+    let mut errors = Vec::new();
     if image_ids.is_empty() {
-        return Ok(());
+        return errors;
     }
 
-    let data_dir = crate::services::get_data_directory()?;
+    let data_dir = match crate::services::get_data_directory() {
+        Ok(dir) => dir,
+        Err(e) => {
+            errors.push(format!("获取数据目录失败: {}", e));
+            return errors;
+        }
+    };
     let images_dir = data_dir.join("clipboard_images");
-    std::fs::create_dir_all(&images_dir).map_err(|e| e.to_string())?;
+    if let Err(e) = std::fs::create_dir_all(&images_dir) {
+        errors.push(format!("创建图片目录失败: {}", e));
+        return errors;
+    }
 
     for image_id in image_ids {
         // 已存在且内容完好的本地 png 跳过(校验 PNG 魔数,半写/损坏文件视为缺失重下)
@@ -230,17 +245,24 @@ async fn download_images(client: &WebdavClient, image_ids: HashSet<String>) -> R
             // 存在但损坏:删除后走重下
             let _ = std::fs::remove_file(&path);
         }
-        let Some(bytes) = client.get_bytes(&format!("files/{}.png", image_id)).await? else {
-            continue;
+        let bytes = match client.get_bytes(&format!("files/{}.png", image_id)).await {
+            Ok(Some(bytes)) => bytes,
+            Ok(None) => continue,
+            Err(e) => {
+                errors.push(format!("下载图片 {} 失败: {}", image_id, e));
+                continue;
+            }
         };
         if is_png_bytes(&bytes) {
-            std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+            if let Err(e) = std::fs::write(&path, bytes) {
+                errors.push(format!("保存图片 {} 失败: {}", image_id, e));
+            }
         } else {
             eprintln!("[WebDAV同步] 跳过非 PNG 内容: {}", image_id);
         }
     }
 
-    Ok(())
+    errors
 }
 
 // 检查是否为有效 PNG 魔数(8 字节签名)
@@ -314,5 +336,46 @@ mod tests {
         assert!(!super::is_png_bytes(&[]));
         assert!(!super::is_png_bytes(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0B]), "魔数末尾错");
         assert!(!super::is_png_bytes(&b"hello world"[..]));
+    }
+
+    // 图片下载失败不得中止整个同步报告:download_image(本地 helper)应为
+    // download_images 汇集错误而非 `?` 传播——单张图片缺失/网络抖动只记
+    // 入 report.errors,已拉取记录仍正常返回,scheduler 不会整体重试。
+    #[test]
+    fn download_images_collects_errors_instead_of_aborting() {
+        let src = crate::services::system::hotkey::test_utils::strip_line_comments(
+            &crate::services::system::hotkey::test_utils::source_file(
+                "src/services/webdav_sync/downloader.rs",
+            ),
+        );
+        let start = src
+            .find("async fn download_images")
+            .expect("缺 download_images");
+        // 结束锚点用 strip 后依然存在的函数定义,不能用行注释(剥行注释时被删)
+        let end = src[start..]
+            .find("\nfn is_png_bytes")
+            .map(|i| start + i)
+            .unwrap_or(src.len());
+        let body = &src[start..end];
+        assert!(
+            body.contains("-> Vec<String>"),
+            "download_images 必须返回错误集合而非 Result,供调用方并入 report.errors"
+        );
+        assert!(
+            body.contains("errors.push(") && body.contains("errors"),
+            "download_images 内部必须逐条收集失败错误"
+        );
+        assert!(
+            !body.contains(".await?"),
+            "download_images 内部不得用 ? 中止——否则单张图片失败丢弃全部"
+        );
+        // 调用方必须把错误并入 report.errors 而非中止
+        let download_all = &src[..start];
+        let err_extend_count = download_all.matches("report.errors.extend(download_images(").count();
+        assert!(
+            err_extend_count >= 2,
+            "download_all 两处图片下载调用都必须把错误并入 report.errors,实际 {}",
+            err_extend_count
+        );
     }
 }
