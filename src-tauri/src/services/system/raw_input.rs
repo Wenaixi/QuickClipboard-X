@@ -633,10 +633,13 @@ mod windows_raw_input {
                 input_common::run_on_main_thread(|| {
                     if let Some(app) = input_common::try_get_app_handle() {
                         // A4: 50ms 延迟期间用户可能再次唤出 quickpaste(新会话),
-                        // 此时旧 hide 请求若直接 hide 会把新窗口立即误隐藏。
-                        // 重查窗口可见性:若期间被重开,放弃本次延迟 hide,
-                        // 由新会话的显式隐藏流程接管。
-                        if crate::windows::quickpaste::is_visible() {
+                        // show 路径已 reset_quickpaste_hide_triggered 复位标记。
+                        // 旧 hide 请求若直接 hide 会把新窗口立即误隐藏——因此
+                        // 此刻用 swap(false) 一次性判定:标记仍为 true(发起置位
+                        // 后既无新会话也无已执行隐藏)才执行 hide,否则放弃由
+                        // 新会话的显式隐藏流程接管。不能以 is_visible 为前置
+                        // 条件(重开后窗口重新可见,反而误关新窗口)。
+                        if QUICKPASTE_HIDE_TRIGGERED.swap(false, Ordering::SeqCst) {
                             let _ = crate::windows::quickpaste::hide_quickpaste_window(&app);
                         }
                     }
@@ -927,8 +930,10 @@ pub(crate) use windows_raw_input::{
 
 #[cfg(target_os = "windows")]
 mod windows_raw_input_tests {
-    // §10.3 源码护栏(A4 会话重检):延迟隐藏线程的回调必须重查 quickpaste
-    // 窗口仍可见后才 hide,否则 50ms 延迟期间窗口被重开时新窗口被立即误隐藏。
+    // §10.3 源码护栏(A4 会话重检):延迟隐藏线程的回调必须以隐藏触发标记
+    // (QUICKPASTE_HIDE_TRIGGERED)的 swap(false) 判定是否仍应隐藏,先于
+    // hide_quickpaste_window;且禁止以 is_visible() 作前置条件——重开后窗口
+    // 重新可见,若以可见性作守卫反而把新会话窗口立即误隐藏(方向反转)。
     #[test]
     fn delayed_hide_guard_rechecks_visibility_before_hide() {
         let source = std::fs::read_to_string(format!(
@@ -948,21 +953,27 @@ mod windows_raw_input_tests {
         let rest = &stripped[start..];
         let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(stripped.len());
         let body = &stripped[start..end];
-        // 延迟线程回调(50ms sleep 之后)必须先重查 is_visible 再 hide
+        // 延迟线程回调(50ms sleep 之后)必须先 swap 判定标记再 hide
         let sleep_pos = body
             .find("sleep(std::time::Duration::from_millis(50))")
             .expect("延迟隐藏必须 sleep 50ms");
-        let recheck_pos = body[sleep_pos..]
-            .find("crate::windows::quickpaste::is_visible()")
+        let swap_pos = body[sleep_pos..]
+            .find("QUICKPASTE_HIDE_TRIGGERED.swap(false, Ordering::SeqCst)")
             .map(|i| sleep_pos + i)
-            .expect("延迟回调必须重查 quickpaste 可见性");
+            .expect("延迟回调必须用 swap(false) 一次性判定隐藏触发标记");
         let hide_pos = body[sleep_pos..]
             .find("hide_quickpaste_window(&app)")
             .map(|i| sleep_pos + i)
             .expect("延迟回调必须调 hide_quickpaste_window");
         assert!(
-            recheck_pos < hide_pos,
-            "延迟 hide 回调必须先重查可见性再隐藏,避免 50ms 延迟期间重开的窗口被误隐藏"
+            swap_pos < hide_pos,
+            "延迟 hide 回调必须先判定隐藏标记再隐藏"
+        );
+        // 方向断言:swap 判定到 hide 之间不得以 is_visible() 作前置条件——
+        // 重开后窗口重新可见,若以可见性作守卫反而误关新窗口。
+        assert!(
+            !body[sleep_pos..hide_pos].contains("quickpaste::is_visible()"),
+            "延迟回调禁止以 is_visible() 作为 hide 前置条件(重开后可见,会把新窗口误隐藏)"
         );
     }
 
