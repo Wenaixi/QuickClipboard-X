@@ -443,7 +443,6 @@ fn handle_clipboard_change() -> Result<(), String> {
         return Ok(());
     }
     // 检查应用过滤
-    crate::AppSounds::play_copy_immediate();
     let settings = crate::services::get_settings();
 
     if crate::services::system::is_front_app_globally_disabled(
@@ -460,6 +459,9 @@ fn handle_clipboard_change() -> Result<(), String> {
     ) {
         return Ok(());
     }
+
+    // 过滤判定通过后才播放复制音效——被过滤应用里复制不泄漏"用户在复制"信号
+    crate::AppSounds::play_copy_immediate();
 
     schedule_capture_worker();
 
@@ -690,6 +692,42 @@ mod tests {
         assert!(
             !schedule_line.contains("take_capture_pending()"),
             "take_capture_pending 不得作为 should_schedule 实参先求值"
+        );
+    }
+
+    // 源码护栏:复制音效必须晚于应用过滤检查——被过滤应用里复制
+    // 仍播音效等于泄漏"用户在复制"信号。断言 play_copy_immediate
+    // 必须出现在过滤判定之后。
+    #[test]
+    fn copy_sound_plays_after_app_filter_check() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/clipboard/monitor.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 monitor.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = stripped
+            .find("fn handle_clipboard_change")
+            .expect("缺 handle_clipboard_change");
+        let rest = &stripped[start..];
+        let end = rest
+            .find("\nfn ")
+            .map(|i| start + i)
+            .unwrap_or(stripped.len());
+        let body = &stripped[start..end];
+        let sound_pos = body
+            .find("play_copy_immediate()")
+            .expect("复制音效调用必须存在");
+        let filter_pos = body
+            .find("is_front_app_globally_disabled(")
+            .expect("必须存在全局应用过滤判定");
+        assert!(
+            filter_pos < sound_pos,
+            "复制音效必须晚于应用过滤检查,否则被过滤应用复制仍播音效"
         );
     }
 
