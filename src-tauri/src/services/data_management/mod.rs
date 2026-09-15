@@ -364,6 +364,7 @@ pub fn import_data_zip(zip_path: PathBuf, mode: &str) -> Result<String, String> 
     let imported_db = temp_root.join("quickclipboard.db");
     let imported_images = temp_root.join("clipboard_images");
     let imported_image_library = temp_root.join("image_library");
+    let imported_pin_images = temp_root.join("pin_images");
     let imported_app_icons = temp_root.join("app_icons");
     let imported_settings = temp_root.join("settings.json");
 
@@ -420,6 +421,12 @@ pub fn import_data_zip(zip_path: PathBuf, mode: &str) -> Result<String, String> 
                 let target_app_icons = target_dir.join("app_icons");
                 if target_app_icons.exists() { fs::remove_dir_all(&target_app_icons).map_err(|e| e.to_string())?; }
                 if imported_app_icons.exists() { copy_dir_all(&imported_app_icons, &target_app_icons)?; }
+                // M2:pin_images 与 clipboard_images/image_library 同列——导出已收,
+                // 替换导入漏收会让贴图文件成为"数据要清但备份没有"的孤儿(类比
+                // D3 目录清单),必须与目标库同清同补。
+                let target_pin_images = target_dir.join("pin_images");
+                if target_pin_images.exists() { fs::remove_dir_all(&target_pin_images).map_err(|e| e.to_string())?; }
+                if imported_pin_images.exists() { copy_dir_all(&imported_pin_images, &target_pin_images)?; }
 
                 let src_db = temp_root.join("quickclipboard.db");
                 let dst_db = target_dir.join("quickclipboard.db");
@@ -468,6 +475,12 @@ pub fn import_data_zip(zip_path: PathBuf, mode: &str) -> Result<String, String> 
             if imported_app_icons.exists() {
                 if !target_app_icons.exists() { fs::create_dir_all(&target_app_icons).map_err(|e| e.to_string())?; }
                 merge_dir_overwrite(&imported_app_icons, &target_app_icons)?;
+            }
+
+            let target_pin_images = current_dir.join("pin_images");
+            if imported_pin_images.exists() {
+                if !target_pin_images.exists() { fs::create_dir_all(&target_pin_images).map_err(|e| e.to_string())?; }
+                merge_dir_overwrite(&imported_pin_images, &target_pin_images)?;
             }
 
             if imported_db.exists() {
@@ -1235,6 +1248,11 @@ pub fn export_data_zip(target_path: PathBuf) -> Result<PathBuf, String> {
             add_dir_to_zip(&app_icons_dir, &app_icons_dir, "app_icons", &mut zip, options)?;
         }
 
+        let pin_images_dir = current_dir.join("pin_images");
+        if pin_images_dir.exists() {
+            add_dir_to_zip(&pin_images_dir, &pin_images_dir, "pin_images", &mut zip, options)?;
+        }
+
         if settings_path.exists() {
             let mut f = fs::File::open(&settings_path).map_err(|e| format!("读取settings失败: {}", e))?;
             zip.start_file("settings.json", options).map_err(|e| e.to_string())?;
@@ -1464,9 +1482,48 @@ mod tests {
             "clipboard_images/a1b2c3.png",
             "settings.json",
             "image_library/dir/icon.png",
+            "pin_images/a1b2c3.png",
         ] {
             assert_eq!(safe_zip_entry_name(name), Some(name), "合法路径被拒: {}", name);
         }
+    }
+
+    // M2(pin_images 数据孤儿):贴图目录必须走完整的"备份/导出/替换导入/合并"
+    // 四路闭环——D3 补过备份与清理侧清单,但 export_data_zip 只收 db +
+    // clipboard_images + image_library + app_icons,import replace/merge 也只
+    // 处理这三目录,pin_images 成了"会被替换清掉、但导出包里没有"的数据孤儿。
+    #[test]
+    fn export_import_zip_covers_pin_images_on_all_paths() {
+        let src = strip_line_comments(&source_file("src/services/data_management/mod.rs"));
+
+        // export_data_zip 必须收 pin_images 目录
+        let export = fn_body(&src, "export_data_zip");
+        assert!(
+            export.contains("add_dir_to_zip(&pin_images_dir, &pin_images_dir, \"pin_images\""),
+            "导出 zip 必须收 pin_images"
+        );
+
+        // import replace/merge 都必须声明 imported_pin_images 并落地到 target
+        let import = fn_body(&src, "import_data_zip");
+        let imported_decl = import
+            .find("imported_pin_images = temp_root.join(\"pin_images\")")
+            .expect("导入必须声明 imported_pin_images");
+        let replace_pin = import
+            .find("copy_dir_all(&imported_pin_images, &target_pin_images)")
+            .expect("replace 分支必须复制贴图到目标");
+        assert!(imported_decl < replace_pin, "replace 必须先声明再复制");
+        let merge_pin = import
+            .find("merge_dir_overwrite(&imported_pin_images, &target_pin_images)")
+            .expect("merge 分支必须合并贴图到目标");
+        assert!(imported_decl < merge_pin, "merge 必须先声明再合并");
+        // 三个 pin_images 操作全部先于 imported_db 落地(同 clipboard_images 序)
+        let db_pos = import
+            .find("if imported_db.exists()")
+            .expect("合并尾段必须先处理目录再合库");
+        assert!(
+            replace_pin < db_pos && merge_pin < db_pos,
+            "贴图落地必须早于数据库合并"
+        );
     }
 
     #[test]
