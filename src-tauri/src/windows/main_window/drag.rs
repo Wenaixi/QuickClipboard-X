@@ -85,8 +85,12 @@ mod platform {
                 let vx = BOUND_LEFT.load(Ordering::Relaxed);
                 let vy = BOUND_TOP.load(Ordering::Relaxed);
                 let vright = BOUND_RIGHT.load(Ordering::Relaxed);
+                let vbottom = BOUND_BOTTOM.load(Ordering::Relaxed);
                 wp.x = wp.x.clamp(vx, vright);
-                wp.y = wp.y.max(vy);
+                // w8:兜底分支与上方 monitor 分支同款 clamp(vy, vbottom)——旧实现
+                // 只 wp.y.max(vy) 钳上边,缺下边,锁竞争/无 monitor 命中时窗口可被
+                // 拖出虚拟屏底边之外。
+                wp.y = wp.y.clamp(vy, vbottom);
             }
         }
 
@@ -318,6 +322,34 @@ mod w6_restore_wndproc_guard {
         assert!(
             load_first < restore_seg_start,
             "restore 必须晚于句柄比对"
+        );
+    }
+
+    // w8(clamp 缺底边):兜底分支(锁竞争/无 monitor 命中)必须与 monitor 分支
+    // 同款 clamp(vy, vbottom)——旧实现只 wp.y.max(vy) 钳上边,缺下边约束,
+    // 拖拽经过兜底分支时窗口可被拖出虚拟屏底边之外。
+    #[test]
+    fn fallback_clamp_covers_bottom_edge_like_monitor_branch() {
+        let src = strip_line_comments(&source_file("src/windows/main_window/drag.rs"));
+        let body = fn_body(&src, "window_proc");
+        // 两个分支都要读 vbottom
+        let vbottom_count = body.matches("BOUND_BOTTOM.load(Ordering::Relaxed)").count();
+        assert!(
+            vbottom_count >= 2,
+            "兜底分支与 monitor 分支必须都读 BOUND_BOTTOM,当前只读 {} 次",
+            vbottom_count
+        );
+        // 兜底分支(clamp(vx, vright) 出现两次)必须用 clamp(vy, vbottom)
+        let clamp_count = body.matches("wp.y.clamp(vy, vbottom)").count();
+        assert!(
+            clamp_count >= 2,
+            "monitor 分支与兜底分支都必须用 clamp(vy, vbottom),当前 {} 次",
+            clamp_count
+        );
+        // 负向:禁止兜底分支退回 max(vy)(只钳上边)
+        assert!(
+            !body.contains("wp.y = wp.y.max(vy)"),
+            "兜底分支禁止只钳上边(wp.y.max(vy)),必须与 monitor 分支同款 clamp 底边"
         );
     }
 }
