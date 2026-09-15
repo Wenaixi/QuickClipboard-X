@@ -220,18 +220,14 @@ pub fn query_clipboard_items(params: QueryParams) -> Result<PaginatedResult<Clip
         
         let total_count: i64 = if has_filter {
             let count_sql = format!("SELECT COUNT(*) FROM clipboard {}", where_clause);
-            let count_params: Vec<Box<dyn rusqlite::ToSql>> = query_params.iter().map(|p| {
-                let val: Box<dyn rusqlite::ToSql> = match p.as_ref().to_sql() {
-                    Ok(rusqlite::types::ToSqlOutput::Borrowed(rusqlite::types::ValueRef::Text(s))) => {
-                        Box::new(String::from_utf8_lossy(s).to_string())
-                    }
-                    _ => Box::new("")
-                };
-                val
-            }).collect();
+            // L4:COUNT 直接绑定 query_params 的真实值,不得先经 to_sql() 反射式
+            // 深拷贝——旧实现对非文本参数(如 _sortId 深拷贝的数字项)会折叠成
+            // 空串,让 COUNT 的 WHERE 比主查询的 WHERE 收到不同的值,分页总数
+            // 与列表语义脱节。COUNT 执行时 query_params 只含 WHERE 文本参数,
+            // 直接借用引用即可,limit/offset 在 count 之后才 push,互不干扰。
             conn.query_row(
                 &count_sql,
-                rusqlite::params_from_iter(count_params.iter().map(|p| p.as_ref())),
+                rusqlite::params_from_iter(query_params.iter().map(|p| p.as_ref())),
                 |row| row.get(0)
             )?
         } else {
@@ -547,7 +543,7 @@ fn upsert_history_records(records: &[CloudRecord], ignore_tombstones: bool) -> R
                     "SELECT COALESCE(source_device_id, ''), updated_at, content, html_content, content_type,
                             image_id, item_order, paste_count, source_app, source_icon_hash, char_count, created_at
                      FROM clipboard
-                     WHERE uuid = ?1 OR (uuid IS NULL AND CAST(id AS TEXT) = ?2) LIMIT 1",
+                     WHERE uuid = ?1 OR ((uuid IS NULL OR uuid = '') AND CAST(id AS TEXT) = ?2) LIMIT 1",
                     params![record.uuid, record.uuid],
                     |row| {
                         Ok((
@@ -622,7 +618,7 @@ fn upsert_history_records(records: &[CloudRecord], ignore_tombstones: bool) -> R
                         char_count = ?11,
                         created_at = ?12,
                         updated_at = ?13
-                     WHERE uuid = ?14 OR (uuid IS NULL AND CAST(id AS TEXT) = ?15)",
+                     WHERE uuid = ?14 OR ((uuid IS NULL OR uuid = '') AND CAST(id AS TEXT) = ?15)",
                     params![
                         record.uuid,
                         record.source_device_id,
@@ -1188,8 +1184,13 @@ pub fn update_clipboard_item(
     content: String,
     html_content: Option<String>,
 ) -> Result<(), String> {
-    let should_clear_raw_formats = with_connection(|conn| {
-        let (old_content, old_html_content): (String, Option<String>) = conn.query_row(
+    // L2:旧格式清理必须在同一事务内完成——UPDATE 提交后再清 raw formats
+    // 失败(独立连接)会留下"新 content 配旧 formats"的不一致态,前端按新
+    // 格式请求 clipboard_data 时找不到对应 raw,内容回退显示错乱。
+    // 事务内直接 DELETE,UPDATE + 清理任一失败整体回滚,原子落地。
+    with_connection(|conn| {
+        let tx = conn.unchecked_transaction()?;
+        let (old_content, old_html_content): (String, Option<String>) = tx.query_row(
             "SELECT content, html_content FROM clipboard WHERE id = ?1",
             params![id],
             |row| Ok((row.get(0)?, row.get(1)?)),
@@ -1203,28 +1204,32 @@ pub fn update_clipboard_item(
 
         let now = chrono::Local::now().timestamp();
         let rows = if let Some(ref html_content) = html_content {
-            conn.execute(
+            tx.execute(
                 "UPDATE clipboard SET content = ?1, html_content = ?2, updated_at = ?3 WHERE id = ?4",
                 params![&content, html_content, now, id],
             )?
         } else {
-            conn.execute(
+            tx.execute(
                 "UPDATE clipboard SET content = ?1, updated_at = ?2 WHERE id = ?3",
                 params![&content, now, id],
             )?
         };
         if rows == 0 {
-            Err(rusqlite::Error::QueryReturnedNoRows)
-        } else {
-            Ok(content_changed || html_changed)
+            return Err(rusqlite::Error::QueryReturnedNoRows);
         }
-    }).map_err(|e| if e.contains("QueryReturnedNoRows") {
+        if content_changed || html_changed {
+            // 内容变了:旧 raw formats 必须同事务清掉,否则新内容配旧格式
+            tx.execute(
+                "DELETE FROM clipboard_data WHERE target_kind = 'clipboard' AND target_id = ?1",
+                [id.to_string()],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    })
+    .map_err(|e| if e.contains("QueryReturnedNoRows") {
         format!("剪贴板项不存在: {}", id)
     } else { e })?;
-
-    if should_clear_raw_formats {
-        delete_clipboard_data_items("clipboard", &id.to_string())?;
-    }
 
     Ok(())
 }
@@ -1278,6 +1283,9 @@ mod upsert_null_uuid_guard {
     // webdav_get_history_record_by_uuid 口径一致,含 NULL uuid 兜底分支——
     // 否则本地 uuid 为 NULL 的旧记录被上传(uuid 兜底成 id 字符串)后,对端
     // upsert 查 WHERE uuid=?1 匹配不到 NULL 行,INSERT 出重复行。
+    // L3(B2 只修了 NULL,漏 uuid='' 空串):reading 路径 :414 兜底是
+    // (uuid IS NULL OR uuid = ''),upsert 也必须同样覆盖——某些导入/修复
+    // 场景 uuid 会被写成空串而非 NULL,只兜 NULL 会漏,INSERT 出重复行。
     #[test]
     fn upsert_existing_query_has_null_uuid_fallback() {
         let src = strip_line_comments(&source_file("src/services/database/clipboard.rs"));
@@ -1287,8 +1295,8 @@ mod upsert_null_uuid_guard {
             .expect("upsert 必须查 clipboard 表");
         let existing_seg = &body[existing_pos..];
         assert!(
-            existing_seg.contains("CAST(id AS TEXT) = ?2"),
-            "existing 查询必须含 NULL uuid 兜底(uuid IS NULL AND CAST(id AS TEXT)=uuid)"
+            existing_seg.contains("(uuid IS NULL OR uuid = '') AND CAST(id AS TEXT) = ?2"),
+            "existing 查询必须含 NULL/空串 uuid 兜底(uuid IS NULL OR uuid = '')"
         );
     }
 
@@ -1303,8 +1311,8 @@ mod upsert_null_uuid_guard {
             .expect("upsert 必须含 UPDATE 分支");
         let update_seg = &body[update_pos..];
         assert!(
-            update_seg.contains("CAST(id AS TEXT) = ?15"),
-            "UPDATE 分支 WHERE 必须覆盖 NULL uuid 行"
+            update_seg.contains("(uuid IS NULL OR uuid = '') AND CAST(id AS TEXT) = ?15"),
+            "UPDATE 分支 WHERE 必须覆盖 NULL/空串 uuid 行"
         );
     }
 }
@@ -1361,6 +1369,7 @@ mod single_delete_tx_guard {
 #[cfg(test)]
 mod content_type_like_tests {
     use std::fs;
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
 
     /// C25 护栏:content_type 过滤必须 like_pattern + ESCAPE,与搜索词路径一致。
     #[test]
@@ -1407,6 +1416,58 @@ mod content_type_like_tests {
         assert!(
             !has_raw_format,
             "content_type 不得再用 format!(\"%{{}}%\") 裸拼"
+        );
+    }
+
+    /// L2 护栏:update_clipboard_item 的旧格式清理必须包进同一事务。
+    /// 原实现 UPDATE 提交后才调 delete_clipboard_data_items(独立连接),
+    /// 清理失败时留下"新 content 配旧 formats"的不一致态;且 DELETE 必须
+    /// 用 tx 内的执行器,禁止再调 with_connection 嵌套(死锁)。
+    #[test]
+    fn update_clipboard_item_clears_raw_formats_in_same_transaction() {
+        let src = strip_line_comments(&source_file("src/services/database/clipboard.rs"));
+        let body = fn_body(&src, "update_clipboard_item");
+        let tx_pos = body
+            .find("unchecked_transaction()")
+            .expect("update_clipboard_item 必须开事务");
+        let tx_seg = &body[tx_pos..];
+        let del_pos = tx_seg
+            .find("DELETE FROM clipboard_data WHERE target_kind = 'clipboard'")
+            .expect("内容变化时必须同事务清掉旧 raw formats");
+        let commit_pos = tx_seg
+            .find("tx.commit()")
+            .expect("UPDATE + 清理后必须提交事务");
+        assert!(
+            del_pos < commit_pos,
+            "DELETE 清理必须先于提交事务"
+        );
+        // 负向:禁止再出现事务外的独立连接清理
+        assert!(
+            !body.contains("delete_clipboard_data_items"),
+            "旧格式清理不得再走事务外的独立连接(with_connection 会死锁)"
+        );
+    }
+
+    /// L4 护栏:COUNT 参数必须直接复用 query_params(深拷贝会折叠非文本)。
+    /// 旧实现对每个参数 to_sql() 反射:文本拷贝、其余折叠空串——选中项含
+    /// 数字/整型(_sortId 深拷贝)时,WHERE 按原始值过滤、COUNT 按空串计数,
+    /// 分页总数与列表语义脱节。COUNT 执行时 query_params 只含 WHERE 文本
+    /// 参数,直接借用即可。
+    #[test]
+    fn count_query_uses_same_params_as_where_clause() {
+        let src = strip_line_comments(&source_file("src/services/database/clipboard.rs"));
+        let body = fn_body(&src, "query_clipboard_items");
+        let count_pos = body
+            .find("SELECT COUNT(*) FROM clipboard")
+            .expect("分页必须有 COUNT 查询");
+        let count_seg = &body[count_pos..];
+        assert!(
+            count_seg.contains("params_from_iter(query_params.iter().map(|p| p.as_ref()))"),
+            "COUNT 必须直接复用 query_params,禁止深拷贝折叠非文本"
+        );
+        assert!(
+            !count_seg.contains("to_sql()"),
+            "COUNT 不得再对参数做 to_sql 反射式深拷贝"
         );
     }
 
