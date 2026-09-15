@@ -27,7 +27,7 @@ pub fn create_settings_window(app: &AppHandle) -> Result<(), String> {
     settings_window.on_window_event(move |event| match event {
         tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed => {
             crate::services::memory::schedule_cleanup_after_main_window_hide();
-            // hk1:设置窗口关闭按打开前的 DESIRED 快照精确恢复导航键——打开时
+            // 设置窗口关闭按打开前的 DESIRED 快照精确恢复导航键——打开时
             // 已快照并按主窗口形态禁用,关闭后 restore 需与打开前状态一致:
             // 自动弹出(MouseAuto)隐藏态 DESIRED=false,恢复不误启用。
             crate::hotkey::restore_navigation_hotkeys_from_snapshot();

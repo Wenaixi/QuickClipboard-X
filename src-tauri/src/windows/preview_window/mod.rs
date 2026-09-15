@@ -10,7 +10,7 @@ use tauri::{
     WebviewWindowBuilder,
 };
 
-// r6-hotkey-3:标签常量提为 pub(crate)——focus.rs refresh_excluded_hwnds 的排除
+// 标签常量提为 pub(crate)——focus.rs refresh_excluded_hwnds 的排除
 // 列表要按真实标签取窗口,此前硬编码 "preview" 恒 None,预览窗 hwnd 从未进
 // 排除列表,聚焦事件污染 LAST_FOCUS_HWND。
 pub(crate) const PREVIEW_WINDOW_LABEL: &str = "preview-window";

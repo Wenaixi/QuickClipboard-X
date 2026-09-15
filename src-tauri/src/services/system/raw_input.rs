@@ -609,15 +609,18 @@ mod windows_raw_input {
         let required = QUICKPASTE_REQUIRED_MODIFIER_MASK.load(Ordering::Relaxed);
         let released_mask = quickpaste_modifier_mask_from_vk(vk);
 
-        if required == 0 || (released_mask & required) == 0 {
-            return;
-        }
-
+        // 本次 keyup 既不是必需要、必需要也未全抬时提前退出;否则继续走
+        // 全空求值——先松必需要后松非必需键(如 Ctrl 先松 Shift 后松)时,
+        // 后松的 Shift keyup 仍会重新求值 all_released,隐藏不再被跳过。
         let (ctrl, alt, shift, meta) = get_modifier_keys_state_impl();
         let all_released = ((required & 0x01) == 0 || !ctrl)
             && ((required & 0x02) == 0 || !alt)
             && ((required & 0x04) == 0 || !shift)
             && ((required & 0x08) == 0 || !meta);
+        let is_required_release = (released_mask & required) != 0;
+        if !is_required_release && !all_released {
+            return;
+        }
 
         if all_released && !QUICKPASTE_HIDE_TRIGGERED.swap(true, Ordering::SeqCst) {
             handle_quickpaste_hide_request_impl();
@@ -1156,6 +1159,54 @@ mod windows_raw_input_tests {
             "禁止回退到 tracker——tracker 会被注入键的 marker 早退污染"
         );
     }
+
+    // r8-hk-2 护栏:修饰键释放必须重求值全空——先松必需要后松非必需键时,
+    // 后松的键 keyup 仍要触达隐藏判定,不得被"非必需要早退"跳过。断言:
+    // 函数体内出现对本次释放掩码的判断且早退条件同时要求"非必需要且未全空"。
+    #[test]
+    fn modifier_release_reevaluates_all_released_on_non_required_keyup() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/system/raw_input.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 raw_input.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = stripped
+            .find("fn handle_quickpaste_modifier_release")
+            .expect("缺 handle_quickpaste_modifier_release");
+        let rest = &stripped[start..];
+        let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(stripped.len());
+        let body = &stripped[start..end];
+        // 早退条件必须同时包含"非必需要释放"与"未全空",缺一即会吞掉后松场景
+        let non_required_pos = body
+            .find("released_mask & required) != 0")
+            .expect("必须判断本次释放键是否属于必需要组合");
+        assert!(
+            body[..non_required_pos].contains("get_modifier_keys_state_impl"),
+            "全空求值必须发生在本函数内(实时读修饰键状态)"
+        );
+        // 早退只能在"非必需要且未全空"时发生——断言函数内没有出现把
+        // 非必需要释放直接 return 的旧逻辑
+        assert!(
+            !body.contains("return;\n        }\n\n        let (ctrl"),
+            "非必需要释放不得直接 return(会跳过先松必需要后松非必需键场景)"
+        );
+        // 隐藏触发必须在全空成立时,且以 QUICKPASTE_HIDE_TRIGGERED 消费
+        let hide_pos = body
+            .find("QUICKPASTE_HIDE_TRIGGERED.swap(true")
+            .expect("隐藏判定必须消费 QUICKPASTE_HIDE_TRIGGERED");
+        let all_pos = body
+            .find("all_released")
+            .expect("必须求值 all_released");
+        assert!(
+            all_pos < hide_pos,
+            "必须先在 all_released 成立后才触发隐藏"
+        );
+    }
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -1172,4 +1223,15 @@ pub(crate) fn start_quickpaste_secondary_key_hold() {}
 
 #[cfg(not(target_os = "windows"))]
 pub(crate) fn guard_tray_click_region(_x: i32, _y: i32, _width: u32, _height: u32) {}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn reset_quickpaste_hide_triggered() {}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn mark_quickpaste_hide_triggered() {}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn take_quickpaste_hide_triggered() -> bool {
+    true
+}
 

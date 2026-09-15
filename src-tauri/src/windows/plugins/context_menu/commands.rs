@@ -3,11 +3,11 @@ use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition};
 
 #[cfg(test)]
 mod close_all_sync_guard {
-    // C2(菜单关后 200ms 阻塞):close_all_context_menus 必须同步清
+    // 菜单关后 200ms 阻塞:close_all_context_menus 必须同步清
     // session,不得 spawn 延迟 200ms——延迟期间 is_context_menu_visible()
     // 恒 true,edge_monitor 延迟隐藏与主窗口 hide 检查它时被阻塞 200ms,
     // 每次撮/关菜单都引入抖动。submit_context_menu 的结果选择延迟可保留。
-    // F3(窗口销毁后 session 残留):session 清理必须无条件执行且先于窗口
+    // 窗口销毁后 session 残留:session 清理必须无条件执行且先于窗口
     // hide——低内存模式 destroy_all_webviews 销毁 context-menu 窗口后
     // get_webview_window 返回 None,旧实现把清理放进 if-let 内导致 session
     // 残留(visible 恒 true 阻塞 hide 判定),重建后旧会话仍挂起。反证:
@@ -95,11 +95,11 @@ pub fn close_all_context_menus(app: AppHandle) {
     let _ = crate::windows::pin_image_window::close_image_preview(app.clone());
     let _ = crate::windows::preview_window::close_preview_window(app.clone());
 
-    // F3:session 清理必须无条件执行,不得依赖窗口存在——低内存模式
+    // session 清理必须无条件执行,不得依赖窗口存在——低内存模式
     // destroy_all_webviews 已销毁 context-menu 窗口后 get_webview_window
     // 返回 None,旧实现把它放进 if-let 内导致 session 残留(visible 恒 true
     // 阻塞 edge_monitor 延迟隐藏与主窗口 hide 判定),恢复重建后旧会话仍挂起。
-    // C2:此处同步清 session,不延迟——延迟期间 is_context_menu_visible()
+    // 此处同步清 session,不延迟——延迟期间 is_context_menu_visible()
     // 恒 true,每次撮/关菜单都引入抖动。窗口 hide 保留判断(可能已被销毁)。
     let sid = super::get_active_menu_session();
     super::clear_active_menu_session(sid);

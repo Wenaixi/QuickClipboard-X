@@ -54,7 +54,7 @@ pub fn show_quickpaste_window(app: &AppHandle) -> Result<(), String> {
     }
     let _ = crate::services::system::save_current_focus(app.clone());
 
-    // B10:显示窗口时复位"已触发过隐藏"标记——上次便捷粘贴会话在修饰键松开
+    // 显示窗口时复位"已触发过隐藏"标记——上次便捷粘贴会话在修饰键松开
     // 路径已把 QUICKPASTE_HIDE_TRIGGERED 置位,若从不复位,本次会话快结束时
     // 判断会因标记仍为 true 而跳过隐藏窗口,便捷粘贴窗口卡住不关。
     reset_quickpaste_hide_triggered();

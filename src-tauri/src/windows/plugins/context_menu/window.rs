@@ -420,7 +420,7 @@ fn start_cursor_passthrough_monitor(window: WebviewWindow, session_id: u64) {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
 
-        // r6-window-4:退出时无条件 set_ignore_cursor_events(false) 有与 w1 同款
+        // 退出时无条件 set_ignore_cursor_events(false) 有与 w1 同款
         // 竞态——while 因新菜单接管而退出时,新会话刚把菜单建出来、其 monitor
         // 首 tick 尚未接管穿透,旧线程立即 false 会把新菜单的穿透恢复成交互,
         // 短暂拦截新菜单下方点击。与 clear_menu_regions 同款加会话比对。
@@ -617,7 +617,7 @@ mod w1_menu_region_guard {
             guarded.contains("if super::get_active_menu_session() == session_id {"),
             "clear_menu_regions 必须位于 if 会话比对分支内"
         );
-        // r6-window-4:退出时的 set_ignore_cursor_events(false)(恢复交互)也
+        // 退出时的 set_ignore_cursor_events(false)(恢复交互)也
         // 必须被同一会话比对守卫——新菜单接管瞬间旧线程无条件恢复交互会
         // 短暂拦截新菜单下方点击,直到新 monitor 首 tick 再穿透。
         let reset_offset = body.find("set_ignore_cursor_events(false)").expect("收尾必须恢复交互");

@@ -81,7 +81,7 @@ fn build_pin_images_children() -> Vec<CtxMenuItem> {
         children.push(menu_item_with_state("empty", "(暂无贴图)", None, true));
     } else {
         for (idx, (name, path)) in images.iter().take(MAX_PIN_IMAGES_DISPLAY).enumerate() {
-            // D1:按字符截断而非按字节切片——&name[..27] 在中文/emoji 等
+            // 按字符截断而非按字节切片——&name[..27] 在中文/emoji 等
             // 多字节字符落在边界中间时直接 panic 崩进程。
             let display_name = if name.chars().count() > 30 {
                 format!("{}...", name.chars().take(27).collect::<String>())
@@ -89,7 +89,7 @@ fn build_pin_images_children() -> Vec<CtxMenuItem> {
                 name.clone()
             };
             children.push(
-                // F6:菜单项 id 用文件名而非排序下标——目录在菜单打开与点击之间
+                // 菜单项 id 用文件名而非排序下标——目录在菜单打开与点击之间
                 // 变化时(idx 漂移),下标会指向另一张图;文件名目录内唯一且稳定。
                 CtxMenuItem::item(format!("pin-image-{}", name), display_name, Some("ti ti-photo"))
                     .with_preview_image(path.clone()),
@@ -320,7 +320,7 @@ fn open_pin_images_folder() {
 
 #[cfg(test)]
 mod display_name_guard {
-    // D1(托盘字节切片 panic):贴图文件名超过 30 字符时按字符截断
+    // 托盘字节切片 panic:贴图文件名超过 30 字符时按字符截断
     // (chars().take(27)),不得用 &name[..27] 字节切片——中文/emoji
     // 多字节字符落在边界中间时 String 切片 panic 崩进程。
     #[test]
@@ -351,7 +351,7 @@ mod display_name_guard {
         );
     }
 
-    // F6(托盘贴图项 idx 漂移):菜单项 id 必须用文件名(pin-image-{name})而非
+    // 托盘贴图项 idx 漂移:菜单项 id 必须用文件名(pin-image-{name})而非
     // 排序下标(pin-image-{idx}),点击处理必须按文件名 find 匹配而非下标 get——
     // 菜单打开与点击之间目录变化(新增/删除/改名)时下标漂移会贴错图。
     // 文件名目录内唯一且稳定,不受排序变化影响。反证:id 改回 idx 下标 → FAILED。

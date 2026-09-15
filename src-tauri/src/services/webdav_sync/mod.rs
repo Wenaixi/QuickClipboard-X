@@ -30,9 +30,9 @@ pub async fn upload() -> Result<SyncReport, String> {
 }
 
 pub(super) async fn download_raw(force_download: bool) -> Result<SyncReport, String> {
-    // B9:持有全局同步锁,调度拉取/窗口显示拉取不得与上传事务交错
+    // 持有全局同步锁,调度拉取/窗口显示拉取不得与上传事务交错
     let _tx_guard = sync_scheduler::SYNC_TX_LOCK.lock().await;
-    // B9:持有全局同步锁,调度拉取/窗口显示拉取不得与上传事务交错
+    // 持有全局同步锁,调度拉取/窗口显示拉取不得与上传事务交错
     let client = build_client().await?;
     let device_id = crate::services::sync_transfer::device_id();
     downloader::download_all(&client, &device_id, force_download).await
