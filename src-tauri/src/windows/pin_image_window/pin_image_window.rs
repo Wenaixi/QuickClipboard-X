@@ -361,68 +361,17 @@ pub fn close_pin_image_window_by_self(window: WebviewWindow) -> Result<(), Strin
 // 启动贴图编辑模式
 #[tauri::command]
 pub async fn start_pin_edit_mode(
-    app: AppHandle,
-    window: WebviewWindow,
-    img_offset_x_physical: i32,
-    img_offset_y_physical: i32,
-    img_width_physical: u32,
-    img_height_physical: u32,
+    _app: AppHandle,
+    _window: WebviewWindow,
+    _img_offset_x_physical: i32,
+    _img_offset_y_physical: i32,
+    _img_width_physical: u32,
+    _img_height_physical: u32,
 ) -> Result<(), String> {
-    let (file_path, original_image_path, edit_data) = {
-        let map = lock_pin_data();
-        if let Some(data) = map.get(window.label()) {
-            (data.file_path.clone(), data.original_image_path.clone(), data.edit_data.clone())
-        } else {
-            return Err("未找到图片数据".to_string());
-        }
-    };
-
-    let position = window.outer_position()
-        .map_err(|e| format!("获取窗口位置失败: {}", e))?;
-    let inner_size = window.inner_size()
-        .map_err(|e| format!("获取窗口尺寸失败: {}", e))?;
-    let scale_factor = window.scale_factor()
-        .map_err(|e| format!("获取缩放因子失败: {}", e))?;
-    let image_x = position.x + img_offset_x_physical;
-    let image_y = position.y + img_offset_y_physical;
-    let image_physical_width = img_width_physical;
-    let image_physical_height = img_height_physical;
-    
-    let logical_width = (image_physical_width as f64 / scale_factor).round() as u32;
-    let logical_height = (image_physical_height as f64 / scale_factor).round() as u32;
-
-    let window_x = position.x;
-    let window_y = position.y;
-    let window_width = inner_size.width as f64 / scale_factor;
-    let window_height = inner_size.height as f64 / scale_factor;
-
-    let label = window.label().to_string();
-    let window_clone = window.clone();
-    let (tx, rx) = std::sync::mpsc::channel::<()>();
-    let _unlisten = app.once("pin-edit-ready", move |_| {
-        let _ = window_clone.set_size(Size::Logical(LogicalSize::new(1.0, 1.0)));
-        let _ = window_clone.hide();
-        let _ = tx.send(());
-    });
-
-    let _ = (
-        file_path,
-        image_x,
-        image_y,
-        image_physical_width,
-        image_physical_height,
-        logical_width,
-        logical_height,
-        scale_factor,
-        label,
-        window_x,
-        window_y,
-        window_width,
-        window_height,
-        original_image_path,
-        edit_data,
-    );
-    let _ = rx.recv_timeout(Duration::from_secs(1));
+    // w5:贴图编辑功能当前未实现——旧实现是 1s 阻塞桩:注册一次性的
+    // "pin-edit-ready" 监听 + rx.recv_timeout(1s) 阻塞等待,超时后返回
+    // Err,还在 app.once 里残留监听(窗口被前端发射事件时会执行 hide+缩到
+    // 1x1 的副作用)。直接返回不可用,不注册监听、不阻塞、不留挂起状态。
     Err("贴图编辑功能当前不可用".to_string())
 }
 
@@ -585,5 +534,43 @@ mod tests {
         // helper 仍能拿到数据(不 panic)
         let map = lock_pin_data();
         assert!(map.is_empty(), "poison 后 PIN_IMAGE_DATA_MAP 仍可访问");
+    }
+
+    // w5(编辑模式阻塞桩):start_pin_edit_mode 必须直接返回不可用——
+    // 旧实现注册一次性 "pin-edit-ready" 监听 + rx.recv_timeout(1s) 阻塞,
+    // 超时才返回 Err;若前端在窗口生命周期内发射该事件,残留监听会执行
+    // hide+缩到 1x1 的副作用。新实现不注册监听、不阻塞、不留挂起状态。
+    #[test]
+    fn pin_edit_mode_returns_unavailable_without_stub_side_effects() {
+        let src = std::fs::read_to_string(format!(
+            "{}/src/windows/pin_image_window/pin_image_window.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读取贴图窗口源码失败");
+        let body: String = src
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = body
+            .find("pub async fn start_pin_edit_mode")
+            .expect("缺 start_pin_edit_mode");
+        let rest = &body[start..];
+        let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(body.len());
+        let fn_body = &body[start..end];
+        // 桩的副作用全部不得再出现
+        assert!(
+            !fn_body.contains("recv_timeout"),
+            "不得再阻塞等待 pin-edit-ready"
+        );
+        assert!(
+            !fn_body.contains("app.once(\"pin-edit-ready\")"),
+            "不得再注册一次性监听"
+        );
+        // 直接返回不可用
+        assert!(
+            fn_body.contains("Err(\"贴图编辑功能当前不可用\".to_string())"),
+            "必须直接返回不可用"
+        );
     }
 }
