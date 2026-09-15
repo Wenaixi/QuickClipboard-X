@@ -257,15 +257,20 @@ impl SettingsStorage {
         if had_legacy_webdav_password {
             if !settings.webdav_url.trim().is_empty() && !settings.webdav_username.trim().is_empty()
             {
-                if let Err(e) = crate::services::secure_credentials::set_webdav_password(
+                // 迁移失败必须保留明文副本待下次启动继续迁移——凭据库不可写
+                // (RDP/组策略)时若清空,唯一明文副本被抹除,密码永久丢失。
+                match crate::services::secure_credentials::set_webdav_password(
                     &settings.webdav_url,
                     &settings.webdav_username,
                     &settings.webdav_password,
                 ) {
-                    eprintln!("迁移 WebDAV 密码到系统凭据库失败: {}", e);
+                    Ok(()) => settings.webdav_password.clear(),
+                    Err(e) => eprintln!("迁移 WebDAV 密码到系统凭据库失败: {}", e),
                 }
+            } else {
+                // 地址或用户名缺一不可时凭据无处挂靠,迁移无意义,清空等用户重填。
+                settings.webdav_password.clear();
             }
-            settings.webdav_password.clear();
         }
         // 守不变量:手改/旧 JSON 可能留下 hide=false/hover=true 违规组合,
         // 加载时统一归一化,防止下次开启 hide 时意外弹出触发条
@@ -711,5 +716,47 @@ mod tests {
             "最旧备份（index 0）必须被新内容覆盖"
         );
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    // 源码护栏:加载时 WebDAV 密码迁移到系统凭据库失败,不得清空
+    // 明文密码——否则 save() 把清空结果落盘,唯一明文副本被抹除,
+    // 用户在凭据库不可写的环境(RDP/组策略)下密码永久丢失。
+    // 断言:clear 必须锁定在 set_webdav_password 的成功臂内,失败臂
+    // 只打印错误保留明文。
+    #[test]
+    fn webdav_password_clear_is_guarded_by_migration_success() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/settings/storage.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 storage.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = stripped
+            .find("pub fn load(")
+            .expect("缺 pub fn load");
+        let rest = &stripped[start..];
+        let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(stripped.len());
+        let body = &stripped[start..end];
+        assert!(
+            body.contains("set_webdav_password("),
+            "load 必须调用 set_webdav_password 迁移遗留密码"
+        );
+        assert!(
+            body.contains("Ok(()) => settings.webdav_password.clear()"),
+            "明文密码清除必须锁定在迁移成功臂内——失败臂不得清除,否则唯一明文副本被抹除"
+        );
+        assert!(
+            body.contains("Err(e) => eprintln!"),
+            "迁移失败臂必须打印错误保留明文待下次重试"
+        );
+        // 失败臂不得清除明文
+        assert!(
+            !body.contains("Err(e) => settings.webdav_password.clear()"),
+            "迁移失败臂禁止清除明文密码(凭据库不可写时唯一副本被抹除)"
+        );
     }
 }
