@@ -576,20 +576,22 @@ fn merge_database(src_db: &Path) -> Result<(), String> {
             .ok_or(rusqlite::Error::InvalidPath("bad path".into()))?;
         conn.execute("ATTACH DATABASE ?1 AS importdb", [import_path])?;
 
-        let merge_result = (|| -> rusqlite::Result<()> {
-            merge_groups_from_importdb(conn)?;
-            merge_favorites_from_importdb(conn)?;
+        // M1:ATTACH 导入必须包事务——merge_* 里任一失败(如撞 uuid 唯一索引)
+        // 前面已落地的 groups/favorites/clipboard 都要回滚,否则半合并数据
+        // 无法回滚,重复导入越积越多(INSERT OR IGNORE 幂等只兜部分)。
+        let tx = conn.unchecked_transaction()?;
+        merge_groups_from_importdb(&tx)?;
+        merge_favorites_from_importdb(&tx)?;
 
-            // 记录导入库 clipboard.id 到当前库新 id 的映射，用于迁移 clipboard_data。
-            let id_mapping = merge_clipboard_from_importdb(conn)?;
-            merge_clipboard_data_from_importdb(conn, &id_mapping)?;
+        // 记录导入库 clipboard.id 到当前库新 id 的映射，用于迁移 clipboard_data。
+        let id_mapping = merge_clipboard_from_importdb(&tx)?;
+        merge_clipboard_data_from_importdb(&tx, &id_mapping)?;
 
-            reorder_clipboard_by_time(conn);
-            Ok(())
-        })();
+        reorder_clipboard_by_time(&tx);
+        tx.commit()?;
 
         let _ = conn.execute("DETACH DATABASE importdb", []);
-        merge_result
+        Ok(())
     })?;
     Ok(())
 }
@@ -1413,6 +1415,45 @@ mod tests {
         assert!(
             !closure_def_to_call.contains("init_database"),
             "init_database 不得藏在闭包内部"
+        );
+    }
+
+    // M1(ATTACH 导入无事务):merge_database 的各 merge_* 步骤(先 groups/favorites
+    // 再 clipboard/clipboard_data)必须包进同一个事务——任一失败时事务回滚,
+    // 前面已落地的合并数据不残留,重复导入不会因半合并越积越多
+    // (INSERT OR IGNORE 幂等只兜部分)。DETACH 必须在 commit 之后。
+    #[test]
+    fn merge_database_wraps_attach_import_in_transaction() {
+        let src = strip_line_comments(&source_file("src/services/data_management/mod.rs"));
+        let body = fn_body(&src, "merge_database");
+        // 事务必须存在且用 unchecked(不自动 BEGIN,因为 ATTACH 后 SQLite
+        // 禁止隐式 BEGIN 的事务敏感语句顺序,直接手动管理事务边界)
+        let tx_pos = body
+            .find("unchecked_transaction()")
+            .expect("merge 导入必须包事务");
+        // 所有写库步骤都必须在事务内
+        for step in [
+            "merge_groups_from_importdb(&tx)",
+            "merge_favorites_from_importdb(&tx)",
+            "merge_clipboard_from_importdb(&tx)",
+            "merge_clipboard_data_from_importdb(&tx, &id_mapping)",
+            "tx.commit()",
+        ] {
+            assert!(
+                body.find(step).expect("缺少合并步骤") > tx_pos,
+                "合并步骤 {} 必须在事务内",
+                step
+            );
+        }
+        // DETACH 必须在 commit 之后(否则迁移数据写库失败时会话级 importdb
+        // 已拆,无法回滚重试)
+        let commit_pos = body.find("tx.commit()").expect("必须提交事务");
+        let detach_pos = body
+            .find("DETACH DATABASE importdb")
+            .expect("合并结束后必须拆离导入库");
+        assert!(
+            commit_pos < detach_pos,
+            "DETACH 必须位于 commit 之后(失败时事务回滚仍需 importdb)"
         );
     }
 
