@@ -861,7 +861,6 @@ pub fn delete_favorite(id: String) -> Result<(), String> {
         Ok(to_delete)
     })?;
 
-    let _ = super::clipboard::delete_clipboard_data_items("favorite", &id);
     delete_image_files(images_to_delete)
 }
 
@@ -973,8 +972,13 @@ pub fn update_favorite(
 ) -> Result<FavoriteItem, String> {
     let group_name = group_name.unwrap_or_else(|| "全部".to_string());
     
-    let should_clear_raw_formats = with_connection(|conn| {
-        let (old_group_name, content_type, old_content, old_html_content) = conn.query_row(
+    with_connection(|conn| {
+        // r7-db-3:UPDATE + 旧格式 DELETE 必须在同一事务——旧实现在闭包外另起
+        // 连接 delete_clipboard_data_items,第二步失败时 content 已更新而旧 raw
+        // formats 残留,前端按新内容请求旧格式找不到对应 raw,内容回退错乱。
+        // 与 L2(update_clipboard_item,clipboard.rs:1191+)同构:事务内直删。
+        let tx = conn.unchecked_transaction()?;
+        let (old_group_name, content_type, old_content, old_html_content) = tx.query_row(
             "SELECT group_name, content_type, content, html_content FROM favorites WHERE id = ?",
             params![&id],
             |row| Ok((
@@ -984,7 +988,7 @@ pub fn update_favorite(
                 row.get::<_, Option<String>>(3)?,
             ))
         ).optional()?.ok_or(rusqlite::Error::QueryReturnedNoRows)?;
-        
+
         let content_changed = old_content != content;
         let html_changed = html_content
             .as_ref()
@@ -994,37 +998,43 @@ pub fn update_favorite(
         let now = chrono::Local::now().timestamp();
 
         let char_count = calculate_char_count(&content, &content_type);
-        
+
         if old_group_name != group_name {
             if let Some(ref html_content) = html_content {
-                conn.execute(
+                tx.execute(
                     "UPDATE favorites SET title = ?1, content = ?2, html_content = ?3, group_name = ?4, char_count = ?5, updated_at = ?6 WHERE id = ?7",
                     params![&title, &content, html_content, &group_name, char_count, now, &id],
                 )?;
             } else {
-                conn.execute(
+                tx.execute(
                     "UPDATE favorites SET title = ?1, content = ?2, group_name = ?3, char_count = ?4, updated_at = ?5 WHERE id = ?6",
                     params![&title, &content, &group_name, char_count, now, &id],
                 )?;
             }
         } else if let Some(ref html_content) = html_content {
-            conn.execute(
+            tx.execute(
                 "UPDATE favorites SET title = ?1, content = ?2, html_content = ?3, char_count = ?4, updated_at = ?5 WHERE id = ?6",
                 params![&title, &content, html_content, char_count, now, &id],
             )?;
         } else {
-            conn.execute(
+            tx.execute(
                 "UPDATE favorites SET title = ?1, content = ?2, char_count = ?3, updated_at = ?4 WHERE id = ?5",
                 params![&title, &content, char_count, now, &id],
             )?;
         }
-        Ok(content_changed || html_changed)
-    })?;
+        if content_changed || html_changed {
+            // r7-db-3:旧 raw formats 同事务清理——UPDATE + DELETE 任一失败整体回滚
+            tx.execute(
+                "DELETE FROM clipboard_data WHERE target_kind = 'favorite' AND target_id = ?1",
+                [&id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }).map_err(|e| if e.contains("QueryReturnedNoRows") {
+        format!("收藏项不存在: {}", id)
+    } else { e })?;
 
-    if should_clear_raw_formats {
-        super::clipboard::delete_clipboard_data_items("favorite", &id)?;
-    }
-    
     get_favorite_by_id(&id)?.ok_or_else(|| format!("更新后无法获取收藏项: {}", id))
 }
 
@@ -1115,6 +1125,49 @@ mod content_type_like_tests {
         assert!(
             fn_body.contains("where_clauses.join(\" AND \")"),
             "where_clauses 必须以 AND 拼接"
+        );
+    }
+
+    /// r7-db-3 护栏:update_favorite 的旧 raw formats 清理必须在同一事务内
+    /// (tx.execute 的 DELETE),禁止闭包外独立连接 delete_clipboard_data_items
+    /// ——否则 UPDATE 提交后第二步失败会留下"新 content 配旧 formats"不一致态。
+    /// 与 L2(update_clipboard_item,clipboard.rs)同构。
+    #[test]
+    fn update_favorite_clears_raw_formats_in_same_transaction() {
+        let source = fs::read_to_string(format!(
+            "{}/src/services/database/favorites.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读 favorites.rs");
+        let body: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = body
+            .find("pub fn update_favorite")
+            .expect("找不到 update_favorite");
+        let after = &body[start..];
+        let end = after
+            .find("\nfn ")
+            .or_else(|| after.find("\n#[cfg(test)]"))
+            .map(|i| start + i)
+            .unwrap_or(body.len());
+        let fn_body = &body[start..end];
+        // 同一事务:unchecked_transaction + tx.execute 的 DELETE
+        assert!(
+            fn_body.contains("unchecked_transaction"),
+            "update_favorite 必须包 unchecked_transaction 保证原子性"
+        );
+        assert!(
+            fn_body.contains("tx.execute")
+                && fn_body.contains("DELETE FROM clipboard_data WHERE target_kind = 'favorite'"),
+            "旧 raw formats 清理必须在 update_favorite 内以 tx.execute 的 DELETE 完成"
+        );
+        // 负向:闭包外独立连接删除不得出现
+        assert!(
+            !fn_body.contains("delete_clipboard_data_items"),
+            "update_favorite 禁止闭包外独立连接删除旧格式,必须事务内直删"
         );
     }
 }
