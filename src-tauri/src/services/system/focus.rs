@@ -61,6 +61,7 @@ pub fn refresh_excluded_hwnds(app_handle: &tauri::AppHandle) {
         "main",
         "context-menu",
         crate::windows::preview_window::PREVIEW_WINDOW_LABEL,
+        crate::windows::screenshot_window::SCREENSHOT_WINDOW_LABEL,
         "quickpaste",
         "community",
     ] {
@@ -351,6 +352,7 @@ fn is_ignored_foreground_window(class_name: &str, name: &str) -> bool {
         || name.starts_with("文件盒")
         || name.starts_with("社区交流")
         || name == "更新"
+        || name == "截图"
         || name == "拖放接收层"
 }
 
@@ -442,6 +444,7 @@ mod tests {
             "main",
             "context-menu",
             "PREVIEW_WINDOW_LABEL",
+            "SCREENSHOT_WINDOW_LABEL",
             "quickpaste",
             "community",
         ] {
@@ -459,6 +462,24 @@ mod tests {
         assert!(
             b.contains("webview_windows()"),
             "必须遍历全部 webview 窗口取文件盒窗口"
+        );
+    }
+
+    // 源码护栏:截图窗口(标签 "screenshot",标题 "截图")必须同时进排除列表
+    // 与忽略表——截图取景时聚焦截图窗口,若不过滤,LAST_FOCUS_HWND 被记为
+    // 截图窗口,恢复焦点把焦点设回已隐藏的截图窗口。
+    #[test]
+    fn screenshot_window_covered_by_excluded_hwnds_and_ignore_table() {
+        let src = strip_line_comments(&focus_source());
+        let excluded_body = fn_body(&src, "refresh_excluded_hwnds");
+        assert!(
+            excluded_body.contains("crate::windows::screenshot_window::SCREENSHOT_WINDOW_LABEL"),
+            "截图窗口标签必须进排除列表(用常量防字符串漂移)"
+        );
+        let helper = fn_body(&src, "is_ignored_foreground_window");
+        assert!(
+            helper.contains("name == \"截图\""),
+            "截图窗口标题必须进忽略表"
         );
     }
 
