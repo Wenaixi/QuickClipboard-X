@@ -56,6 +56,9 @@ pub fn list_peers() -> Vec<PairedPeer> {
     let original_len = peers.len();
     let peers = dedupe_peers(peers);
     if peers.len() != original_len {
+        // 去重写盘也是写路径——与 upsert/mark_peer_seen 的读-改-写并发时
+        // 无锁整体覆盖会丢配对记录,必须持锁后经 save_peers_inner 落盘。
+        let _guard = PEER_STORE_LOCK.lock();
         let _ = save_peers_inner(&peers);
     }
     peers
@@ -157,6 +160,34 @@ mod tests {
         assert!(
             save.contains("store::set(PAIRED_PEERS_KEY"),
             "save_peers_inner 是唯一不加锁的落盘实现"
+        );
+    }
+
+    // 读路径的去重写盘也必须持锁——list_peers 发现重复配对时写回去重结果,
+    // 若绕过 PEER_STORE_LOCK,会与持锁的 upsert/mark_peer_seen 读-改-写并发,
+    // 旧快照整体覆盖丢配对。断言去重后的落盘先取锁再写。
+    #[test]
+    fn list_peers_dedupe_write_holds_lock() {
+        let src = strip_line_comments(&source_file("src/services/sync_transfer/lan/peer_store.rs"));
+        let body = fn_body(&src, "list_peers");
+        let dedupe_pos = body
+            .find("dedupe_peers(peers)")
+            .unwrap_or_else(|| panic!("list_peers 必须先做去重"));
+        let rest = &body[dedupe_pos..];
+        // 去重之后的写盘路径必须:先持锁、再经 save_peers_inner 落盘
+        assert!(
+            rest.contains("PEER_STORE_LOCK.lock()"),
+            "list_peers 去重后的写盘必须持有 PEER_STORE_LOCK,否则与 upsert 读-改-写并发会丢配对"
+        );
+        let lock_pos = rest
+            .find("PEER_STORE_LOCK.lock()")
+            .unwrap_or_else(|| panic!("缺锁获取"));
+        let save_pos = rest
+            .find("save_peers_inner")
+            .unwrap_or_else(|| panic!("缺去重落盘"));
+        assert!(
+            lock_pos < save_pos,
+            "锁获取必须先于 save_peers_inner 落盘"
         );
     }
 }
