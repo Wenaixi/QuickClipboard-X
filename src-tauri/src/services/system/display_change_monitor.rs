@@ -151,6 +151,11 @@ mod windows_display_change_monitor {
             }
         }
 
+        // 通过节流闸立即推进基准:显示变化风暴期间,后到事件由闸门直接
+        // 丢弃。基准若等延迟线程真正执行才推进,风暴里每个事件都会通过
+        // 旧基准的闸门,各自 spawn 一个 450ms 空睡线程,线程堆积。
+        *DISPLAY_REFRESH_LAST_RUN.lock() = now;
+
         let version = DISPLAY_REFRESH_VERSION.fetch_add(1, Ordering::SeqCst) + 1;
 
         thread::spawn(move || {
@@ -162,7 +167,6 @@ mod windows_display_change_monitor {
 
             input_common::run_on_main_thread(|| {
                 handle_display_change_impl();
-                *DISPLAY_REFRESH_LAST_RUN.lock() = Instant::now();
             });
         });
     }
@@ -187,3 +191,30 @@ pub(crate) use windows_display_change_monitor::start_display_change_monitor_if_n
 
 #[cfg(not(target_os = "windows"))]
 pub(crate) fn start_display_change_monitor_if_needed() {}
+
+#[cfg(target_os = "windows")]
+#[cfg(test)]
+mod display_change_monitor_tests {
+    // 护栏:节流基准必须在调度点(通过节流闸时)就推进,不能在延迟线程
+    // 真正执行时才推进——显示变化风暴期间,滞后基准会让每个风暴事件都
+    // 通过闸门,各自 spawn 一个 450ms 空睡线程,线程堆积。
+    #[test]
+    fn display_refresh_throttle_baseline_advances_at_schedule_time() {
+        use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+        let src = strip_line_comments(&source_file("src/services/system/display_change_monitor.rs"));
+        let body = fn_body(&src, "schedule_hidden_snap_refresh");
+        // 调度点必须立即推进基准(DISPLAY_REFRESH_LAST_RUN 写 now)
+        let baseline_pos = body
+            .find("DISPLAY_REFRESH_LAST_RUN.lock() = now")
+            .expect("通过节流闸后必须立即推进节流基准");
+        // spawn 延迟线程必须发生在基准推进之后
+        let spawn_pos = body
+            .find("thread::spawn(move ||")
+            .expect("必须 spawn 延迟刷新线程");
+        assert!(
+            baseline_pos < spawn_pos,
+            "节流基准必须在 spawn 之前推进——延迟线程内推进会让风暴期间线程堆积"
+        );
+    }
+}
