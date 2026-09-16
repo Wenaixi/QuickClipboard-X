@@ -719,7 +719,7 @@ mod windows_raw_input {
     }
 
     fn check_modifier_requirement_impl(required: &str) -> bool {
-        let (ctrl, alt, shift, _meta) = get_modifier_keys_state_impl();
+        let (ctrl, alt, shift, meta) = get_modifier_keys_state_impl();
 
         if required == "None" || required.is_empty() {
             return true;
@@ -729,13 +729,18 @@ mod windows_raw_input {
         let need_ctrl = parts.contains(&"Ctrl");
         let need_alt = parts.contains(&"Alt");
         let need_shift = parts.contains(&"Shift");
+        let need_meta = parts
+            .iter()
+            .any(|&p| matches!(p, "Win" | "Super" | "Meta" | "Cmd" | "Command"));
 
         (!need_ctrl || ctrl)
             && (!need_alt || alt)
             && (!need_shift || shift)
+            && (!need_meta || meta)
             && (need_ctrl || !ctrl)
             && (need_alt || !alt)
             && (need_shift || !shift)
+            && (need_meta || !meta)
     }
 
     fn get_modifier_keys_state_impl() -> (bool, bool, bool, bool) {
@@ -1215,6 +1220,40 @@ mod windows_raw_input_tests {
         assert!(
             !body.contains("QUICKPASTE_SECONDARY_KEY_VK.store(vk"),
             "禁止把任意按键兜底存为副键——按住任意键即切换条目"
+        );
+    }
+
+    // 护栏:配置 Win/Super/Meta/Cmd 家族修饰键不得被忽略——若解构时
+    // 丢弃 meta 状态,按 Win 配置的判定会与真实键盘状态无关(方向反转),
+    // 需要的键与禁止的键都会被跳过。
+    #[test]
+    fn win_modifier_requirement_not_ignored() {
+        use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+        let src = strip_line_comments(&source_file("src/services/system/raw_input.rs"));
+        let body = fn_body(&src, "check_modifier_requirement_impl");
+        // 解构必须接收 meta,禁止 _meta 丢弃
+        assert!(
+            body.contains("let (ctrl, alt, shift, meta) = get_modifier_keys_state_impl()"),
+            "必须接收 meta 键状态,禁止 _meta 丢弃"
+        );
+        // 必须把 Win 家族解析进 need_meta
+        let need_meta_pos = body
+            .find("need_meta")
+            .expect("必须解析 Win/Super/Meta 家族需求");
+        let parse_pos = body
+            .find("\"Win\" | \"Super\" | \"Meta\"")
+            .expect("必须识别 Win/Super/Meta/Cmd/Command 家族写法");
+        // need_meta 必须同时用于"需要则必须按下"与"不需要则禁止按下"
+        let require_pos = body
+            .find("need_meta || meta")
+            .expect("必须包含 need_meta 满足蕴含");
+        let forbid_pos = body
+            .find("need_meta || !meta")
+            .expect("必须包含未配置时禁止 meta 按下");
+        assert!(
+            need_meta_pos < require_pos && need_meta_pos < forbid_pos && parse_pos < forbid_pos,
+            "need_meta 必须先解析得出,再用于满足与禁止双向判定"
         );
     }
 
