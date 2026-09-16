@@ -72,9 +72,13 @@ pub fn refresh_excluded_hwnds(app_handle: &tauri::AppHandle) {
     }
     // 文件盒窗口按 transfer-shelf-{id} 动态标签创建,rename_shelf 允许任意
     // 名称,重命名后标题过滤(name.starts_with("文件盒"))失效,只能按标签
-    // 前缀枚举进排除列表,否则其聚焦事件污染 LAST_FOCUS_HWND。
+    // 前缀枚举进排除列表;贴图窗口按 pin-image-{uuid} 动态标签创建,target
+    // 为图片内容标题不固定,同样只能按标签前缀枚举——否则重命名后聚焦
+    // 文件盒/聚焦贴图污染 LAST_FOCUS_HWND,恢复焦点把焦点设回隐藏窗口。
     for (label, win) in app_handle.webview_windows() {
-        if label.starts_with(crate::windows::transfer_shelf::LABEL_PREFIX) {
+        if label.starts_with(crate::windows::transfer_shelf::LABEL_PREFIX)
+            || label.starts_with("pin-image-")
+        {
             if let Ok(hwnd) = win.hwnd() {
                 excluded.push(hwnd.0 as isize);
             }
@@ -448,8 +452,9 @@ mod tests {
             );
         }
         assert!(
-            b.contains("starts_with(crate::windows::transfer_shelf::LABEL_PREFIX)"),
-            "排除列表必须按标签前缀覆盖文件盒窗口,标题可被重命名标题过滤失效"
+            b.contains("starts_with(crate::windows::transfer_shelf::LABEL_PREFIX)")
+                && b.contains("starts_with(\"pin-image-\")"),
+            "排除列表必须按标签前缀覆盖文件盒与贴图窗口,标题可被重命名/变图内容标题过滤失效"
         );
         assert!(
             b.contains("webview_windows()"),
@@ -669,8 +674,9 @@ mod tests {
 
     // 文件盒窗口标题可被 rename_shelf 改成任意名,标题过滤
     // (name.starts_with("文件盒"))随之失效,只能按 transfer-shelf-{id} 标签
-    // 前缀枚举进排除列表——否则重命名后聚焦文件盒污染 LAST_FOCUS_HWND,
-    // 恢复焦点把焦点设回隐藏的文件盒窗口。
+    // 前缀枚举进排除列表;贴图窗口按 pin-image-{uuid} 标签动态创建,加上
+    // 托盘删除项校验——否则重命名后聚焦文件盒/聚焦贴图污染
+    // LAST_FOCUS_HWND,恢复焦点把焦点设回隐藏的文件盒/贴图窗口。
     #[test]
     fn excluded_hwnds_cover_transfer_shelf_windows_by_label_prefix() {
         let src = strip_line_comments(&focus_source());
@@ -678,6 +684,10 @@ mod tests {
         assert!(
             body.contains("starts_with(crate::windows::transfer_shelf::LABEL_PREFIX)"),
             "排除列表必须按 transfer-shelf 标签前缀枚举文件盒窗口"
+        );
+        assert!(
+            body.contains("starts_with(\"pin-image-\")"),
+            "排除列表必须按 pin-image- 标签前缀枚举贴图窗口"
         );
         assert!(
             body.contains("webview_windows()"),
