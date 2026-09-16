@@ -548,13 +548,17 @@ pub fn run() {
                     });
                 }
                 tauri::RunEvent::ExitRequested { api, .. } => {
-                    if services::low_memory::is_low_memory_mode() 
-                        && !services::low_memory::is_user_requested_exit() 
+                    if services::low_memory::is_low_memory_mode()
+                        && !services::low_memory::is_user_requested_exit()
                     {
                         api.prevent_exit();
                     } else {
                         SHUTDOWN_REQUESTED.store(true, Ordering::SeqCst);
                         services::webdav_sync::crypto::clear_cached_keys();
+                        // 进程真正退出前清理"管理员实例存活"心跳标记——残留标记
+                        // 会让下次普通自启读到 1 而静默跳过提权,run_as_admin 失效。
+                        #[cfg(windows)]
+                        services::system::startup::clear_admin_instance_alive();
                     }
                 }
                 tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } => {
@@ -591,6 +595,35 @@ mod tests {
             env!("CARGO_MANIFEST_DIR")
         ))
         .expect("找不到 lib.rs")
+    }
+
+    // §10.3 源码护栏：管理员实例退出时必须清理心跳标记——残留标记会让
+    // 下次普通自启读到 1 而静默跳过提权,run_as_admin 失效。
+    #[test]
+    fn admin_instance_alive_cleared_on_exit() {
+        let src = strip_line_comments(&lib_source());
+        let start = src
+            .find("RunEvent::ExitRequested")
+            .expect("缺退出请求事件分支");
+        let end = src[start..]
+            .find("tauri::RunEvent::WindowEvent")
+            .map(|i| start + i)
+            .unwrap_or(src.len());
+        let body = &src[start..end];
+        assert!(
+            body.contains("clear_admin_instance_alive"),
+            "退出请求分支必须清理管理员实例心跳标记"
+        );
+        let clear_pos = body
+            .find("clear_admin_instance_alive")
+            .expect("缺心跳清理调用");
+        let crypto_pos = body
+            .find("clear_cached_keys")
+            .expect("缺密钥清理调用");
+        assert!(
+            clear_pos > crypto_pos,
+            "心跳清理必须在密钥清理之后(退出真正发生时)"
+        );
     }
 
     // §10.3 源码护栏：单实例回调必须区分后台启动（自启/管理员重启），

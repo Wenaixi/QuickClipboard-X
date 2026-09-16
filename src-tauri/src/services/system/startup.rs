@@ -71,6 +71,7 @@ mod platform {
     use std::io;
     use std::os::windows::ffi::{OsStrExt, OsStringExt};
     use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicBool, Ordering};
     use windows::core::{Interface, BSTR, HRESULT, PCWSTR};
     use windows::Win32::Foundation::{
         CloseHandle, ERROR_FILE_NOT_FOUND, RPC_E_CHANGED_MODE, VARIANT_FALSE, VARIANT_TRUE,
@@ -104,6 +105,9 @@ mod platform {
     // 管理员实例心跳:值 1 表示"有一个管理员提权实例存活"。
     // 普通权限自启实例据此判定不应重复触发 UAC 提权,避免每次开机静默弹窗。
     const ADMIN_INSTANCE_ALIVE_KEY: &str = "AdminInstanceAlive";
+    // 本进程是否写过心跳标记:true 才在退出时清理,防止误删仍在运行的
+    // 其他管理员实例的标记。
+    static ADMIN_INSTANCE_ALIVE_MARKED: AtomicBool = AtomicBool::new(false);
     const LEGACY_ADMIN_TASK_NAME: &str = "QuickClipboardAdmin";
     const ADMIN_TASK_PREFIX: &str = "QuickClipboardAdmin-";
 
@@ -676,7 +680,9 @@ mod platform {
     // 提权实例专用的启动探测标记:写 1 表示管理员实例存活,读取后清空。
     // 写入必须是无条件的(每次提权实例启动都刷新),读取用 swap(true) 原子
     // 取走旧值——普通自启实例读到 1 即知道有管理员实例在跑,不会重复提权。
+    // 退出时按"本进程是否写过"清理,避免残留标记让下次普通自启静默跳过提权。
     pub fn mark_admin_instance_alive() {
+        ADMIN_INSTANCE_ALIVE_MARKED.store(true, Ordering::SeqCst);
         let current_user = RegKey::predef(HKEY_CURRENT_USER);
         match current_user.create_subkey(STARTUP_STATE_KEY) {
             Ok((key, _)) => {
@@ -684,6 +690,22 @@ mod platform {
             }
             Err(error) => eprintln!("打开自启动状态键失败,无法标记管理员实例存活: {error}"),
         }
+    }
+
+    // 退出清理:仅删除本进程写过的标记。进程退出后"管理员实例存活"已不再
+    // 成立,残留标记会让后续普通自启实例读到 1 而静默跳过提权,用户配置的
+    // run_as_admin 失效且无声。用 swap 判本进程是否写过,防止误删仍在
+    // 运行中的其他管理员实例的标记。
+    pub fn clear_admin_instance_alive() {
+        if !ADMIN_INSTANCE_ALIVE_MARKED.swap(false, Ordering::SeqCst) {
+            return;
+        }
+        let current_user = RegKey::predef(HKEY_CURRENT_USER);
+        let key = match current_user.open_subkey_with_flags(STARTUP_STATE_KEY, KEY_READ | KEY_SET_VALUE) {
+            Ok(key) => key,
+            Err(_) => return,
+        };
+        let _ = key.delete_value(ADMIN_INSTANCE_ALIVE_KEY);
     }
 
     fn take_admin_instance_alive() -> bool {
@@ -953,9 +975,10 @@ mod platform {
 
 #[cfg(target_os = "windows")]
 pub use platform::{
-    cleanup_startup_entries, configure_auto_start, get_auto_start_status, is_admin_task_ready,
-    is_running_as_admin, mark_admin_instance_alive, repair_startup_configuration,
-    should_skip_elevation_for_admin, switch_to_standard_mode, try_elevate_and_restart,
+    cleanup_startup_entries, clear_admin_instance_alive, configure_auto_start,
+    get_auto_start_status, is_admin_task_ready, is_running_as_admin, mark_admin_instance_alive,
+    repair_startup_configuration, should_skip_elevation_for_admin, switch_to_standard_mode,
+    try_elevate_and_restart,
 };
 
 #[cfg(not(target_os = "windows"))]
@@ -1000,6 +1023,9 @@ pub fn should_skip_elevation_for_admin() -> bool {
 
 #[cfg(not(target_os = "windows"))]
 pub fn mark_admin_instance_alive() {}
+
+#[cfg(not(target_os = "windows"))]
+pub fn clear_admin_instance_alive() {}
 
 #[cfg(not(target_os = "windows"))]
 pub fn cleanup_startup_entries() -> Result<(), String> {
