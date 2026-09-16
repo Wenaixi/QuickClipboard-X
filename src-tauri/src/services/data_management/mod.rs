@@ -281,8 +281,10 @@ pub fn reset_all_data() -> Result<String, String> {
     let _ = crate::services::database::connection::with_connection(|conn| {
         conn.execute_batch("PRAGMA wal_checkpoint(FULL); PRAGMA wal_checkpoint(TRUNCATE);")
     });
-    let _ = backup_full_zip(&current_dir);
-    if current_dir != default_dir { let _ = backup_full_zip(&default_dir); }
+    backup_full_zip(&current_dir).map_err(|e| format!("重置前备份失败,已中止: {}", e))?;
+    if current_dir != default_dir {
+        backup_full_zip(&default_dir).map_err(|e| format!("默认目录备份失败,已中止: {}", e))?;
+    }
 
     close_database();
 
@@ -389,7 +391,7 @@ pub fn import_data_zip(zip_path: PathBuf, mode: &str) -> Result<String, String> 
             let _ = crate::services::database::connection::with_connection(|conn| {
                 conn.execute_batch("PRAGMA wal_checkpoint(FULL); PRAGMA wal_checkpoint(TRUNCATE);")
             });
-            let _ = backup_full_zip(&current_dir_for_backup);
+            backup_full_zip(&current_dir_for_backup).map_err(|e| format!("替换前备份失败,已中止: {}", e))?;
             let mut new_settings = if imported_settings.exists() {
                 let s = fs::read_to_string(&imported_settings).map_err(|e| e.to_string())?;
                 serde_json::from_str::<crate::services::AppSettings>(&s).map_err(|e| e.to_string())?
@@ -425,6 +427,10 @@ pub fn import_data_zip(zip_path: PathBuf, mode: &str) -> Result<String, String> 
             // ②闭包无论成败外层无条件 init_database(target 库),绝不留下关闭态;
             // ③update_settings 后置到替换与重开都成功之后,失败时不改设置,
             //   避免下次启动指向半替换目录。
+            // 备份 target_dir(导入 settings 决定的落点)——替换删除的正是它,
+            // 只备份 current_dir 会让 target 侧既有数据在备份里找不到,删除后
+            // 永久丢失;target 无数据时备份返回 Ok(None) 不产生空包。
+            backup_full_zip(&target_dir).map_err(|e| format!("目标目录备份失败,已中止替换: {}", e))?;
             close_database();
             let result = (|| -> Result<(), String> {
                 let target_images = target_dir.join("clipboard_images");
@@ -1119,8 +1125,10 @@ fn change_storage_dir_internal(src_dir: &Path, dst_dir: &Path, mode: &str) -> Re
     let _ = crate::services::database::connection::with_connection(|conn| {
         conn.execute_batch("PRAGMA wal_checkpoint(FULL); PRAGMA wal_checkpoint(TRUNCATE);")
     });
-    let _ = backup_full_zip(src_dir);
-    if check_target_has_data(dst_dir)?.has_data { let _ = backup_full_zip(dst_dir); }
+    backup_full_zip(src_dir).map_err(|e| format!("迁移前备份失败,已中止: {}", e))?;
+    if check_target_has_data(dst_dir)?.has_data {
+        backup_full_zip(dst_dir).map_err(|e| format!("目标目录备份失败,已中止: {}", e))?;
+    }
 
     close_database();
 
@@ -1522,6 +1530,31 @@ mod tests {
         assert!(
             !closure_def_to_call.contains("init_database"),
             "init_database 不得藏在闭包内部"
+        );
+    }
+
+    // 护栏:备份失败必须中止破坏性操作。重置全部数据/替换导入/迁移存储
+    // 都会随后删除或覆盖源目录数据——若备份失败仍继续,数据将永久丢失
+    // 且无任何回滚副本。断言备份错误经 map_err 传播为函数错误。
+    #[test]
+    fn destructive_operations_abort_when_backup_fails() {
+        let src = strip_line_comments(&source_file("src/services/data_management/mod.rs"));
+        for function in ["reset_all_data", "change_storage_dir_internal"] {
+            let body = fn_body(&src, function);
+            assert!(
+                body.contains("backup_full_zip(&current_dir).map_err")
+                    || body.contains("backup_full_zip(&default_dir).map_err")
+                    || body.contains("backup_full_zip(src_dir).map_err")
+                    || body.contains("backup_full_zip(dst_dir).map_err"),
+                "{} 的备份失败必须传播中止,不得吞错后继续删除数据",
+                function
+            );
+        }
+        let replace = fn_body(&src, "import_data_zip");
+        let replace_seg = &replace[replace.find("backup_full_zip(&current_dir_for_backup)").expect("缺少替换前备份")..];
+        assert!(
+            replace_seg.contains("backup_full_zip(&target_dir).map_err") && replace_seg.contains("已中止替换"),
+            "替换导入必须备份 target_dir 且失败即中止,否则被删数据无备份可回滚"
         );
     }
 
