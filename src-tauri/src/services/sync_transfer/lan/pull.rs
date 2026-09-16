@@ -77,9 +77,62 @@ pub async fn pull_from_peer(device_id: &str) -> Result<SyncReport, String> {
     tauri::async_runtime::spawn(async move {
         fetch_missing_images_best_effort(&image_peer, &history_records).await;
         fetch_missing_images_best_effort(&image_peer, &favorite_records).await;
+        // 全表重扫补拉历史缺失图片——与 WebDAV 侧 uploader/downloader 对称:
+        // 仅覆盖本次增量记录时,网络抖动导致某次下载失败的图片不会再被取回
+        // (该记录 updated_at 不变,增量 pull 不再携带),缺失会永久化。这里
+        // 对历史/收藏全表 metas 再扫一遍 image_id,本地已存在的文件会被
+        // fetch_missing_images_best_effort 内部跳过,成本只限于缺失项。
+        scan_and_fetch_missing_images(&image_peer).await;
     });
 
     Ok(report)
+}
+
+async fn scan_and_fetch_missing_images(peer: &super::peer_store::PairedPeer) {
+    let mut image_ids = std::collections::HashSet::new();
+    for meta in crate::services::database::webdav_list_history_record_metas()
+        .into_iter()
+        .flatten()
+    {
+        if let Some(raw) = meta.image_id.as_deref() {
+            for image_id in raw.split(',').map(|item| item.trim()) {
+                if !image_id.is_empty() && super::files::is_valid_image_id(image_id) {
+                    image_ids.insert(image_id.to_string());
+                }
+            }
+        }
+    }
+    for meta in crate::services::database::webdav_list_favorite_record_metas()
+        .into_iter()
+        .flatten()
+    {
+        if let Some(raw) = meta.image_id.as_deref() {
+            for image_id in raw.split(',').map(|item| item.trim()) {
+                if !image_id.is_empty() && super::files::is_valid_image_id(image_id) {
+                    image_ids.insert(image_id.to_string());
+                }
+            }
+        }
+    }
+    for image_id in image_ids {
+        match super::files::read_image_file(&image_id) {
+            Ok(Some(_)) => continue,
+            Ok(None) => {}
+            Err(e) => {
+                eprintln!("[局域网同步] 检查本地图片失败 image_id={} 错误={}", image_id, e);
+                continue;
+            }
+        }
+        match super::http_client::fetch_peer_image(peer, &image_id).await {
+            Ok(Some(bytes)) => {
+                if let Err(e) = super::files::save_image_file(&image_id, &bytes) {
+                    eprintln!("[局域网同步] 保存拉取图片失败 image_id={} 错误={}", image_id, e);
+                }
+            }
+            Ok(None) => {}
+            Err(e) => eprintln!("[局域网同步] 拉取图片失败 image_id={} 错误={}", image_id, e),
+        }
+    }
 }
 
 async fn fetch_missing_images_best_effort(
@@ -148,6 +201,32 @@ mod lan_incremental_pull_guard {
         assert!(
             !body.contains("authorized_get(peer, \"/qc-sync/records/favorites\")"),
             "收藏拉取禁止裸全量调用,必须带 since"
+        );
+    }
+
+    // 图片补拉必须覆盖全表 metas 重扫——只处理本次增量记录时,网络抖动
+    // 导致某次下载失败的图片永不重试(记录 updated_at 不变,增量 pull 不再
+    // 携带)。断言 pull_from_peer 的 spawn 范围里同时存在按记录差量拉取与
+    // scan_and_fetch_missing_images 全表重扫两个环节。
+    #[test]
+    fn pull_scans_all_metas_for_missing_images_besides_increment() {
+        let src = strip_line_comments(&source_file("src/services/sync_transfer/lan/pull.rs"));
+        let body = fn_body(&src, "pull_from_peer");
+        let spawn_pos = body
+            .find("fetch_missing_images_best_effort")
+            .unwrap_or_else(|| panic!("图片补拉必须先按本次增量记录差量拉取"));
+        let scan_pos = body
+            .find("scan_and_fetch_missing_images")
+            .unwrap_or_else(|| panic!("pull_from_peer 必须再对全表 metas 重扫缺失图片,否则历史缺失图片永不重试"));
+        assert!(
+            scan_pos > spawn_pos,
+            "全表重扫必须紧跟增量图片补拉之后,作为兜底环节"
+        );
+        let scan_fn = &src[src.find("async fn scan_and_fetch_missing_images").expect("缺扫描函数")..];
+        assert!(
+            scan_fn.contains("webdav_list_history_record_metas")
+                && scan_fn.contains("webdav_list_favorite_record_metas"),
+            "全表重扫必须读历史与收藏两张表的 metas"
         );
     }
 }
