@@ -51,6 +51,12 @@ fn save_groups(groups: &[CloudGroup], ignore_tombstones: bool) -> Result<Vec<Clo
         let mut changed = Vec::new();
 
         for group in groups {
+            // "全部"是本地 UI 构造的收藏容器哨兵行(name 为 PK),不在真实
+            // 分组清单里——远端同步/修复若携带同名声明的样式,覆盖本地
+            // 哨兵行的 icon/color/order 会让"全部"视觉与结构错乱,必须跳过。
+            if group.name == "全部" {
+                continue;
+            }
             let tombstone_deleted_at = super::tombstones::sync_tombstone_deleted_at_in_conn(
                 &tx,
                 super::tombstones::COLLECTION_GROUPS,
@@ -554,6 +560,26 @@ mod tests {
         assert!(
             delete_body.contains("name == \"全部\""),
             "delete_group 必须保留对'全部'的拒绝"
+        );
+    }
+
+    // "全部"哨兵行的远端同步防护:save_groups(局域网/WebDAV 共用落库)
+    // 若接收 name=="全部" 的远端声明,会覆盖本地哨兵行的 icon/color/
+    // order 样式,前端"全部"容器视觉与结构错乱;name 是 PK 不会丢,
+    // 但样式会漂移,必须整条跳过。
+    #[test]
+    fn save_groups_skips_all_sentinel_group() {
+        let src = strip_line_comments(&source_file("src/services/database/groups.rs"));
+        let body = fn_body(&src, "save_groups");
+        let guard_pos = body
+            .find("if group.name == \"全部\" {")
+            .expect("save_groups 必须拒绝'全部'哨兵分组");
+        let tombstone_pos = body
+            .find("sync_tombstone_deleted_at_in_conn")
+            .expect("缺墓碑检查");
+        assert!(
+            guard_pos < tombstone_pos,
+            "'全部'拒绝必须早于墓碑/合并逻辑,否则仍会触达 UPDATE"
         );
     }
 }
