@@ -10,8 +10,8 @@ mod types;
 mod window;
 
 pub use manager::{
-    append_files_to_recent_or_new_shelf, open_or_create_shelf, persisted_file_paths,
-    schedule_startup_restore_persisted_shelves,
+    append_files_to_recent_or_new_shelf, clear_active_shelves, open_or_create_shelf,
+    persisted_file_paths, schedule_startup_restore_persisted_shelves,
 };
 // 标签前缀供焦点排除列表按 transfer-shelf-{id} 枚举窗口——
 // 文件盒标题可被重命名,标题过滤失效,只能按标签前缀识别自身窗口。

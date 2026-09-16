@@ -189,6 +189,13 @@ pub fn list_shelves() -> Vec<ShelfSummary> {
         .collect()
 }
 
+// 清空内存 SHELVES 记录——低占用模式销毁全部文件盒窗口后调用,避免
+// 静态 Vec 残留"已销毁窗口"的记录;只清内存不动持久化(持久化的会被
+// 退出低占用后的启动恢复重新读入)。
+pub fn clear_active_shelves() {
+    SHELVES.lock().clear();
+}
+
 pub fn append_files_to_recent_or_new_shelf(
     app: &AppHandle,
     paths: Vec<String>,

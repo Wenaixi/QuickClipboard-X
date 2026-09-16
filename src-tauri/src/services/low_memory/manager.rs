@@ -309,6 +309,11 @@ fn destroy_all_webviews(app: &AppHandle) {
         }
     }
 
+    // 文件盒窗口销毁后,清空内存 SHELVES 记录——静态 Vec 只增不减时,
+    // 退出低占用后 list_shelves 会返回已销毁窗口的记录,前端按记录打开
+    // 等于打开不存在的窗口,重开同名文件盒也会命中残留记录。
+    crate::windows::transfer_shelf::clear_active_shelves();
+
     for label in WEBVIEW_LABELS {
         if let Some(window) = app.get_webview_window(label) {
             let _ = window.destroy();
@@ -658,6 +663,25 @@ mod tests {
             body.contains("starts_with(\"pin-image-\")")
                 && body.contains("starts_with(crate::windows::transfer_shelf::LABEL_PREFIX)"),
             "动态标签窗口(贴图/文件盒)必须按前缀遍历销毁"
+        );
+    }
+
+    // 源码护栏:销毁文件盒窗口后必须清空内存 SHELVES 记录——静态 Vec 只增
+    // 不减时,退出低占用后 list_shelves 返回"已销毁文件的盒"记录,前端按
+    // 记录打开等于打开不存在的窗口;再加同名文件盒也会命中残留记录。
+    #[test]
+    fn destroy_all_webviews_clears_shelf_records_after_destroy() {
+        let src = strip_line_comments(&manager_source());
+        let body = crate::services::system::hotkey::test_utils::fn_body(&src, "destroy_all_webviews");
+        let destroy_pos = body
+            .find("window.destroy()")
+            .expect("destroy_all_webviews 必须销毁文件盒窗口");
+        let clear_pos = body
+            .find("clear_active_shelves()")
+            .expect("销毁文件盒窗口后必须清空内存 SHELVES 记录");
+        assert!(
+            destroy_pos < clear_pos,
+            "必须先销毁窗口再清空记录——避免残留下已销毁窗口的文件盒记录"
         );
     }
 
