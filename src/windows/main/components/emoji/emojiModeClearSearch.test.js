@@ -2,13 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readSource } from './readSource.js';
 
-// F1-3: 切子模式(emoji/symbols/images)后搜索态残留。
+// 切子模式(emoji/symbols/images)后搜索态残留。
 // 旧版 main 的 emojiMode effect 第一行 setSearchQuery(''),commit 80acf679
 // 把搜索框合并到顶栏后删除,无重建。现在 searchQuery 是 App 顶层 state,
 // 切子模式仍按旧关键词过滤 → 无匹配时渲染 no-results 空网格。
 // 修复:App 在 emojiMode 变化的回调里清空搜索(搜索框归 App 所有)。
 
-test('F1-3 App 有 handleEmojiModeChange 且在模式变化时清空 searchQuery', async () => {
+test('App 有 handleEmojiModeChange 且在模式变化时清空 searchQuery', async () => {
   const body = await readSource('../../App.jsx');
   const fnStart = body.indexOf('const handleEmojiModeChange');
   assert.notEqual(fnStart, -1, '缺 const handleEmojiModeChange');
@@ -18,7 +18,7 @@ test('F1-3 App 有 handleEmojiModeChange 且在模式变化时清空 searchQuery
   assert.ok(fn.includes('setEmojiMode'), 'handleEmojiModeChange 应转发 setEmojiMode');
 });
 
-test('F1-3 App 用 handleEmojiModeChange 取代全部裸 setEmojiMode', async () => {
+test('App 用 handleEmojiModeChange 取代全部裸 setEmojiMode', async () => {
   const body = await readSource('../../App.jsx');
   // TabNavigation / EmojiTab 拿到的是带清搜索的包装回调
   const tabNavProps = body.slice(body.indexOf('const TabNavigationComponent'), body.indexOf('const ContentComponent'));

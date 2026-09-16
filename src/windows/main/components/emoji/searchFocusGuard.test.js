@@ -2,11 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readSource } from './readSource.js';
 
-// F1-1: 顶栏搜索框聚焦时全局热键全部变为输入(commit 3a6f67c5 只给 7 个 handler
+// 顶栏搜索框聚焦时全局热键全部变为输入(commit 3a6f67c5 只给 7 个 handler
 // 加了 isSearchFocused 守卫),Esc(hide-window)/Ctrl+P(toggle-pin)/Ctrl+↑↓
 // (previous/next-group)仍会打断输入。护栏:这些 handler 必须带同样的守卫。
 
-test('F1-1 App handleTogglePin 有 isSearchFocused 守卫', async () => {
+test('App handleTogglePin 有 isSearchFocused 守卫', async () => {
   const body = await readSource('../../App.jsx');
   const fnStart = body.indexOf('const handleTogglePin');
   const fnEnd = body.indexOf('const handlePreviousGroup', fnStart);
@@ -16,7 +16,7 @@ test('F1-1 App handleTogglePin 有 isSearchFocused 守卫', async () => {
   assert.ok(fn.includes('isSearchFocused'), 'handleTogglePin 应检查 isSearchFocused');
 });
 
-test('F1-1 App handlePreviousGroup 有 isSearchFocused 守卫', async () => {
+test('App handlePreviousGroup 有 isSearchFocused 守卫', async () => {
   const body = await readSource('../../App.jsx');
   const fnStart = body.indexOf('const handlePreviousGroup');
   const fnEnd = body.indexOf('const handleNextGroup', fnStart);
@@ -26,7 +26,7 @@ test('F1-1 App handlePreviousGroup 有 isSearchFocused 守卫', async () => {
   assert.ok(fn.includes('isSearchFocused'), 'handlePreviousGroup 应检查 isSearchFocused');
 });
 
-test('F1-1 App handleNextGroup 有 isSearchFocused 守卫', async () => {
+test('App handleNextGroup 有 isSearchFocused 守卫', async () => {
   const body = await readSource('../../App.jsx');
   const fnStart = body.indexOf('const handleNextGroup');
   const fnEnd = body.indexOf('// 设置全局键盘导航', fnStart);
@@ -35,7 +35,7 @@ test('F1-1 App handleNextGroup 有 isSearchFocused 守卫', async () => {
   assert.ok(fn.includes('isSearchFocused'), 'handleNextGroup 应检查 isSearchFocused');
 });
 
-test('F1-1 App 向 useNavigationKeyboard 传带守卫的 onHideWindow', async () => {
+test('App 向 useNavigationKeyboard 传带守卫的 onHideWindow', async () => {
   const body = await readSource('../../App.jsx');
   const hookStart = body.indexOf('useNavigationKeyboard({');
   const hookEnd = body.indexOf('enabled: true', hookStart);
@@ -44,7 +44,7 @@ test('F1-1 App 向 useNavigationKeyboard 传带守卫的 onHideWindow', async ()
   assert.ok(hook.includes('onHideWindow'), 'useNavigationKeyboard 应传 onHideWindow 回调');
 });
 
-test('F1-1 useNavigationKeyboard hide-window 走回调而非直接 hideMainWindow', async () => {
+test('useNavigationKeyboard hide-window 走回调而非直接 hideMainWindow', async () => {
   const body = await readSource('../../../../shared/hooks/useNavigationKeyboard.js');
   const caseStart = body.indexOf("case 'hide-window':");
   const caseEnd = body.indexOf('case \'toggle-pin\'', caseStart);

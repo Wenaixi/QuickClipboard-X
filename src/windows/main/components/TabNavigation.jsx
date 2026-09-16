@@ -178,7 +178,7 @@ function TabNavigation({
   const expandableFilters = filters.slice(collapsedVisibleFilterCount);
   const shouldStretchHorizontalFilters = !isSidebarLayout;
   const shouldExpandFilters = isFilterAutoExpanded || isFilterExpanded;
-  // F2 修:useFloatingExpandedFilters(!isFilterAutoExpanded && count<=2 && ...)在
+  // useFloatingExpandedFilters(!isFilterAutoExpanded && count<=2 && ...)在
   // collapsedVisibleFilterCount 最小 4 后(commit 6af73f0f 产品决策:全部/文本/
   // 图片/链接常驻,文件折叠)恒 false,浮动展开分支(878-903 死代码)已删。
   const shouldHideGroupButton = !isFilterAutoExpanded && shouldExpandFilters;
@@ -187,7 +187,7 @@ function TabNavigation({
     : 0;
   const groupButtonWidth = isSidebarLayout ? 92 : GROUP_BUTTON_WIDTH;
   const groupButtonVisible = isSidebarLayout || isGroupButtonRevealed || isGroupsPanelOpen;
-  // F2 修:三连重复三元提取单变量(行为不变)
+  // 三连重复三元提取单变量(行为不变)
   const hideGroup = shouldHideGroupButton || !groupButtonVisible;
   const sidebarShowLabel = isSidebarLayout ? !isSidebarCollapsed : true;
 
@@ -425,7 +425,7 @@ function TabNavigation({
   // 按钮本身悬停(或面板打开)时保持显示,避免闪烁。
   const handleGroupRevealMouseMove = (event) => {
     if (isSidebarLayout || isGroupsPanelOpen || isGroupButtonRevealed) {
-      // F2 修:悬停中(已 reveal)移回也必须取消挂起的隐藏定时器,
+      // 悬停中(已 reveal)移回也必须取消挂起的隐藏定时器,
       // 否则按钮滑出→鼠标移出挂 300ms 定时器→定时器内移回→定时器到期按钮收起。
       if (groupRevealTimerRef.current) {
         clearTimeout(groupRevealTimerRef.current);

@@ -390,7 +390,7 @@ function App() {
   const dispatchEmojiNav = (action) => {
     if (activeTab !== 'emoji') return false;
     if (shouldForwardNavToEmoji(navigationStore.emojiKbActive, action)) {
-      // G4 修:lazy 挂载中(emojiTabRef null)不吞键,放行给其他 handler
+      // lazy 挂载中(emojiTabRef null)不吞键,放行给其他 handler
       if (!emojiTabRef.current) return false;
       emojiTabRef.current?.handleNavAction?.(action);
       return true;
@@ -489,7 +489,7 @@ function App() {
     if (isSearchFocused) return;
     blurSearchInput();
     if (activeTab === 'emoji') {
-      // F1-2 修:过滤热键(⌘+←/→)切子模式是"键盘驱动"路径,不踢出键盘导航态。
+      // 过滤热键(⌘+←/→)切子模式是"键盘驱动"路径,不踢出键盘导航态。
       // emojiMode effect 会重置 kbZone——保存切换前 zone,setEmojiMode 后经
       // restoreKbNav 挂起恢复意图,effect 在新子模式数据上恢复 grid/search。
       emojiTabRef.current?.restoreKbNav?.(emojiTabRef.current?.getKbZone?.());
@@ -509,7 +509,7 @@ function App() {
     }
   };
   const handleToggleSearch = () => {
-    // F02:toggleFocus 是 async(内部 await focusWindowImmediately 后才 focus),
+    // toggleFocus 是 async(内部 await focusWindowImmediately 后才 focus),
     // 此前同步读 ref.isFocused() 必拿旧值。isSearchFocused 交由
     // TitleBarSearch onFocus/onBlur → notifyFocusChange → onSearchFocusChange 单写。
     if (searchRef.current?.toggleFocus) {
@@ -517,7 +517,7 @@ function App() {
     }
   };
 
-  // F1-3:切子模式统一入口——先清空搜索再切模式。搜索框是 App 顶层 state,
+  // 切子模式统一入口——先清空搜索再切模式。搜索框是 App 顶层 state,
   // 切子模式后旧关键词仍过滤新模式数据(如 'grin' 切到 symbols 空网格),
   // 旧版 main 的 effect 内 setSearchQuery('') 在 80acf679 合并搜索框时丢失。
   const handleEmojiModeChange = (nextMode) => {

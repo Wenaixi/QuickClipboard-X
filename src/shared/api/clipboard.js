@@ -130,7 +130,7 @@ export async function addToFavorites(id) {
 
 
 // 贴图片到屏幕
-// r6-window-3:原实现 catch 里再调同一个 pin_image_from_file 充当"回退",
+// 原实现 catch 里再调同一个 pin_image_from_file 充当"回退",
 // 与主分支完全相同,fallback 永不成功,纯冗余;贴图失败直接向上抛错。
 export async function pinImageToScreen(filePath) {
   try {

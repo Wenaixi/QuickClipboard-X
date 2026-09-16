@@ -167,9 +167,9 @@ describe('端到端状态机路径(模拟用户)', () => {
   });
 });
 
-// F3 resetKbToOutside 收敛(去重置四连重复):blurSearchInput/resetKbNav/emojiMode
+// resetKbToOutside 收敛(去重置四连重复):blurSearchInput/resetKbNav/emojiMode
 // effect/越界 effect 四处内联同一重置四连,收敛为共享 resetKbToOutside
-describe('F3 resetKbToOutside 收敛(去重置四连重复)', () => {
+describe('resetKbToOutside 收敛(去重置四连重复)', () => {
   // 回归护栏:blurSearchInput/resetKbNav/emojiMode effect/越界 effect 四处内联同一
   // 重置四连(setKbZone outside + kbRow -1 + kbCol 0 + resetKbIndex)。收敛为共享
   // resetKbToOutside 后,四连只应出现在定义处,其余调用点一律复用。
@@ -185,8 +185,8 @@ describe('F3 resetKbToOutside 收敛(去重置四连重复)', () => {
   });
 });
 
-// F4: tabbar zone 死码已删(enter-tabbar 意图无处产生),护栏改为否定形式
-describe('F4 tabbar 死码已删(enter-tabbar 意图无处产生)', () => {
+// tabbar zone 死码已删(enter-tabbar 意图无处产生),护栏改为否定形式
+describe('tabbar 死码已删(enter-tabbar 意图无处产生)', () => {
   it('EmojiTab applyNavIntent 不再有 enter-tabbar/tabbar-move 分支', async () => {
     const body = await readSource('../EmojiTab.jsx');
     assert.equal(body.includes("case 'enter-tabbar':"), false, 'applyNavIntent 不应再有 enter-tabbar 分支');
@@ -247,8 +247,8 @@ describe('App 转发契约源码护栏', () => {
   });
 });
 
-// F5 图片网格边界现在由 EmojiTab 统一交给 App 切换顶层标签。
-describe('F5 图片网格边界契约', () => {
+// 图片网格边界现在由 EmojiTab 统一交给 App 切换顶层标签。
+describe('图片网格边界契约', () => {
   it('EmojiTab 网格边界分支调用相邻顶层切换方向', async () => {
     const body = await readSource('../EmojiTab.jsx');
     const start = body.indexOf("if (!ok && intent.onFail === 'switch-tab-left')");
@@ -269,12 +269,12 @@ describe('F5 图片网格边界契约', () => {
   });
 });
 
-// F9: resolveTabbarMove 生产 0 调用(仅测试用),TabNavigation handleKbNav 已内联
+// resolveTabbarMove 生产 0 调用(仅测试用),TabNavigation handleKbNav 已内联
 // (idx + delta + items.length) % items.length。未知 current 时 resolveTabbarMove 未知
 // fallback idx=0(恒从 emoji 开始),与 cycleValue delta-aware fallback 分叉。删死代码
 // 函数 + 测试 describe 块 + 文件 import 一行。
-// F4 后续:handleKbNav 整链已随 tabbar 死码删除,内联公式断言一并移除(无对象可断言)。
-describe('F9 resolveTabbarMove 已删(死导出清理)', () => {
+// 后续:handleKbNav 整链已随 tabbar 死码删除,内联公式断言一并移除(无对象可断言)。
+describe('resolveTabbarMove 已删(死导出清理)', () => {
   it('emojiKbNavigation.js 不导出 resolveTabbarMove', async () => {
     const body = await readSource('emojiKbNavigation.js');
     assert.equal(
@@ -302,10 +302,10 @@ describe('F9 resolveTabbarMove 已删(死导出清理)', () => {
   });
 });
 
-// F16 性能护栏:EmojiTab renderVirtualItem 的 useCallback deps 不得依赖键盘导航状态。
+// 性能护栏:EmojiTab renderVirtualItem 的 useCallback deps 不得依赖键盘导航状态。
 // 否则每按一次方向键,所有可见格子都重渲染(主人原话"表情页卡")。
 // 修复方向:把高亮信息从 deps 拆出,抽 React.memo cell 组件。
-describe('F16 emoji grid renderVirtualItem deps', () => {
+describe('emoji grid renderVirtualItem deps', () => {
   it('renderVirtualItem deps 不含 kbZone/kbRow/kbCol', async () => {
     const body = await readSource('../EmojiTab.jsx');
     const fnStart = body.indexOf('const renderVirtualItem = useCallback');

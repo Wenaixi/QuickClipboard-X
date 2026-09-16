@@ -434,7 +434,7 @@ const ImageLibraryTab = forwardRef(function ImageLibraryTab({
     loadedImageIndexesRef.current = new Set();
     loadingImageIndexesRef.current = new Set();
     loadGenerationRef.current += 1;
-    // F1-4:搜索词变化会缩小结果集(displayImageItems 换源),旧 kbImageIndex
+    // 搜索词变化会缩小结果集(displayImageItems 换源),旧 kbImageIndex
     // 可能越界 → 高亮停在空位、Enter 静默无操作。与 currentGroup 切换同款
     // 重置:同步清 ref 避免同 tick activateKb 读到旧 index。
     kbImageIndexRef.current = -1;
@@ -444,7 +444,7 @@ const ImageLibraryTab = forwardRef(function ImageLibraryTab({
     () => imageGroups.find(group => group.name === currentGroup) || null,
     [imageGroups, currentGroup]
   );
-  // F1-4:搜索词变化 → displayImageItems 换源(过滤),旧 kbImageIndex 可能越界
+  // 搜索词变化 → displayImageItems 换源(过滤),旧 kbImageIndex 可能越界
   // (kbMove/executeCurrent 用已加载数组,而 activateKb 曾用全量 clamp,口径
   // 不一致 → 高亮停空位、Enter 静默)。统一:搜索词变化时重置 index 回 -1。
   const prevSearchQueryRef = useRef(searchQuery);
@@ -879,11 +879,11 @@ const ImageLibraryTab = forwardRef(function ImageLibraryTab({
     }
   }, [displayImageItems, onKeyboardGridReady]);
 
-  // F10:imageRowCount 用 displayImageTotal 而非 displayImageItemsRef 是有意设计。
+  // imageRowCount 用 displayImageTotal 而非 displayImageItemsRef 是有意设计。
   // Virtuoso 的 totalCount prop(下方渲染处)需要全量行数才能正确虚拟化,含懒加载
   // 占位格;键盘边界 kbMove/executeCurrent/activateKb 用 displayImageItemsRef.current.length
   // (已加载数组)防止高亮停在 placeholder,激活 Enter 静默无操作。视觉/键盘两套
-  // 边界是有意设计,详见 imageKbBounds.test.js F1-4 护栏。
+  // 边界是有意设计,详见 imageKbBounds.test.js 护栏。
   const imageRowCount = useMemo(() => {
     return Math.ceil(displayImageTotal / imageCols);
   }, [displayImageTotal, imageCols]);

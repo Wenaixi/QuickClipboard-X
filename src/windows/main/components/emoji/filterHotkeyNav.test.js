@@ -2,13 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readSource } from './readSource.js';
 
-// F1-2: G3 修复 no-op。handleFilterLeft/Right 先 resetKbNav() 再 setEmojiMode,
+// 过滤热键修复后原 resetKbNav 已 no-op。handleFilterLeft/Right 先 resetKbNav() 再 setEmojiMode,
 // 但 EmojiTab 的 [emojiMode] effect 无条件重置 kbZone→outside,最终状态与
 // 不调 resetKbNav 完全一致,grid 高亮仍被清除,且注释描述的行为不存在。
 // 修复:App 保存切换前 zone,setEmojiMode 后经 restoreKbNav 挂起恢复意图,
 // emojiMode effect 按挂起意图在新数据上恢复 grid/search,而非一律重置。
 
-test('F1-2 App handleFilterLeft/Right emoji 分支保存并恢复 zone,不再 resetKbNav', async () => {
+test('App handleFilterLeft/Right emoji 分支保存并恢复 zone,不再 resetKbNav', async () => {
   const body = await readSource('../../App.jsx');
   for (const fnName of ['handleFilterLeft', 'handleFilterRight']) {
     const fnStart = body.indexOf(`const ${fnName}`);
@@ -21,7 +21,7 @@ test('F1-2 App handleFilterLeft/Right emoji 分支保存并恢复 zone,不再 re
   }
 });
 
-test('F1-2 EmojiTab 暴露 restoreKbNav 且 effect 按挂起意图恢复', async () => {
+test('EmojiTab 暴露 restoreKbNav 且 effect 按挂起意图恢复', async () => {
   const body = await readSource('../EmojiTab.jsx');
   // useImperativeHandle 暴露 restoreKbNav
   const impStart = body.indexOf('useImperativeHandle(ref');

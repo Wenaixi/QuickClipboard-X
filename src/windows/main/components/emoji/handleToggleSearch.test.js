@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readSource } from './readSource.js';
 
-// F02: App.handleToggleSearch 调 searchRef.current.toggleFocus()(async)后
+// App.handleToggleSearch 调 searchRef.current.toggleFocus()(async)后
 // 立刻同步读 searchRef.current.isFocused(),microtask 未 flush 必拿旧值
 // (TitleBarSearch.jsx:107 toggleFocus 是 async,内含 await focusWindowImmediately
 // 后才调 inputRef.focus()/select())。正确路径:不写 setIsSearchFocused 直接读,
@@ -10,7 +10,7 @@ import { readSource } from './readSource.js';
 // → setIsSearchFocused 走 single-write。
 // 护栏:handleToggleSearch 函数体内不得出现同步读 ref.isFocused 的字面。
 
-test('F02 handleToggleSearch 不直接同步读 searchRef.isFocused', async () => {
+test('handleToggleSearch 不直接同步读 searchRef.isFocused', async () => {
   const body = await readSource('../../App.jsx');
   const fnStart = body.indexOf('const handleToggleSearch');
   const fnEnd = body.indexOf('const handleEmojiModeChange', fnStart);
@@ -24,7 +24,7 @@ test('F02 handleToggleSearch 不直接同步读 searchRef.isFocused', async () =
   );
 });
 
-test('F02 handleToggleSearch 仍调用 toggleFocus (行为存在)', async () => {
+test('handleToggleSearch 仍调用 toggleFocus (行为存在)', async () => {
   const body = await readSource('../../App.jsx');
   const fnStart = body.indexOf('const handleToggleSearch');
   const fnEnd = body.indexOf('const handleEmojiModeChange', fnStart);

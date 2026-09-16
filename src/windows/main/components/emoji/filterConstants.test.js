@@ -2,16 +2,16 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readSource, readSourceRaw } from './readSource.js';
 
-// F1-5: App handleFilterLeft/Right 硬编码过滤器数组,与 TabNavigation 常量重复。
+// App handleFilterLeft/Right 硬编码过滤器数组,与 TabNavigation 常量重复。
 // 修复:从 TabNavigation 导出 FILTER_IDS / EMOJI_MODE_IDS,App import 复用。
 
-test('F1-5 TabNavigation 导出 FILTER_IDS/EMOJI_MODE_IDS 常量', async () => {
+test('TabNavigation 导出 FILTER_IDS/EMOJI_MODE_IDS 常量', async () => {
   const body = await readSource('../TabNavigation.jsx');
   assert.ok(/export const FILTER_IDS/.test(body), '应导出 FILTER_IDS');
   assert.ok(/export const EMOJI_MODE_IDS/.test(body), '应导出 EMOJI_MODE_IDS');
 });
 
-test('F1-5 App 过滤热键复用常量,不再硬编码数组', async () => {
+test('App 过滤热键复用常量,不再硬编码数组', async () => {
   const body = await readSource('../../App.jsx');
   const filterSection = body.slice(body.indexOf('const handleFilterLeft'), body.indexOf('const handleToggleSearch'));
   assert.ok(/cycleValue\(FILTER_IDS/.test(filterSection), 'contentFilter 切换应复用 FILTER_IDS');
@@ -79,8 +79,8 @@ test('C12 applyNavIntent useCallback deps 必须含 emojiMode', async () => {
 });
 
 
-// F09:enterGrid 只依赖数据激活与待加载状态,不应再依赖已取消的内部 search。
-test('F09 enterGrid 不再依赖旧 focusSearchInput', async () => {
+// enterGrid 只依赖数据激活与待加载状态,不应再依赖已取消的内部 search。
+test('enterGrid 不再依赖旧 focusSearchInput', async () => {
   const body = await readSource('../EmojiTab.jsx');
   const start = body.indexOf('const enterGrid = useCallback');
   assert.ok(start >= 0, '应有 enterGrid');
@@ -92,7 +92,7 @@ test('F09 enterGrid 不再依赖旧 focusSearchInput', async () => {
 });
 
 // 回归:enterGrid 的依赖函数必须在声明前可用,防止首次渲染触发 TDZ。
-test('F10 enterGrid 的网格激活依赖必须先于声明', async () => {
+test('enterGrid 的网格激活依赖必须先于声明', async () => {
   const body = await readSource('../EmojiTab.jsx');
   const activationStart = body.indexOf('const tryActivateGrid = useCallback');
   const enterGridStart = body.indexOf('const enterGrid = useCallback');

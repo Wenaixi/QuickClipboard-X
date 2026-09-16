@@ -258,7 +258,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
   const prevEmojiModeRef = useRef(emojiMode);
   // 首次方向键遇到异步数据未就绪时暂存激活意图,数据到达后自动重试。
   const pendingGridActivationRef = useRef(false);
-  // F1-2:过滤热键切子模式的挂起恢复意图(zone),由 emojiMode effect 消费
+  // 过滤热键切子模式的挂起恢复意图(zone),由 emojiMode effect 消费
   const pendingRestoreZoneRef = useRef(null);
   const resetKbToOutside = useCallback((preservePending = false) => {
     if (!preservePending) pendingGridActivationRef.current = false;
@@ -892,7 +892,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
       );
     }
     return null;
-    // F16 性能优化:kbZone/kbRow/kbCol 不再列入 deps,而是通过 ref 在调用时取最新值,
+    // 性能优化:kbZone/kbRow/kbCol 不再列入 deps,而是通过 ref 在调用时取最新值,
     // 单格高亮由 EmojiCell 通过 isHighlighted prop 接收,React.memo 让单格只在
     // 自己高亮变化或 props 变化时重渲。方向键每次按不再触发 280+ 格子重渲。
   }, [handlePaste, isChinese, skinTone, applySkintone, getSkinVariants, handleSkinPickerOpen, emojiGlyphClassName]);
@@ -1007,13 +1007,13 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
   }, [currentCategories, handleCategoryClick, showImages, currentImageGroup]);
 
   // 键盘导航退出激活态、过滤热键和模式切换统一复用顶部 resetKbToOutside。
-  // G3:过滤热键路径(App handleFilterLeft/Right)切子模式前调用——把 kbZone 置
+  // 过滤热键路径(App handleFilterLeft/Right)切子模式前调用——把 kbZone 置
   // outside,让 emojiMode effect 的 setKbZone('outside') 同值短路,effect 不跑,
   // 键盘导航态(如 grid 高亮)得以保留
   const resetKbNav = resetKbToOutside;
   const getKbZone = useCallback(() => kbZoneRef.current, []);
 
-  // F1-2:过滤热键(App handleFilterLeft/Right)切子模式前调用——保存当前 zone
+  // 过滤热键(App handleFilterLeft/Right)切子模式前调用——保存当前 zone
   // 到挂起恢复意图,emojiMode effect 在数据重建后恢复,保住键盘导航态
   // (grid 高亮/搜索激活),取代旧 G3 resetKbNav no-op(同值短路不生效,
   // effect 仍无条件重置)。
@@ -1142,7 +1142,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
   }, [skinPickerEmoji, showImageGroupModal, applyNavIntent]);
 
   // 同步 emojiKbActive 到 navigationStore(兜底:任何 setKbZone 路径都覆盖)
-  // G7 时序边界说明:store 写发生在 effect 提交期,晚于本帧 render 的
+  // 时序边界说明:store 写发生在 effect 提交期,晚于本帧 render 的
   // kbZoneRef 同步(render 期)。连续两次 ↓(间隔 <16ms 同一提交批次)时,
   // useNavigationKeyboard listen 读 store=true 但 kbZoneRef 仍是旧值,
   // resolveZoneNav 决策基于旧 zone。verifier 实证无用户可见 bug(<16ms

@@ -22,7 +22,7 @@ test('App dispatchEmojiNav 内保留 emojiKbActive 门控决策', async () => {
   const body = await readSource('../../App.jsx');
   // 边界锚点改用函数名 + 下一个 const 声明:注释锚点 '// EmojiTab 请求' 会被剥行注释
   // 提前去掉,indexOf 恒 -1,slice 会一直切到 EOF,断言作用域漂移有假绿窗口。
-  // F4 删 tabbar 死码后 handleEmojiEnterTabbar 已不存在,改用下一个 const 声明锚点。
+  // tabbar 死码删除后 handleEmojiEnterTabbar 已不存在,改用下一个 const 声明锚点。
   const dispatchStart = body.indexOf('const dispatchEmojiNav');
   const dispatchEnd = body.indexOf('const handleEmojiSwitchTab', dispatchStart);
   assert.notEqual(dispatchStart, -1, '缺 const dispatchEmojiNav 声明');
@@ -32,13 +32,13 @@ test('App dispatchEmojiNav 内保留 emojiKbActive 门控决策', async () => {
   assert.ok(dispatch.includes('resolveOutsideAppAction'), 'dispatchEmojiNav 应保留 outside 决策');
 });
 
-// F8: EmojiTab 在 enterGrid/enterSidebar/focusSearchInput/blurSearchInput/emojiMode 切换 effect
+// EmojiTab 在 enterGrid/enterSidebar/focusSearchInput/blurSearchInput/emojiMode 切换 effect
 // 中显式 navigationStore.setEmojiKbActive(...),但 useEffect([kbZone]) 已统一兜底。
 // 双写竞态:store 同步写领先于 React render,连续两次 ↓(间隔 < commit)时
 // useNavigationKeyboard listen 读 emojiKbActive=true 但 useRef kbZoneRef 仍是旧值,resolveZoneNav
 // 决策基于旧 zone,按键被吞或跳区。
 // 修复:删函数体内所有显式 setEmojiKbActive,全部交由 useEffect([kbZone]) 兜底。
-test('F8 EmojiTab setEmojiKbActive 只在 useEffect 依赖内出现(单写)', async () => {
+test('EmojiTab setEmojiKbActive 只在 useEffect 依赖内出现(单写)', async () => {
   const body = await readSource('../EmojiTab.jsx');
 
   const calls =
