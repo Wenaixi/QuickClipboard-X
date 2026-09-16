@@ -4,8 +4,12 @@ use crate::services::webdav_sync::types::{CloudRecord, CloudRecordMeta};
 use crate::utils::{is_textual_content_type, truncate_string, truncate_around_keyword, truncate_html, calculate_char_count};
 use rusqlite::{params, OptionalExtension};
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use chrono;
 use uuid::Uuid;
+
+// 字符数补齐后台线程的单飞守卫
+static CHAR_COUNT_UPDATER_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
 pub fn save_clipboard_data_items(
     target_kind: &str,
@@ -112,7 +116,12 @@ pub fn delete_clipboard_data_items_by_kind(target_kind: &str) -> Result<(), Stri
 // 异步更新缺失的字符数
 pub fn update_missing_char_counts(items: Vec<(i64, String, String)>) {
     if items.is_empty() { return; }
-    
+    // 单飞守卫:翻页过程中缺失 char_count 的行会不断经 query 收集到这里,
+    // 每页都 spawn 一个后台线程会堆积成串行抢 DB 锁的线程群。一次只允许
+    // 一个在飞线程处理,其余调用直接放弃(下次翻页仍会补齐,语义无损)。
+    if CHAR_COUNT_UPDATER_IN_FLIGHT.swap(true, Ordering::SeqCst) {
+        return;
+    }
     std::thread::spawn(move || {
         let _ = with_connection(|conn| {
             for (id, content, content_type) in items {
@@ -125,6 +134,7 @@ pub fn update_missing_char_counts(items: Vec<(i64, String, String)>) {
             }
             Ok(())
         });
+        CHAR_COUNT_UPDATER_IN_FLIGHT.store(false, Ordering::SeqCst);
     });
 }
 
@@ -1261,6 +1271,29 @@ pub fn toggle_pin_clipboard_item(id: i64) -> Result<bool, String> {
 #[cfg(test)]
 mod limit_zero_guard {
     use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+    // 字符数补齐必须单飞:翻页命中缺失 char_count 的行会每页触发一次
+    // update_missing_char_counts,不加守卫则快速滚动时堆积互抢 DB 锁的
+    // 线程群。单飞守卫要求 spawn 前 swap 置 true、线程收尾复位 false。
+    #[test]
+    fn char_count_updater_has_in_flight_guard() {
+        let src = strip_line_comments(&source_file("src/services/database/clipboard.rs"));
+        let body = fn_body(&src, "update_missing_char_counts");
+        let swap_pos = body
+            .find("CHAR_COUNT_UPDATER_IN_FLIGHT.swap(true, Ordering::SeqCst)")
+            .expect("spawn 前必须单飞占用守卫");
+        let spawn_pos = body
+            .find("std::thread::spawn(move ||")
+            .expect("必须 spawn 后台线程");
+        assert!(swap_pos < spawn_pos, "必须先占用守卫再 spawn");
+        let reset_pos = body
+            .find("CHAR_COUNT_UPDATER_IN_FLIGHT.store(false, Ordering::SeqCst)")
+            .expect("线程收尾必须复位守卫");
+        assert!(
+            reset_pos > spawn_pos,
+            "守卫复位必须在 spawn 之后(线程体内),否则复位立即执行失去单飞意义"
+        );
+    }
 
     // B8 边界护栏:limit_clipboard_history 对 max_count=0 必须兜底,
     // 否则 NOT IN (... LIMIT 0) 空允许集把全部历史(含置顶)清空。
