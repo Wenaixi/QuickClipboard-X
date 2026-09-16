@@ -23,9 +23,10 @@ mod windows_raw_input {
         RID_INPUT, RIDEV_INPUTSINK,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, PeekMessageW, RegisterClassExW,
-        TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, MSG, PM_NOREMOVE, WM_DESTROY, WM_INPUT,
-        WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
+        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, PeekMessageW,
+        RegisterClassExW, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, MSG, PM_NOREMOVE,
+        WM_DESTROY, WM_INPUT, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDCLASSEXW,
+        WS_OVERLAPPEDWINDOW,
     };
 
     use crate::services::sound::AppSounds;
@@ -183,6 +184,8 @@ mod windows_raw_input {
             if let Err(_) = RegisterRawInputDevices(&rid, size_of::<RAWINPUTDEVICE>() as u32) {
                 let err = windows::Win32::Foundation::GetLastError();
                 eprintln!("[RawInput] RegisterRawInputDevices 失败：{:?}", err);
+                // 销毁已创建的 sink 窗口,避免句柄泄漏与残留消息队列
+                DestroyWindow(hwnd);
                 RAW_INPUT_ACTIVE.store(false, Ordering::SeqCst);
                 RAW_INPUT_THREAD_ID.store(0, Ordering::SeqCst);
                 return;
@@ -1254,6 +1257,40 @@ mod windows_raw_input_tests {
         assert!(
             need_meta_pos < require_pos && need_meta_pos < forbid_pos && parse_pos < forbid_pos,
             "need_meta 必须先解析得出,再用于满足与禁止双向判定"
+        );
+    }
+
+    // 护栏:注册失败路径必须销毁已创建的隐藏窗口——若只复位状态标记
+    // 就返回,CreateWindowExW 创建的 sink 窗口残留,句柄泄漏且线程
+    // 消息队列仍挂着未被销毁的窗口。
+    #[test]
+    fn raw_input_register_failure_destroys_sink_window() {
+        use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+        let src = strip_line_comments(&source_file("src/services/system/raw_input.rs"));
+        let body = fn_body(&src, "start_raw_input_if_needed");
+        // CreateWindowExW 必须存在,失败路径才有能销毁的对象
+        body.find("CreateWindowExW")
+            .expect("必须创建 raw input sink 窗口");
+        // RegisterRawInputDevices 失败分支内必须先销毁窗口再 reset 状态
+        let register_pos = body
+            .find("RegisterRawInputDevices(&rid")
+            .expect("必须注册 raw input 设备");
+        let fail_pos = body[register_pos..]
+            .find("RegisterRawInputDevices 失败")
+            .map(|i| register_pos + i)
+            .expect("必须存在注册失败日志");
+        let destroy_pos = body[register_pos..]
+            .find("DestroyWindow(hwnd)")
+            .map(|i| register_pos + i)
+            .expect("注册失败必须销毁 sink 窗口");
+        let reset_pos = body[register_pos..]
+            .find("RAW_INPUT_ACTIVE.store(false")
+            .map(|i| register_pos + i)
+            .unwrap_or(usize::MAX);
+        assert!(
+            destroy_pos < reset_pos,
+            "必须先把 sink 窗口销毁再复位状态标记"
         );
     }
 
