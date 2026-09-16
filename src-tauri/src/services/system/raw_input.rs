@@ -782,13 +782,6 @@ mod windows_raw_input {
             return;
         }
 
-        if settings.mouse_middle_button_modifier != "None" {
-            input_common::run_on_main_thread(|| {
-                handle_middle_button_action_impl();
-            });
-            return;
-        }
-
         if settings.mouse_middle_button_trigger != "long_press" {
             input_common::run_on_main_thread(|| {
                 handle_middle_button_action_impl();
@@ -1242,6 +1235,31 @@ mod windows_raw_input_tests {
             !prod.contains("handle_wheel_event_impl"),
             "生产代码不得存在 wheel 空处理实现——每次滚轮跨线程投递空调用是纯浪费"
         );
+    }
+
+    // 护栏:配置修饰键时中键长按必须仍生效——"配置了修饰键就立即触发并
+    // return"的短路分支若存在,会把 long_press 模式的中键长按整个跳过。
+    // 正确语义:修饰键约束已由 check_modifier_requirement_impl 统一检查,
+    // 触发方式判定后直接进入长按启动,不得再有按修饰键配置短路的分支。
+    #[test]
+    fn middle_button_long_press_not_short_circuited_by_modifier_branch() {
+        use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+        let src = strip_line_comments(&source_file("src/services/system/raw_input.rs"));
+        let body = fn_body(&src, "handle_middle_button_down_impl");
+        // 触发方式判定必须存在
+        let long_press_pos = body
+            .find("mouse_middle_button_trigger != \"long_press\"")
+            .expect("必须存在 long_press 触发判定");
+        // 禁止修饰键短路分支:它会在"配了修饰键 + 长按模式"时先于长按返回
+        assert!(
+            !body.contains("mouse_middle_button_modifier != \"None\""),
+            "禁止按修饰键配置短路触发——配置修饰键时中键长按被跳过"
+        );
+        // long_press 判定之后必须直接进入长按启动逻辑(threshold_ms)
+        body[long_press_pos..]
+            .find("threshold_ms")
+            .expect("long_press 判定后必须直接启动长按计时");
     }
 }
 
