@@ -122,10 +122,6 @@ export const clipboardStore = proxy({
     }
   },
 
-  addItem(item) {
-    this.items = {}
-  },
-  
   // 删除项
   removeItem(id) {
     this.removeItems([id])

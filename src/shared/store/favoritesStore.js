@@ -100,11 +100,6 @@ export const favoritesStore = proxy({
     return index in this.items
   },
   
-  // 添加新项到开头（新收藏内容）
-  addItem(item) {
-    this.items = {}
-  },
-  
   // 删除项
   removeItem(id) {
     this.removeItems([id])
