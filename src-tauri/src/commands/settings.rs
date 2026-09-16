@@ -252,10 +252,14 @@ pub fn get_data_directory_cmd() -> Result<String, String> {
 // 设置开机自启动
 #[tauri::command]
 pub fn set_auto_start(enabled: bool) -> Result<(), String> {
+    // 先持久化设置再执行系统副作用——configure_auto_start 会写注册表/
+    // 计划任务,若持久化失败但系统已改,自启状态与设置漂移(用户看到
+    // 未启用,实际开机自启);反过来先系统后设置则 configure 失败时
+    // 设置已落库,下次启动按已启用状态查系统发现不一致。
     let mut settings = get_settings();
-    crate::services::system::configure_auto_start(enabled, settings.run_as_admin)?;
     settings.auto_start = enabled;
-    update_settings(settings)?;
+    update_settings(settings.clone())?;
+    crate::services::system::configure_auto_start(enabled, settings.run_as_admin)?;
     Ok(())
 }
 
@@ -523,6 +527,35 @@ mod tests {
             fn_body.contains("normalize_edge_hover_invariant"),
             "set_edge_hide_enabled 必须显式调用 normalize_edge_hover_invariant,\
              禁止直接 update_settings(settings) 跳过归一化"
+        );
+    }
+
+    // 顺序护栏:set_auto_start 必须先持久化设置再执行系统副作用。
+    // 旧实现先 configure_auto_start(写注册表/计划任务)后 update_settings,
+    // configure 成功但 update_settings 失败时系统自启已变、设置未变,
+    // 状态漂移;先落库再配置,configure 失败时设置已按用户意图持久化,
+    // 下次查询走真实状态判定不会误报。
+    #[test]
+    fn set_auto_start_persists_settings_before_system_side_effect() {
+        let source = settings_source();
+        let start = source
+            .find("pub fn set_auto_start")
+            .expect("找不到 set_auto_start 定义");
+        let after = &source[start..];
+        let end_rel = after
+            .find("\n#[tauri::command]")
+            .or_else(|| after.find("\npub fn "))
+            .unwrap_or(after.len());
+        let body = &after[..end_rel];
+        let update_pos = body
+            .find("update_settings(settings.clone())?;")
+            .expect("set_auto_start 必须先持久化设置");
+        let configure_pos = body
+            .find("configure_auto_start(enabled, settings.run_as_admin)?;")
+            .expect("set_auto_start 必须执行系统副作用");
+        assert!(
+            update_pos < configure_pos,
+            "必须先 update_settings 再 configure_auto_start,否则系统副作用失败时设置已漂移"
         );
     }
 
