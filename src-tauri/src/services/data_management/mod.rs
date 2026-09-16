@@ -351,6 +351,15 @@ pub fn import_data_zip(zip_path: PathBuf, mode: &str) -> Result<String, String> 
 
     let temp_root = std::env::temp_dir().join(format!("quickclipboard_import_{}", fastrand::u32(..)));
     fs::create_dir_all(&temp_root).map_err(|e| e.to_string())?;
+    // RAII guard:本函数内任何提前返回(解压/settings 解析/替换/合并失败)
+    // 都会触发 Drop 无条件清理解压目录,杜绝 temp_root 残留。
+    struct TempImportDir(PathBuf);
+    impl Drop for TempImportDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    let _temp_guard = TempImportDir(temp_root.clone());
     let file = fs::File::open(&zip_path).map_err(|e| format!("打开导入文件失败: {}", e))?;
     let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("读取压缩包失败: {}", e))?;
     for i in 0..archive.len() {
@@ -1513,6 +1522,38 @@ mod tests {
         assert!(
             !closure_def_to_call.contains("init_database"),
             "init_database 不得藏在闭包内部"
+        );
+    }
+
+    // 解压与解析失败会走 `?` 提前返回:解压循环/读 settings/settings 解析
+    // /备份/关库后的闭包步骤都可能失败,match 各分支末尾的手工清理只覆盖
+    // 到该分支成功路径——任一提前返回都让 temp_root 残留(按名带
+    // quickclipboard_import 前缀,累多了占 temp 且含导入内容)。修复为
+    // RAII guard:创建解压目录后立即绑定 TempImportDir,其 Drop 无条件
+    // 清理,任何提前返回路径都覆盖。
+    #[test]
+    fn import_data_zip_cleans_temp_on_all_early_returns() {
+        let src = strip_line_comments(&source_file("src/services/data_management/mod.rs"));
+        let body = fn_body(&src, "import_data_zip");
+        let create_pos = body
+            .find("fs::create_dir_all(&temp_root)")
+            .expect("必须先创建解压目录");
+        let guard_pos = body
+            .find("TempImportDir(temp_root.clone())")
+            .expect("创建解压目录后必须立即绑定 RAII 清理 guard");
+        assert!(
+            create_pos < guard_pos,
+            "guard 必须在解压目录创建后立即绑定,否则解压循环提前返回仍泄漏"
+        );
+        // guard 的 Drop 必须无条件清理解压目录(fn_body 只在函数体内,
+        // 嵌套 struct 的 impl 用字符串模式直接匹配)
+        let drop_impl_start = body
+            .find("impl Drop for TempImportDir")
+            .expect("必须为 TempImportDir 实现 Drop 清理");
+        let drop_impl = &body[drop_impl_start..];
+        assert!(
+            drop_impl.contains("fs::remove_dir_all"),
+            "Drop 必须无条件清理解压目录"
         );
     }
 
