@@ -71,7 +71,7 @@ pub fn start() {
     RUNNING.store(true, Ordering::SeqCst);
 
     tauri::async_runtime::spawn(async move {
-        let mut seconds_since_pull: u64 = 0;
+        let mut last_pull_at = std::time::Instant::now();
         loop {
             if STOP_FLAG.load(Ordering::SeqCst) {
                 break;
@@ -84,15 +84,18 @@ pub fn start() {
             }
 
             if settings.webdav_auto_pull {
-                let interval = settings.webdav_pull_interval_secs.max(1);
-                if seconds_since_pull % interval == 0 {
+                let interval = Duration::from_secs(settings.webdav_pull_interval_secs.max(1));
+                // 按墙钟计时而非循环迭代计数:长拉取(下载耗时可观)若按迭代
+                // 数累加,间隔会成比例放大导致拉取频率失真,这里以距上次
+                // 拉取的实时流逝时间决定是否到点,拉取完成后重置计时。
+                if last_pull_at.elapsed() >= interval {
                     if let Ok(report) = super::download_raw(false).await {
                         store_report("pull", report, true);
                     }
+                    last_pull_at = std::time::Instant::now();
                 }
             }
 
-            seconds_since_pull = seconds_since_pull.saturating_add(1);
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
         RUNNING.store(false, Ordering::SeqCst);
@@ -397,6 +400,45 @@ mod tests {
         assert!(
             lock_pos < client_pos,
             "B9:锁必须早于客户端构建,否则下载可与上传交错"
+        );
+    }
+
+    // 护栏:自动拉取间隔必须按墙钟计时——若按循环迭代计数,长拉取耗时
+    // 会被吸收进间隔导致拉取频率失真;墙钟计时以距上次拉取的真实流逝
+    // 时间为准,拉取完成后重置起点。
+    #[test]
+    fn auto_pull_interval_measured_by_wall_clock() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/webdav_sync/sync_scheduler.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读 sync_scheduler.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = stripped
+            .find("pub fn start()")
+            .expect("缺 start");
+        let rest = &stripped[start..];
+        let end = rest
+            .find("\nfn ")
+            .or_else(|| rest.find("\n#["))
+            .map(|i| start + i)
+            .unwrap_or(stripped.len());
+        let body = &stripped[start..end];
+        assert!(
+            body.contains("last_pull_at.elapsed() >= interval"),
+            "自动拉取必须按墙钟流逝时间判定到点"
+        );
+        assert!(
+            body.contains("last_pull_at = std::time::Instant::now()"),
+            "拉取完成后必须重置墙钟计时起点"
+        );
+        assert!(
+            !body.contains("seconds_since_pull"),
+            "不得再用循环迭代计数作为间隔依据"
         );
     }
 }
