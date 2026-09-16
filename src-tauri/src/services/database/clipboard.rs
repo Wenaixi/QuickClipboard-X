@@ -1219,8 +1219,10 @@ pub fn update_clipboard_item(
                 params![&content, html_content, now, id],
             )?
         } else {
+            // html_content=None 表示内容已变为纯文本,必须显式写 NULL——
+            // 否则 UPDATE 不含该列,旧 HTML 残留,前端仍按 HTML 渲染旧富文本。
             tx.execute(
-                "UPDATE clipboard SET content = ?1, updated_at = ?2 WHERE id = ?3",
+                "UPDATE clipboard SET content = ?1, html_content = NULL, updated_at = ?2 WHERE id = ?3",
                 params![&content, now, id],
             )?
         };
@@ -1304,6 +1306,18 @@ mod limit_zero_guard {
         assert!(
             body.contains("max_count.max(1)"),
             "max_count=0 必须钳制到至少 1,不得清空全部历史"
+        );
+    }
+
+    // html_content=None 表示内容已变为纯文本,UPDATE 必须显式写 NULL——
+    // 若 SQL 不含该列,旧 HTML 残留,前端仍按 HTML 渲染旧富文本。
+    #[test]
+    fn update_clipboard_item_writes_null_html_when_none() {
+        let src = strip_line_comments(&source_file("src/services/database/clipboard.rs"));
+        let body = fn_body(&src, "update_clipboard_item");
+        assert!(
+            body.contains("html_content = NULL"),
+            "html_content=None 时必须显式写 NULL,不得让旧 HTML 残留"
         );
     }
 }

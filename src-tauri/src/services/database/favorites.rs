@@ -1006,8 +1006,10 @@ pub fn update_favorite(
                     params![&title, &content, html_content, &group_name, char_count, now, &id],
                 )?;
             } else {
+                // html_content=None 表示内容已变为纯文本,必须显式写 NULL——
+                // 否则 UPDATE 不含该列,旧 HTML 残留,前端仍按 HTML 渲染旧富文本。
                 tx.execute(
-                    "UPDATE favorites SET title = ?1, content = ?2, group_name = ?3, char_count = ?4, updated_at = ?5 WHERE id = ?6",
+                    "UPDATE favorites SET title = ?1, content = ?2, html_content = NULL, group_name = ?3, char_count = ?4, updated_at = ?5 WHERE id = ?6",
                     params![&title, &content, &group_name, char_count, now, &id],
                 )?;
             }
@@ -1017,8 +1019,9 @@ pub fn update_favorite(
                 params![&title, &content, html_content, char_count, now, &id],
             )?;
         } else {
+            // 同组分支与换组分支一致:纯文本更新必须清掉旧 HTML 列
             tx.execute(
-                "UPDATE favorites SET title = ?1, content = ?2, char_count = ?3, updated_at = ?4 WHERE id = ?5",
+                "UPDATE favorites SET title = ?1, content = ?2, html_content = NULL, char_count = ?3, updated_at = ?4 WHERE id = ?5",
                 params![&title, &content, char_count, now, &id],
             )?;
         }
@@ -1041,6 +1044,19 @@ pub fn update_favorite(
 #[cfg(test)]
 mod content_type_like_tests {
     use std::fs;
+
+    // 护栏:update_favorite 对 html_content=None 必须显式写 NULL 清旧 HTML,
+    // 与 update_clipboard_item 同构——否则纯文本更新残留旧富文本列。
+    #[test]
+    fn update_favorite_writes_null_html_when_none() {
+        use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+        let src = strip_line_comments(&source_file("src/services/database/favorites.rs"));
+        let body = fn_body(&src, "update_favorite");
+        assert!(
+            body.contains("html_content = NULL"),
+            "html_content=None 时必须显式写 NULL,不得让旧 HTML 残留"
+        );
+    }
 
     /// F01 护栏:收藏 content_type 过滤必须 like_pattern + ESCAPE,与 clipboard 路径一致。
     /// 防止未来有人退回到 format!("%{}%", content_type) 裸拼(通配符未转义)。
