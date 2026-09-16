@@ -134,7 +134,10 @@ fn backup_full_zip(dir: &Path) -> Result<Option<PathBuf>, String> {
 
     let backups = dir.join("backups");
     fs::create_dir_all(&backups).map_err(|e| e.to_string())?;
-    let ts_str = Local::now().format("%Y%m%d-%H%M%S").to_string();
+    // 毫秒级时间戳避免同秒多次备份文件名碰撞互相覆盖——连续执行重置/
+    // 替换/迁移(如同一个监听周期触发多次)时秒级格式会生成同名文件,
+    // 后写者把先写者覆盖,备份链丢一环。
+    let ts_str = Local::now().format("%Y%m%d-%H%M%S%3f").to_string();
     let name = format!("quickclipboard-backup-{}.zip", ts_str);
     let target = backups.join(&name);
 
@@ -1555,6 +1558,19 @@ mod tests {
         assert!(
             replace_seg.contains("backup_full_zip(&target_dir).map_err") && replace_seg.contains("已中止替换"),
             "替换导入必须备份 target_dir 且失败即中止,否则被删数据无备份可回滚"
+        );
+    }
+
+    // 护栏:备份文件名必须毫秒级精度——秒级时间戳在同秒连续多次备份
+    // (重置/替换/迁移在监听周期内可重复触发)时生成同名文件,后写者
+    // 覆盖先写者,备份链丢一环、无法回滚到中间状态。
+    #[test]
+    fn backup_filename_has_millisecond_precision() {
+        let src = strip_line_comments(&source_file("src/services/data_management/mod.rs"));
+        let body = fn_body(&src, "backup_full_zip");
+        assert!(
+            body.contains("%Y%m%d-%H%M%S%3f"),
+            "备份文件名必须毫秒级精度,同秒连续备份不得互相覆盖"
         );
     }
 
