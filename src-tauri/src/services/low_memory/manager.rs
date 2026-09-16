@@ -124,6 +124,13 @@ pub fn exit_low_memory_mode(app: &AppHandle) -> Result<(), String> {
             Ok(())
         });
 
+    // 重建 quickpaste 后再整体刷新自身窗口排除列表——recreate_main_window
+    // 内部那次刷新执行时 quickpaste 尚不存在,其新 hwnd 不在 EXCLUDED_HWNDS;
+    // 不刷新的话聚焦快捷粘贴窗口会被记为外部窗口,恢复焦点设回隐藏的
+    // quickpaste 窗口。
+    #[cfg(windows)]
+    crate::services::system::focus::refresh_excluded_hwnds(app);
+
     // 无论退出流程中间步骤成功与否,都必须复位低占用标记:
     // 只复位 EXITING_LOW_MEMORY 而把 LOW_MEMORY_MODE 留在 true,
     // lib.rs ExitRequested 会因 is_low_memory_mode() && !is_user_requested_exit()
@@ -546,6 +553,28 @@ mod tests {
         assert!(
             state_src.contains("pub fn is_exiting_low_memory"),
             "state.rs 必须提供退出进行中查询能力"
+        );
+    }
+
+    // 退出低占用模式重建窗口后,排除列表刷新必须发生在全部窗口重建完成
+    // (含 quickpaste 初始化)之后——recreate_main_window 内部已有一次刷新,
+    // 但那次执行时 quickpaste 窗口还不存在;若退出流程随后创建 quickpaste
+    // 而不再次刷新,新 hwnd 不在 EXCLUDED_HWNDS,聚焦快捷粘贴窗口会被记为
+    // 外部窗口,恢复焦点把焦点设回隐藏的 quickpaste 窗口。
+    #[test]
+    fn exit_low_memory_refreshes_excluded_hwnds_after_quickpaste_rebuilt() {
+        let src = strip_line_comments(&manager_source());
+        let body =
+            crate::services::system::hotkey::test_utils::fn_body(&src, "exit_low_memory_mode");
+        let quickpaste_pos = body
+            .find("init_quickpaste_window(app)")
+            .expect("退出低占用必须重建 quickpaste 窗口");
+        let refresh_pos = body
+            .find("refresh_excluded_hwnds(app)")
+            .expect("重建 quickpaste 后必须再次刷新排除列表,新 hwnd 才能入列表");
+        assert!(
+            quickpaste_pos < refresh_pos,
+            "排除列表刷新必须晚于 quickpaste 重建——recreate_main_window 内部刷新时 quickpaste 尚不存在"
         );
     }
 
