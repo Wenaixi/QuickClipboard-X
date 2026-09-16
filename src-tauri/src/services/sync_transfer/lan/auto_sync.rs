@@ -242,7 +242,10 @@ fn schedule_retry_after(
                     .retry_after_ms
                     .map(|retry_at| retry_at <= current_time_ms())
                     .unwrap_or(true);
-                state.pending && !state.running && retry_due
+                // 重试唤醒是独立于 notify_local_change 的路径,必须再校验
+                // 发送开关:退避期间用户关闭自动推送,定时器到点不应仍把
+                // pending 记录推出去。
+                state.pending && !state.running && retry_due && settings().can_send()
             } else {
                 false
             }
@@ -266,4 +269,25 @@ fn store_report(app: &AppHandle, mode: &'static str, peer_device_id: String, res
     };
     *LAST_REPORT.lock() = Some(event.clone());
     let _ = app.emit("sync-transfer-lan-report", event);
+}
+
+#[cfg(test)]
+mod retry_guard {
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+    // 退避重试唤醒是独立路径,必须再校验发送开关——用户在退避期间
+    // 关闭自动推送后,定时器到点不得把 pending 记录推出去。
+    #[test]
+    fn retry_wake_up_checks_send_enabled() {
+        let src = strip_line_comments(&source_file("src/services/sync_transfer/lan/auto_sync.rs"));
+        let body = fn_body(&src, "schedule_retry_after");
+        let wake_pos = body
+            .find("state.pending && !state.running && retry_due")
+            .unwrap_or_else(|| panic!("重试唤醒判定必须校验 pending/非运行/退避到期"));
+        let tail = &body[wake_pos..];
+        assert!(
+            tail.contains("can_send()"),
+            "重试唤醒必须校验自动推送开关,否则关闭后到点仍会推送"
+        );
+    }
 }
