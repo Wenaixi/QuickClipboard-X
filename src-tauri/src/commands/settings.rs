@@ -644,7 +644,7 @@ mod tests {
     // 快捷粘贴关闭路径护栏:quickpaste_enabled 改回 false 时必须走
     // hide_quickpaste_window(唯一正确入口:disable 键盘模式 + hide + set_visible(false)),
     // 禁止直接 window.close()。否则 QUICKPASTE_VISIBLE 与键盘模式残留 true,
-    // 之后热键恒走"重建"分支、永远不再显示(快捷键 finding A1)。
+    // 之后热键恒走"重建"分支、永远不再显示。
     // 断言目标:save_settings 函数体(从定义到文件尾闭块)内
     // 必须调用 hide_quickpaste_window,且剥注释后不得出现裸 window.close()。
     #[test]

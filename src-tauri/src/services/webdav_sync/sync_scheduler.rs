@@ -364,7 +364,7 @@ mod tests {
             .expect("upload_selected_parts 应调用 load_uploaded_signature");
         assert!(
             lock_pos < sig_pos,
-            "B9:锁必须早于快照读取,否则并发 RMW 仍可交错"
+            "锁必须早于快照读取,否则并发 RMW 仍可交错"
         );
     }
 
@@ -399,7 +399,7 @@ mod tests {
             .expect("download_raw 应构建 WebDAV 客户端");
         assert!(
             lock_pos < client_pos,
-            "B9:锁必须早于客户端构建,否则下载可与上传交错"
+            "锁必须早于客户端构建,否则下载可与上传交错"
         );
     }
 

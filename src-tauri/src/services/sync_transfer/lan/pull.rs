@@ -8,7 +8,7 @@ pub async fn pull_from_peer(device_id: &str) -> Result<SyncReport, String> {
 
     let mut report = SyncReport::default();
 
-    // s8(计数语义已决):删除记录与新增记录一样是数据变更,tombstone 应用数
+    // 计数语义已决:删除记录与新增记录一样是数据变更,tombstone 应用数
     // 如实计入 pulled(与 uploader 的 upload_tombstones 口径一致),不另立
     // removed 字段——避免报告结构跨端膨胀,前端已有 errors 通道可区分异常。
     let tombstones = super::http_client::fetch_peer_tombstones(&peer).await?;
@@ -19,7 +19,7 @@ pub async fn pull_from_peer(device_id: &str) -> Result<SyncReport, String> {
     report.pulled_groups += tombstone_report.groups;
     report.pulled += tombstone_report.total();
 
-    // s3:LAN pull 必须按 since 增量拉取——全量拉取在记录数增长后每次同步
+    // LAN pull 必须按 since 增量拉取——全量拉取在记录数增长后每次同步
     // 都拉全表,且对端 list_history_records_since(since) 已支持增量,客户端
     // 不带 since 就等于丢弃了服务端的差量能力。增量点取本地 MAX(updated_at):
     // 更早的已落地记录再拉也不会被 upsert 改动(幂等),只省带宽与会话时长。
@@ -164,7 +164,7 @@ async fn fetch_missing_images_best_effort(
 mod lan_incremental_pull_guard {
     use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
 
-    // s3(LAN pull 全量):pull_from_peer 必须按 since 增量——对端
+    // (LAN pull 全量):pull_from_peer 必须按 since 增量——对端
     // list_*_records_since(since) 早已支持,客户端不带 since 每次同步拉全表,
     // 记录增长后带宽与会话时长线性膨胀。增量点 = 本地 MAX(updated_at)。
     #[test]

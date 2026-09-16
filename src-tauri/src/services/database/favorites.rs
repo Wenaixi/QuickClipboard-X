@@ -385,7 +385,7 @@ pub fn query_favorites(params: FavoritesQueryParams) -> Result<PaginatedResult<F
         if let Some(content_type) = params.content_type {
             let types: Vec<_> = content_type.split(',').map(str::trim).filter(|t| !t.is_empty()).collect();
             if !types.is_empty() && content_type != "all" {
-                // 与搜索词路径一致:转义 %/_/\ + ESCAPE,避免 content_type 含通配符时误匹配(F 系列安全修复)
+                // 与搜索词路径一致:转义 %/_/\ + ESCAPE,避免 content_type 含通配符时误匹配(安全修复)
                 let clauses = types.iter().map(|_| "content_type LIKE ? ESCAPE '\\'").collect::<Vec<_>>().join(" OR ");
                 where_clauses.push(format!("({})", clauses));
                 for content_type in types {

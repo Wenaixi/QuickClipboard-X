@@ -87,7 +87,7 @@ mod platform {
                 let vright = BOUND_RIGHT.load(Ordering::Relaxed);
                 let vbottom = BOUND_BOTTOM.load(Ordering::Relaxed);
                 wp.x = wp.x.max(vx).min(vright);
-                // w8:兜底分支与上方 monitor 分支同款钳制(vy, vbottom)——旧实现
+                // 兜底分支与上方 monitor 分支同款钳制(vy, vbottom)——旧实现
                 // 只 wp.y.max(vy) 钳上边,缺下边,锁竞争/无 monitor 命中时窗口可被
                 // 拖出虚拟屏底边之外。
                 wp.y = wp.y.max(vy).min(vbottom);
@@ -172,7 +172,7 @@ pub fn stop_drag(window: &WebviewWindow) -> Result<(), String> {
 
     if let Ok(hwnd) = window.hwnd() {
         let hwnd_value = hwnd.0 as isize;
-        // w6:restore_wndproc 必须先比对 INSTALLED_WNDPROC_HWND——若拖拽
+        // restore_wndproc 必须先比对 INSTALLED_WNDPROC_HWND——若拖拽
         // 期间窗口被重建(引号场景),当前 hwnd 是新窗口,ORIGINAL_WNDPROC_PTR
         // 里存的是旧窗口的过程,直接装到新窗口上会把旧 WndProc 安到错误
         // 窗口。只有在句柄确实是自己安装过的窗口时才恢复。
@@ -281,7 +281,7 @@ fn wait_for_mouse_release(window: WebviewWindow) {
 mod w6_restore_wndproc_guard {
     use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
 
-    // w6(恢复装错窗口):stop_drag 恢复 WndProc 前必须比对 INSTALLED_WNDPROC_HWND
+    // (恢复装错窗口):stop_drag 恢复 WndProc 前必须比对 INSTALLED_WNDPROC_HWND
     // 与当前 hwnd——引号场景窗口重建后 ORIGINAL_WNDPROC_PTR 是旧窗口过程,
     // 无条件 SetWindowLongPtrW 会把旧过程装到新窗口,生成的新实例行为异常。
     #[test]
@@ -325,7 +325,7 @@ mod w6_restore_wndproc_guard {
         );
     }
 
-    // w8(clamp 缺底边):兜底分支(锁竞争/无 monitor 命中)必须与 monitor 分支
+    // (clamp 缺底边):兜底分支(锁竞争/无 monitor 命中)必须与 monitor 分支
     // 同款 clamp(vy, vbottom)——旧实现只 wp.y.max(vy) 钳上边,缺下边约束,
     // 拖拽经过兜底分支时窗口可被拖出虚拟屏底边之外。
     #[test]

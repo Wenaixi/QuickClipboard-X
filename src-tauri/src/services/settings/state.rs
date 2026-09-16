@@ -147,7 +147,7 @@ mod tests {
         update_settings(AppSettings::default()).unwrap();
     }
 
-    // A3 护栏:update_with 必须在 SettingsStorage::save 之前释放 RwLock 写锁,
+    // 护栏:update_with 必须在 SettingsStorage::save 之前释放 RwLock 写锁,
     // 否则 save 的 IO 阻塞期间所有 get_settings() 阻塞 50ms,
     // edge_monitor 轮询等读路径被锁卡死。
     // ponytail: 全局 RwLock 不拆分(per-field lock 是过度工程,save 本就序列化写),

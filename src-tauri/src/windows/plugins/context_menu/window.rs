@@ -420,7 +420,7 @@ fn start_cursor_passthrough_monitor(window: WebviewWindow, session_id: u64) {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
 
-        // 退出时无条件 set_ignore_cursor_events(false) 有与 w1 同款
+        // 退出时无条件 set_ignore_cursor_events(false) 有与会话守卫同款
         // 竞态——while 因新菜单接管而退出时,新会话刚把菜单建出来、其 monitor
         // 首 tick 尚未接管穿透,旧线程立即 false 会把新菜单的穿透恢复成交互,
         // 短暂拦截新菜单下方点击。与 clear_menu_regions 同款加会话比对。
@@ -430,7 +430,7 @@ fn start_cursor_passthrough_monitor(window: WebviewWindow, session_id: u64) {
                 let _ = window_for_task.set_ignore_cursor_events(false);
             });
         }
-        // w1:只在会话仍属于本线程时才清区域——while 循环可能因会话被新
+        // 只在会话仍属于本线程时才清区域——while 循环可能因会话被新
         // 菜单接管(next_menu_session_id 推进 + set_active_menu_session)而
         // 退出,此时新会话刚 update_menu_regions 写入的区域属于新菜单,
         // 旧线程无条件 clear 会把新菜单的穿透区域一并清掉,新菜单穿透
@@ -585,7 +585,7 @@ pub async fn show_menu(
 mod w1_menu_region_guard {
     use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
 
-    // w1(区域被旧会话线程误清):start_cursor_passthrough_monitor 退出时必须
+    // (区域被旧会话线程误清):start_cursor_passthrough_monitor 退出时必须
     // 只在"活跃会话仍是本线程 session"时才 clear_menu_regions——while 退出
     // 可能因为新菜单接管,此时区域已被新会话写入,无条件清会连新菜单的
     // 穿透区域一起清掉。

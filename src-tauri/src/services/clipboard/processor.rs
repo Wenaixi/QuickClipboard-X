@@ -564,7 +564,7 @@ mod tests {
         }
     }
 
-    /// C02 护栏:process_html_images 必须用 IMG_SRC_* LazyLock,禁止函数内裸 Regex::new。
+    /// 护栏:process_html_images 必须用 IMG_SRC_* LazyLock,禁止函数内裸 Regex::new。
     #[test]
     fn process_html_images_uses_lazy_img_src_regex() {
         let source = std::fs::read_to_string(format!(

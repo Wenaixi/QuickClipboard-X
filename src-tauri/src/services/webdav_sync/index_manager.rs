@@ -16,7 +16,7 @@ pub async fn load_index(client: &WebdavClient, collection: SyncCollection) -> Re
 // 本地条目覆盖同名 uuid、远端独有条目保留、next_chunk 取两者较大。
 // 返回合并结果与"是否相对远端有实质变化",调用方仅在 has_change 时
 // 条件 PUT。这解决 index.json 裸 PUT 整块覆盖对端并发写入的问题
-// (chunk 有 B1 的先 load 再合并,index 此前没有)。
+// (chunk 有的先 load 再合并,index 此前没有)。
 pub async fn merge_index(
     client: &WebdavClient,
     collection: SyncCollection,

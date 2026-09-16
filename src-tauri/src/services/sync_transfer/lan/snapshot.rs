@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use crate::services::webdav_sync::types::{CloudGroup, CloudRecord};
 
-// r6-sync-1 护栏:since 过滤必须 >=(含等)——拉取端 since=本地 MAX(updated_at),
+// 护栏:since 过滤必须 >=(含等)——拉取端 since=本地 MAX(updated_at),
 // 严格大于会确定性漏掉对端 updated_at == MAX 的同秒记录(详见
 // list_history_records_since 注释)。拉取端 max 锚点与其必须配对,否则 >= 改为
 // 严格大于又回到同秒漏拉。§10.3 铁律,当场反证见红。

@@ -144,7 +144,7 @@ mod tests {
         assert!(!is_image_only_html(Some(r#"<img src="a.png"/>caption"#)));
     }
 
-    /// C01/C03 护栏:capture 与 paste/options 不得各自再 Regex::new TAG/ENTITY。
+    /// 护栏:capture 与 paste/options 不得各自再 Regex::new TAG/ENTITY。
     #[test]
     fn capture_and_paste_reuse_shared_is_image_only_html() {
         let root = env!("CARGO_MANIFEST_DIR");

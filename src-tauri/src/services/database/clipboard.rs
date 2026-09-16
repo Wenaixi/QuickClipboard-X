@@ -206,7 +206,7 @@ pub fn query_clipboard_items(params: QueryParams) -> Result<PaginatedResult<Clip
         if let Some(ref content_type) = params.content_type {
             let types: Vec<_> = content_type.split(',').map(str::trim).filter(|t| !t.is_empty()).collect();
             if !types.is_empty() && content_type != "all" {
-                // 与搜索词路径一致:转义 %/_/\ + ESCAPE,避免 content_type 含通配符时误匹配(F 系列安全修复)
+                // 与搜索词路径一致:转义 %/_/\ + ESCAPE,避免 content_type 含通配符时误匹配(安全修复)
                 let clauses = types.iter().map(|_| "content_type LIKE ? ESCAPE '\\'").collect::<Vec<_>>().join(" OR ");
                 where_clauses.push(format!("({})", clauses));
                 for content_type in types {
@@ -867,7 +867,7 @@ pub fn limit_clipboard_history(max_count: u64) -> Result<(), String> {
     if max_count >= 999999 {
         return Ok(());
     }
-    // B8 边界:max_count=0 时 NOT IN (... LIMIT 0) 是空允许集,会把全部历史
+    // 边界:max_count=0 时 NOT IN (... LIMIT 0) 是空允许集,会把全部历史
     // (含置顶项)清空。前端输入框有 min=25 归一,但命令/升级/导入等直接
     // 调用路径可能传 0,这里统一兜底:0 视为 1,至少保留一条最近记录。
     let max_count = max_count.max(1);
@@ -1297,7 +1297,7 @@ mod limit_zero_guard {
         );
     }
 
-    // B8 边界护栏:limit_clipboard_history 对 max_count=0 必须兜底,
+    // 边界护栏:limit_clipboard_history 对 max_count=0 必须兜底,
     // 否则 NOT IN (... LIMIT 0) 空允许集把全部历史(含置顶)清空。
     #[test]
     fn limit_zero_clamps_to_one_not_empty_allowlist() {

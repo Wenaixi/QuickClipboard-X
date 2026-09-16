@@ -160,7 +160,7 @@ mod tests {
         assert_eq!(out.matches("<!--StartFragment-->").count(), 1);
     }
 
-    /// F06 回归:仅有 StartFragment 无 EndFragment 时,早返必须禁止,
+    /// 回归:仅有 StartFragment 无 EndFragment 时,早返必须禁止,
     /// 否则 generate_cf_html 中 .find("<!--EndFragment-->").expect() 会 panic。
     /// 改后早返条件为"成对标记都存在",StartFragment 单独存在时按"无外壳"路径包一对。
     #[test]
@@ -177,7 +177,7 @@ mod tests {
         assert_eq!(&out.as_bytes()[offset..offset + 18], b"<!--EndFragment-->");
     }
 
-    /// F06 额外:Start 单独 + 有 <html 外壳 → 保留原有 Start,补 EndFragment
+    /// 额外:Start 单独 + 有 <html 外壳 → 保留原有 Start,补 EndFragment
     #[test]
     fn generate_cf_html_start_only_with_html_shell() {
         let html = "<html><body>x<!--StartFragment-->y</body></html>";

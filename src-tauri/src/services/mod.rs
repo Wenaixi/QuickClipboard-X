@@ -96,7 +96,7 @@ pub fn is_portable_build() -> bool {
 }
 
 /// 统一便携运行时检测:exe 名含 portable,或同目录有 portable.flag / portable.txt。
-/// 所有调用点必须走这里,禁止各自内联 flag/txt 判定(语义漂移见 A2)。
+/// 所有调用点必须走这里,禁止各自内联 flag/txt 判定,避免语义漂移。
 pub fn is_portable_runtime() -> bool {
     if is_portable_build() {
         return true;
@@ -113,7 +113,7 @@ pub fn is_portable_runtime() -> bool {
 
 #[cfg(test)]
 mod tests {
-    // A2 护栏:is_portable_runtime 必须是唯一判定入口,
+    // 护栏:is_portable_runtime 必须是唯一判定入口,
     // 禁止调用点各自内联 portable.flag / portable.txt 判定(语义漂移)。
     // 剥注释后再匹配,避免注释字面误命中。
     use crate::services::system::hotkey::test_utils::{source_file, strip_line_comments};
