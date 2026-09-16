@@ -471,13 +471,16 @@ pub fn import_data_zip(zip_path: PathBuf, mode: &str) -> Result<String, String> 
             let _ = crate::services::database::connection::with_connection(|conn| {
                 conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
             });
-            let _ = reload_from_settings();
 
             let _ = fs::remove_dir_all(&temp_root);
             // 替换成功且重开成功后才持久化设置;任一失败都不改设置。
             result?;
             reopen?;
+            // reload 必须等 update_settings 落地之后再执行——导入的
+            // settings.json 里快捷键配置在 update_settings 前 reload 读到的是
+            // 旧值,本会话继续使用旧热键,导入端看到"设置已保存但没生效"。
             update_settings(new_settings.clone())?;
+            let _ = reload_from_settings();
             Ok(target_dir.to_string_lossy().to_string())
         }
         "merge" => {
@@ -1527,6 +1530,15 @@ mod tests {
         assert!(
             reopen_pos < reopen_result_pos && reopen_result_pos < update_pos,
             "顺序必须为重开 -> 重开结果 -> 持久化设置"
+        );
+        // reload 必须在 update_settings 之后——若在其前,导入的快捷键
+        // 配置本会话仍用旧值,前端看到"设置已保存"实则没生效。
+        let reload_pos = after_close
+            .find("reload_from_settings()")
+            .expect("替换后必须重载热键配置");
+        assert!(
+            update_pos < reload_pos,
+            "reload_from_settings 必须位于 update_settings 之后,否则导入的快捷键本会话不生效"
         );
         // 负向:闭包定义到调用之间不得出现 init_database
         let closure_def_to_call = &after_close[..invoke_pos];
