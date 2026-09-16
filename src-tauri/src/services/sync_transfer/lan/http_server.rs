@@ -184,7 +184,15 @@ async fn handle_client(mut stream: tokio::net::TcpStream, remote_addr: std::net:
             receive_transfer_file_stream(&request, &mut stream, &app).await
         }
     } else {
-        read_request_body(&mut request, &mut stream, MAX_REQUEST_BODY_SIZE).await?;
+        if let Err(message) = read_request_body(&mut request, &mut stream, MAX_REQUEST_BODY_SIZE).await {
+            // 读请求体失败(超时/超限/断线)也要写错误响应,对端才能
+            // 明确收到 400/413 而非只看到连接被直接关闭。
+            return write_response(
+                &mut stream,
+                json_response(400, serde_json::json!({ "message": message })),
+            )
+            .await;
+        }
         match (request.method.as_str(), request.path.as_str()) {
         ("GET", HELLO_PATH) => json_response(200, serde_json::json!({
             "device_id": super::runtime::device_id(),
@@ -746,4 +754,29 @@ async fn write_response(stream: &mut tokio::net::TcpStream, response: HttpRespon
         .await
         .map_err(|_| "刷新响应超时".to_string())?
         .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod read_body_error_response_guard {
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+    // 读请求体失败(超时/超限/断线)必须先写错误响应再返回,不能裸 `?`
+    // 直接关连接——对端拿不到 413/400,只会把失败当成网络错误整体重试。
+    #[test]
+    fn read_body_failure_writes_error_response_before_match() {
+        let src = strip_line_comments(&source_file("src/services/sync_transfer/lan/http_server.rs"));
+        let body = fn_body(&src, "handle_client");
+        let read_pos = body
+            .find("read_request_body(&mut request, &mut stream, MAX_REQUEST_BODY_SIZE)")
+            .unwrap_or_else(|| panic!("handle_client 必须先读请求体"));
+        let tail = &body[read_pos..];
+        let match_pos = tail
+            .find("match (request.method.as_str()")
+            .unwrap_or_else(|| panic!("缺成功路径的分发 match"));
+        let failure_segment = &tail[..match_pos];
+        assert!(
+            failure_segment.contains("write_response"),
+            "read_request_body 失败分支必须写错误响应,对端才能收到 413/400"
+        );
+    }
 }
