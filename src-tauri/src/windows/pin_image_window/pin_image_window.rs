@@ -363,13 +363,13 @@ pub fn close_image_preview(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-// 关闭贴图窗口
-#[tauri::command]
-pub fn close_pin_image_window_by_self(window: WebviewWindow) -> Result<(), String> {
-    let label = window.label().to_string();
-
+// 按标签清理贴图数据:移除 PIN_IMAGE_DATA_MAP 记录,并在文件路径与原始
+// 图片不同(独立临时文件)且不再被其他贴图引用时删除临时文件。前端主动
+// 关窗与低占用模式销毁贴图窗口共用同一清理语义,保证两条销毁路径一致,
+// 避免直接 destroy 绕过清理造成数据残留与临时文件泄漏。
+pub fn cleanup_pin_image_data(label: &str) {
     let mut map = lock_pin_data();
-    if let Some(data) = map.remove(&label) {
+    if let Some(data) = map.remove(label) {
         if let Some(ref original_path) = data.original_image_path {
             if data.file_path != *original_path {
                 let file_in_use = map.values().any(|d| d.file_path == data.file_path);
@@ -379,8 +379,22 @@ pub fn close_pin_image_window_by_self(window: WebviewWindow) -> Result<(), Strin
             }
         }
     }
-    drop(map);
+}
 
+// 全部贴图归零清理:低占用模式销毁全部贴图窗口前调用,逐个走
+// cleanup_pin_image_data 的清理语义——移除数据记录、删除不再被引用的
+// 独立临时文件;map 已空时锁被其他路径持有也无妨,remove 无对象即跳过。
+pub fn cleanup_all_pin_images() {
+    for label in lock_pin_data().keys().cloned().collect::<Vec<String>>() {
+        cleanup_pin_image_data(&label);
+    }
+}
+
+// 关闭贴图窗口
+#[tauri::command]
+pub fn close_pin_image_window_by_self(window: WebviewWindow) -> Result<(), String> {
+    let label = window.label().to_string();
+    cleanup_pin_image_data(&label);
     let _ = window.set_size(Size::Logical(LogicalSize::new(1.0, 1.0)));
     window.close().map_err(|e| format!("关闭窗口失败: {}", e))?;
 

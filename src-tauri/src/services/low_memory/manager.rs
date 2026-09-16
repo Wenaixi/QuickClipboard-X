@@ -314,6 +314,12 @@ fn destroy_all_webviews(app: &AppHandle) {
     // 等于打开不存在的窗口,重开同名文件盒也会命中残留记录。
     crate::windows::transfer_shelf::clear_active_shelves();
 
+    // 贴图窗口销毁后整体清空贴图数据——window.destroy() 走不到前端主动
+    // 关窗的清理逻辑,失败路径下的 PIN_IMAGE_DATA_MAP 记录会残留、被改图
+    // 等操作创建的独立临时文件也不会删除;整体清理还能覆盖"窗口已销毁但
+    // 数据记录仍在"的漏网场景,保证退出低占用后数据与临时文件全部归零。
+    crate::windows::pin_image_window::cleanup_all_pin_images();
+
     for label in WEBVIEW_LABELS {
         if let Some(window) = app.get_webview_window(label) {
             let _ = window.destroy();
@@ -682,6 +688,25 @@ mod tests {
         assert!(
             destroy_pos < clear_pos,
             "必须先销毁窗口再清空记录——避免残留下已销毁窗口的文件盒记录"
+        );
+    }
+
+    // 源码护栏:贴图窗口销毁后必须整体清空贴图数据——window.destroy()
+    // 走不到前端主动关窗的清理逻辑,数据记录与独立临时文件会泄漏;整体
+    // 清理放在销毁循环之后,还覆盖"窗口已销毁但数据仍在"的漏网场景。
+    #[test]
+    fn destroy_all_webviews_cleans_pin_image_data_after_destroy() {
+        let src = strip_line_comments(&manager_source());
+        let body = crate::services::system::hotkey::test_utils::fn_body(&src, "destroy_all_webviews");
+        let destroy_pos = body
+            .find("window.destroy()")
+            .expect("destroy_all_webviews 必须销毁贴图窗口");
+        let cleanup_pos = body
+            .find("cleanup_all_pin_images()")
+            .expect("销毁贴图窗口后必须整体清空贴图数据与临时文件");
+        assert!(
+            destroy_pos < cleanup_pos,
+            "贴图数据整体清理必须发生在窗口销毁之后——直接 destroy 绕过清理造成残留"
         );
     }
 
