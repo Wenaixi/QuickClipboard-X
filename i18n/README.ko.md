@@ -30,7 +30,7 @@
 
 ## 소개
 
-**QuickClipboard**는 Tauri 2 + Rust + React로 구축된 크로스 플랫폼 클립보드 강화 도구입니다 (현재 Windows 및 Android 지원). 복사하는 순간 자동으로 텍스트, 이미지, 리치 텍스트, 파일을 기록하여 이전에 복사한 모든 내용을 언제든지 찾아볼 수 있습니다. 기록뿐만 아니라 이미지 고정, OCR, WebDAV 동기화, LAN 동기화/전송 등 다양한 기능을 통합하여 일상 업무 생산성을 획기적으로 향상시킵니다.
+**QuickClipboard**는 Tauri 2 + Rust + React로 구축된 Windows용 클립보드 강화 도구입니다. 복사하는 순간 자동으로 텍스트, 이미지, 리치 텍스트, 파일을 기록하여 이전에 복사한 모든 내용을 언제든지 찾아볼 수 있습니다. 기록뿐만 아니라 이미지 고정, OCR, WebDAV 동기화, LAN 동기화/전송 등 다양한 기능을 통합하여 일상 업무 생산성을 획기적으로 향상시킵니다.
 
 > 네이티브 성능, 낮은 메모리 사용량, 실행 즉시 사용 가능, 시스템 트레이 상주.
 
@@ -154,7 +154,6 @@
 | **NSIS 설치 프로그램**<br>`QuickClipboard_0.5.0_x64-setup.exe` | 권장; 자동 제거 지원      | ![다운로드](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_0.5.0_x64-setup.exe?label=)       | [![다운로드 NSIS](https://img.shields.io/badge/다운로드-NSIS설치프로그램-blue?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.5.0/QuickClipboard_0.5.0_x64-setup.exe) |
 | **일반 포터블**<br>`QuickClipboard_0.5.0.exe`                  |       설치 불필요, 바로 사용 | ![다운로드](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_0.5.0.exe?label=)                | [![다운로드 포터블](https://img.shields.io/badge/다운로드-포터블-orange?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.5.0/QuickClipboard_0.5.0.exe)    |
 | **USB 포터블**<br>`QuickClipboard_0.5.0_portable.exe`          |     USB 및 모바일 사용에 적합 | ![다운로드](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_0.5.0_portable.exe?label=)        | [![다운로드 USB](https://img.shields.io/badge/다운로드-USB포터블-green?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.5.0/QuickClipboard_0.5.0_portable.exe) |
-| **Android APK**<br>`QuickClipboard_Android_v1.0.4.apk`         |       Android 기기용 | ![다운로드](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_Android_v1.0.4.apk?label=)        | [![다운로드 Android](https://img.shields.io/badge/다운로드-Android-success?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.4.0/QuickClipboard_Android_v1.0.4.apk) |
 | **클라우드 드라이브**                                          |    GitHub 속도가 느릴 때 대체 수단 |                                                          —                                                                    | [![클라우드 드라이브](https://img.shields.io/badge/클라우드드라이브-클릭-red?style=for-the-badge)](https://www.123912.com/s/A9Ckjv-Vu75v?pwd=UhWA#)                                                |
 
 ---

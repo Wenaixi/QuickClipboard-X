@@ -88,33 +88,9 @@ async function fetchReleaseAssets(repo, releaseTag, requireReleaseAssets) {
       throw new Error(`读取 Release 资产失败：${error.message}`)
     }
 
-    console.warn(`读取 Release 资产失败，保留 Android 下载信息：${error.message}`)
+    console.warn(`读取 Release 资产失败：${error.message}`)
     return []
   }
-}
-
-function compareVersions(left, right) {
-  const leftParts = left.split('.').map((part) => Number(part))
-  const rightParts = right.split('.').map((part) => Number(part))
-
-  for (let index = 0; index < 3; index += 1) {
-    const diff = (leftParts[index] || 0) - (rightParts[index] || 0)
-    if (diff !== 0) return diff
-  }
-
-  return 0
-}
-
-function findAndroidAsset(assetNames) {
-  const matched = assetNames
-    .map((name) => {
-      const match = /^QuickClipboard_Android_v(\d+\.\d+\.\d+)\.apk$/.exec(name)
-      return match ? { name, version: match[1] } : null
-    })
-    .filter(Boolean)
-    .sort((left, right) => compareVersions(right.version, left.version))
-
-  return matched[0]?.name ?? null
 }
 
 function updateAsset(content, oldAssetRegex, newAsset, releaseTag) {
@@ -128,7 +104,7 @@ function updateAsset(content, oldAssetRegex, newAsset, releaseTag) {
   return nextContent
 }
 
-function updateReadmeContent(content, desktopVersion, releaseTag, androidAsset) {
+function updateReadmeContent(content, desktopVersion, releaseTag) {
   let nextContent = content.replace(
     /^(##\s+(?:下载方式|Download|ダウンロード|다운로드|下載方式)[（(])v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?([）)])/gmu,
     `$1${releaseTag}$2`,
@@ -153,25 +129,16 @@ function updateReadmeContent(content, desktopVersion, releaseTag, androidAsset) 
     nextContent = updateAsset(nextContent, pattern, asset, releaseTag)
   }
 
-  if (androidAsset) {
-    nextContent = updateAsset(
-      nextContent,
-      /QuickClipboard_Android_v\d+\.\d+\.\d+\.apk/g,
-      androidAsset,
-      releaseTag,
-    )
-  }
-
   return nextContent
 }
 
-async function updateReadmeFiles(desktopVersion, releaseTag, androidAsset, dryRun) {
+async function updateReadmeFiles(desktopVersion, releaseTag, dryRun) {
   const changedFiles = []
 
   for (const file of readmeFiles) {
     const filePath = path.join(rootDir, file)
     const content = await fs.readFile(filePath, 'utf8')
-    const nextContent = updateReadmeContent(content, desktopVersion, releaseTag, androidAsset)
+    const nextContent = updateReadmeContent(content, desktopVersion, releaseTag)
 
     if (nextContent === content) continue
 
@@ -247,19 +214,11 @@ async function main() {
   }
 
   const repo = args.repo || process.env.GITHUB_REPOSITORY
-  const releaseAssets = await fetchReleaseAssets(repo, releaseTag, requireReleaseAssets)
-  const androidAsset = args['android-asset']
-    || (args['android-version'] ? `QuickClipboard_Android_v${args['android-version']}.apk` : null)
-    || findAndroidAsset(releaseAssets)
+  await fetchReleaseAssets(repo, releaseTag, requireReleaseAssets)
 
   console.log(`桌面端版本：${desktopVersion}`)
-  if (androidAsset) {
-    console.log(`检测到 Android 包：${androidAsset}`)
-  } else {
-    console.log('当前正式版未检测到 Android APK，保留 README 中现有 Android 下载信息')
-  }
 
-  const changedFiles = await updateReadmeFiles(desktopVersion, releaseTag, androidAsset, Boolean(args['dry-run']))
+  const changedFiles = await updateReadmeFiles(desktopVersion, releaseTag, Boolean(args['dry-run']))
 
   if (changedFiles.length === 0) {
     console.log('README 已是最新，无需更新')

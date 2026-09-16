@@ -30,7 +30,7 @@
 
 ## 紹介
 
-**QuickClipboard** は、Tauri 2 + Rust + React で構築されたクロスプラットフォームのクリップボード強化ツールです（現在 Windows と Android に対応）。コピーした瞬間から自動的にテキスト、画像、リッチテキスト、ファイルを記録し、過去にコピーした内容をいつでも取り戻せます。記録だけでなく、画像ピン留め、OCR、WebDAV 同期、LAN 同期/転送などの機能も統合しており、日常業務の生産性を大幅に向上させます。
+**QuickClipboard** は、Tauri 2 + Rust + React で構築された Windows 用クリップボード強化ツールです。コピーした瞬間から自動的にテキスト、画像、リッチテキスト、ファイルを記録し、過去にコピーした内容をいつでも取り戻せます。記録だけでなく、画像ピン留め、OCR、WebDAV 同期、LAN 同期/転送などの機能も統合しており、日常業務の生産性を大幅に向上させます。
 
 > ネイティブパフォーマンス、低メモリ使用量、起動後すぐに使用可能、システムトレイ常駐。
 
@@ -154,7 +154,6 @@
 | **NSIS インストーラ**<br>`QuickClipboard_0.5.0_x64-setup.exe` | 推奨；自動アンインストール対応 | ![ダウンロード](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_0.5.0_x64-setup.exe?label=) | [![ダウンロード NSIS](https://img.shields.io/badge/ダウンロード-NSISインストーラ-blue?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.5.0/QuickClipboard_0.5.0_x64-setup.exe) |
 | **ポータブル版**<br>`QuickClipboard_0.5.0.exe`              |       インストール不要、ダブルクリックで使用 | ![ダウンロード](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_0.5.0.exe?label=)            | [![ダウンロード ポータブル](https://img.shields.io/badge/ダウンロード-ポータブル版-orange?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.5.0/QuickClipboard_0.5.0.exe)    |
 | **USB ポータブル版**<br>`QuickClipboard_0.5.0_portable.exe` |       USB メモリやモバイル利用に最適 | ![ダウンロード](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_0.5.0_portable.exe?label=)    | [![ダウンロード USB](https://img.shields.io/badge/ダウンロード-USBポータブル版-green?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.5.0/QuickClipboard_0.5.0_portable.exe) |
-| **Android 版**<br>`QuickClipboard_Android_v1.0.4.apk`       |     Android 端末向け | ![ダウンロード](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_Android_v1.0.4.apk?label=)    | [![ダウンロード Android](https://img.shields.io/badge/ダウンロード-Android-success?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.4.0/QuickClipboard_Android_v1.0.4.apk)  |
 | **クラウドドライブ**                                          |    GitHub が遅い場合の代替手段 |                                                          —                                                                    | [![クラウドドライブ](https://img.shields.io/badge/クラウドドライブ-クリック-red?style=for-the-badge)](https://www.123912.com/s/A9Ckjv-Vu75v?pwd=UhWA#)                                              |
 
 ---

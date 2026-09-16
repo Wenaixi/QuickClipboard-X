@@ -30,7 +30,7 @@
 
 ## 簡介
 
-**QuickClipboard** 是一款跨平台剪貼簿增強工具（現支援 Windows、Android），基於 Tauri 2 + Rust + React 構建。它在你複製的那一刻就開始工作——自動記錄文字、圖片、富文本、檔案，讓你隨時找回曾經複製過的任何內容。不只是記錄，QuickClipboard 還整合了貼圖、OCR、WebDAV 同步與區域網路同步/傳輸等能力，是日常辦公效率的全面提升。
+**QuickClipboard** 是一款 Windows 剪貼簿增強工具，基於 Tauri 2 + Rust + React 構建。它在你複製的那一刻就開始工作——自動記錄文字、圖片、富文本、檔案，讓你隨時找回曾經複製過的任何內容。不只是記錄，QuickClipboard 還整合了貼圖、OCR、WebDAV 同步與區域網路同步/傳輸等能力，是日常辦公效率的全面提升。
 
 > 原生效能，記憶體佔用低，啟動即用，常駐系統托盤。
 
@@ -154,7 +154,6 @@
 | **NSIS 安裝包**<br>`QuickClipboard_0.5.0_x64-setup.exe` | 推薦安裝方式，支援自動卸載 | ![下載量](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_0.5.0_x64-setup.exe?label=) | [![下載 NSIS](https://img.shields.io/badge/下載-NSIS安裝包-blue?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.5.0/QuickClipboard_0.5.0_x64-setup.exe) |
 | **綠色版**<br>`QuickClipboard_0.5.0.exe`                |       免安裝，雙擊即可使用 |      ![下載量](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_0.5.0.exe?label=)      | [![下載綠色版](https://img.shields.io/badge/下載-綠色版-orange?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.5.0/QuickClipboard_0.5.0.exe)            |
 | **可攜版**<br>`QuickClipboard_0.5.0_portable.exe`       |      更適合放隨身碟或行動使用 | ![下載量](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_0.5.0_portable.exe?label=)  | [![下載可攜版](https://img.shields.io/badge/下載-可攜版-green?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.5.0/QuickClipboard_0.5.0_portable.exe)    |
-| **Android 版**<br>`QuickClipboard_Android_v1.0.4.apk`    |    適用於 Android 裝置安裝 | ![下載量](https://img.shields.io/github/downloads/mosheng1/QuickClipboard/QuickClipboard_Android_v1.0.4.apk?label=)  | [![下載 Android 版](https://img.shields.io/badge/下載-Android版-success?style=for-the-badge)](https://github.com/mosheng1/QuickClipboard/releases/download/v0.4.0/QuickClipboard_Android_v1.0.4.apk)  |
 | **雲端下載**                                            |    GitHub 較慢時的備用管道 |                                                          —                                                           | [![雲端下載](https://img.shields.io/badge/雲端下載-點擊進入-red?style=for-the-badge)](https://www.123912.com/s/A9Ckjv-Vu75v?pwd=UhWA#)                                                        |
 
 ---
