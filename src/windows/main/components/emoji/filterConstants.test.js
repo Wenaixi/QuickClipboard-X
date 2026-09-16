@@ -30,9 +30,9 @@ test('App 过滤热键复用常量,不再硬编码数组', async () => {
 });
 
 
-// C09: EmojiTab prev-mode 硬编码 ['emoji','symbols','images'],与 App 过滤路径/TabNavigation 常量脱钩。
+// EmojiTab prev-mode 硬编码 ['emoji','symbols','images'],与 App 过滤路径/TabNavigation 常量脱钩。
 // 修复:import cycleValue + EMOJI_MODE_IDS,cycleValue(EMOJI_MODE_IDS, ...) 复用单一真源。
-test('C09 EmojiTab prev-mode 复用 EMOJI_MODE_IDS 与 cycleValue,不再硬编码子模式数组', async () => {
+test('EmojiTab prev-mode 复用 EMOJI_MODE_IDS 与 cycleValue,不再硬编码子模式数组', async () => {
   const body = await readSource('../EmojiTab.jsx');
   const raw = await readSourceRaw('../EmojiTab.jsx');
   // import 必须有 cycleValue 与 EMOJI_MODE_IDS(raw 保留 import 行,body 已剥注释)
@@ -62,8 +62,8 @@ test('C09 EmojiTab prev-mode 复用 EMOJI_MODE_IDS 与 cycleValue,不再硬编�
 });
 
 
-// C12: applyNavIntent 闭包读 emojiMode,deps 缺 emojiMode → stale 子模式决策。
-test('C12 applyNavIntent useCallback deps 必须含 emojiMode', async () => {
+// applyNavIntent 闭包读 emojiMode,deps 缺 emojiMode → stale 子模式决策。
+test('applyNavIntent useCallback deps 必须含 emojiMode', async () => {
   const body = await readSource('../EmojiTab.jsx');
   const start = body.indexOf('const applyNavIntent = useCallback');
   assert.ok(start >= 0, '应有 applyNavIntent');

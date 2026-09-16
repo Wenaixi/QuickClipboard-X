@@ -134,7 +134,7 @@ export const defaultSettings = {
   
   // 截屏设置
   screenshotEnabled: true,
-  // D4:与 Rust model.rs 的 screenshot_shortcut 默认值对齐(Ctrl+Shift+A)。
+  // 与 Rust model.rs 的 screenshot_shortcut 默认值对齐(Ctrl+Shift+A)。
   // 前端 defaultSettings 缺这一项时,重置/默认快照合并会以 Rust 默认值刷新
   // 回滚,或后端回退 defaults 时截屏快捷键变 undefined。
   screenshotShortcut: 'Ctrl+Shift+A',
