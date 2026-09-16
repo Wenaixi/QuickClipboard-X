@@ -62,6 +62,7 @@ pub fn refresh_excluded_hwnds(app_handle: &tauri::AppHandle) {
         "context-menu",
         crate::windows::preview_window::PREVIEW_WINDOW_LABEL,
         crate::windows::screenshot_window::SCREENSHOT_WINDOW_LABEL,
+        "input-dialog",
         "quickpaste",
         "community",
     ] {
@@ -465,16 +466,21 @@ mod tests {
         );
     }
 
-    // 源码护栏:截图窗口(标签 "screenshot",标题 "截图")必须同时进排除列表
-    // 与忽略表——截图取景时聚焦截图窗口,若不过滤,LAST_FOCUS_HWND 被记为
-    // 截图窗口,恢复焦点把焦点设回已隐藏的截图窗口。
+    // 截图窗口(标签 "screenshot",标题 "截图")与输入对话框(固定标签
+    // "input-dialog",标题是调用方传入的任意 title 不能按标题过滤)必须
+    // 同时进排除列表与忽略表——两者聚焦时若不过滤,LAST_FOCUS_HWND 被记
+    // 为自身窗口,恢复焦点把焦点设回已隐藏的自身窗口。
     #[test]
-    fn screenshot_window_covered_by_excluded_hwnds_and_ignore_table() {
+    fn screenshot_and_input_dialog_windows_covered_by_excluded_and_ignore() {
         let src = strip_line_comments(&focus_source());
         let excluded_body = fn_body(&src, "refresh_excluded_hwnds");
         assert!(
             excluded_body.contains("crate::windows::screenshot_window::SCREENSHOT_WINDOW_LABEL"),
             "截图窗口标签必须进排除列表(用常量防字符串漂移)"
+        );
+        assert!(
+            excluded_body.contains("\"input-dialog\""),
+            "输入对话框固定标签必须进排除列表——标题是调用方传入的任意值,不能按标题过滤"
         );
         let helper = fn_body(&src, "is_ignored_foreground_window");
         assert!(
