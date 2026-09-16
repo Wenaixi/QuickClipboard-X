@@ -336,7 +336,7 @@ fn unique_path(dir: &Path, file_name: &str, reserved: &HashSet<PathBuf>) -> Path
     path
 }
 
-fn is_valid_image_id(image_id: &str) -> bool {
+pub(super) fn is_valid_image_id(image_id: &str) -> bool {
     !image_id.is_empty()
         && image_id.len() <= 128
         && image_id

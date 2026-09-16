@@ -170,7 +170,10 @@ fn spawn_push_images_from_metas(
     let image_ids = metas
         .into_iter()
         .flat_map(|meta| meta.image_id.unwrap_or_default().split(',').map(str::trim).map(str::to_string).collect::<Vec<_>>())
-        .filter(|image_id| !image_id.is_empty())
+        // 与 spawn_push_images 的 collect_record_image_ids 同口径白名单:
+        // image_id 会拼进磁盘路径,`..`/超长/非安全字符会在拼路径或
+        // 对端存储时引发穿越/非法路径,必须在此先过滤。
+        .filter(|image_id| super::files::is_valid_image_id(image_id))
         .collect::<Vec<_>>();
     if image_ids.is_empty() {
         return;
@@ -290,6 +293,23 @@ mod image_delta_guards {
         assert!(
             body.contains(".send()") && body.contains(".await"),
             "探测必须真正发请求"
+        );
+    }
+
+    // meta 触发的图片推送必须走与记录触发同款白名单:metas 里的
+    // image_id 同样会拼进磁盘路径,只过滤空串挡不住 `..`/超长/非法
+    // 字符,脏 id 会一路发到对端造成非法路径与反复报错。
+    #[test]
+    fn push_images_from_metas_filters_invalid_image_ids() {
+        let src = strip_line_comments(&source_file("src/services/sync_transfer/lan/push.rs"));
+        let body = fn_body(&src, "spawn_push_images_from_metas");
+        assert!(
+            body.contains("super::files::is_valid_image_id(image_id)"),
+            "meta 触发推送必须用与记录触发同款白名单过滤 image_id"
+        );
+        assert!(
+            !body.contains(".filter(|image_id| !image_id.is_empty())"),
+            "meta 触发推送不得退化为只过滤空串"
         );
     }
 }
