@@ -309,7 +309,7 @@ mod windows_impl {
     }
 
     // 获取 UWP 应用真实名称
-    fn get_uwp_app_name(hwnd: windows::Win32::Foundation::HWND) -> Option<String> {
+    pub fn get_uwp_app_name(hwnd: windows::Win32::Foundation::HWND) -> Option<String> {
         use windows::Win32::UI::WindowsAndMessaging::{EnumChildWindows, GetWindowThreadProcessId};
         use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM};
         use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
@@ -457,6 +457,7 @@ pub fn get_all_windows_info() -> Vec<AppInfo> {
 
 #[cfg(target_os = "windows")]
 pub use windows_impl::{
+    get_uwp_app_name,
     get_all_windows_info,
     get_clipboard_source,
     start_clipboard_source_monitor,

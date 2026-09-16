@@ -253,6 +253,15 @@ pub fn get_foreground_app_info() -> Option<ForegroundAppInfo> {
                 }
             }
 
+            // UWP 应用前台进程统一是 ApplicationFrameHost.exe 宿主,不解析
+            // 真实应用名的话,前台来源过滤按宿主名匹配对所有 UWP 应用失效
+            // (规则写商店应用名永远不命中)。复用 app_filter 的子窗口枚举
+            // 解析器,失败兜底回宿主名——解析不到时保持宿主名而非清空。
+            if process_name.to_lowercase() == "applicationframehost.exe" {
+                process_name = crate::services::system::app_filter::get_uwp_app_name(hwnd)
+                    .unwrap_or(process_name);
+            }
+
             if process_name.is_empty() {
                 return None;
             }
@@ -673,6 +682,30 @@ mod tests {
         assert!(
             body.contains("webview_windows()"),
             "必须遍历全部 webview 窗口取文件盒窗口"
+        );
+    }
+
+    // 护栏:get_foreground_app_info 必须解析 UWP 真实应用名——UWP 应用
+    // 前台进程都是 ApplicationFrameHost.exe 宿主,不解析则所有 UWP 来源
+    // 过滤规则按宿主名匹配全部失效。必须复用 app_filter 的子窗口枚举
+    // 解析器,并先判定宿主进程再调用,解析失败兜底回宿主名。
+    #[test]
+    fn foreground_app_info_resolves_uwp_real_name() {
+        let src = strip_line_comments(&focus_source());
+        let b = fn_body(&src, "get_foreground_app_info");
+        let framehost = b
+            .find("applicationframehost.exe")
+            .expect("必须判定 ApplicationFrameHost 宿主进程");
+        let resolve = b
+            .find("get_uwp_app_name(hwnd)")
+            .expect("必须复用 app_filter 的 UWP 真实应用名解析");
+        assert!(
+            framehost < resolve,
+            "必须首先判定宿主进程再调用真实应用名解析"
+        );
+        assert!(
+            b.contains("unwrap_or(process_name)"),
+            "UWP 解析失败必须兜底回宿主名,不得清空应用名"
         );
     }
 }
