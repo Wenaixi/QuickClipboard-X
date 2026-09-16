@@ -1093,7 +1093,7 @@ mod content_type_like_tests {
         );
     }
 
-    /// F01 护栏:收藏 content_type 过滤必须 like_pattern + ESCAPE,与 clipboard 路径一致。
+    /// 护栏:收藏 content_type 过滤必须 like_pattern + ESCAPE,与 clipboard 路径一致。
     /// 防止未来有人退回到 format!("%{}%", content_type) 裸拼(通配符未转义)。
     #[test]
     fn query_favorites_content_type_uses_like_pattern_with_escape() {

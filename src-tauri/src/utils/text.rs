@@ -204,7 +204,7 @@ mod tests {
         assert_eq!(calculate_char_count("data", "file"), None);
     }
 
-    /// F11 护栏:三个调用点应共享 `utils::calculate_char_count`,
+    /// 护栏:三个调用点应共享 `utils::calculate_char_count`,
     /// 不允许在 database/clipboard.rs / database/favorites.rs / clipboard/storage.rs 重新定义同名 fn。
     /// 防止未来有人复制粘贴回旧位置导致语义漂移。
     #[test]
