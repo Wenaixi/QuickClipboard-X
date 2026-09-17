@@ -52,12 +52,12 @@ impl PairedPeer {
 }
 
 pub fn list_peers() -> Vec<PairedPeer> {
-    let peers = crate::services::store::get::<Vec<PairedPeer>>(PAIRED_PEERS_KEY).unwrap_or_default();
+    // 去重写盘也是写路径——与 upsert/mark_peer_seen 的读-改-写并发时
+    // 无锁整体覆盖会丢配对记录,必须持锁后经 save_peers_inner 落盘。
+    let peers = load_peers_inner();
     let original_len = peers.len();
     let peers = dedupe_peers(peers);
     if peers.len() != original_len {
-        // 去重写盘也是写路径——与 upsert/mark_peer_seen 的读-改-写并发时
-        // 无锁整体覆盖会丢配对记录,必须持锁后经 save_peers_inner 落盘。
         let _guard = PEER_STORE_LOCK.lock();
         let _ = save_peers_inner(&peers);
     }
@@ -66,6 +66,14 @@ pub fn list_peers() -> Vec<PairedPeer> {
 
 pub fn list_peer_infos() -> Vec<PairedPeerInfo> {
     list_peers().into_iter().map(|peer| peer.info()).collect()
+}
+
+// 不加锁的读实现:只读存储,不去重、不写盘。持锁入口
+// (upsert/mark_peer_seen/remove_peer)取锁后调它拿列表——
+// 旧实现持锁调 list_peers,存储出现重复配对时 list_peers 的去重写盘
+// 二次取 PEER_STORE_LOCK(parking_lot 不可重入),配对操作全部挂死。
+fn load_peers_inner() -> Vec<PairedPeer> {
+    crate::services::store::get::<Vec<PairedPeer>>(PAIRED_PEERS_KEY).unwrap_or_default()
 }
 
 // 不加锁的写实现:所有公开入口先取 PEER_STORE_LOCK 再走它,
@@ -81,7 +89,7 @@ pub fn save_peers(peers: &[PairedPeer]) -> Result<(), String> {
 
 pub fn upsert_peer(peer: PairedPeer) -> Result<(), String> {
     let _guard = PEER_STORE_LOCK.lock();
-    let mut peers = list_peers();
+    let mut peers = load_peers_inner();
     peers.retain(|item| !same_peer_identity(item, &peer));
     peers.push(peer);
     save_peers_inner(&peers)
@@ -113,7 +121,7 @@ fn normalized_base_url(base_url: &str) -> String {
 
 pub fn mark_peer_seen(device_id: &str) -> Result<(), String> {
     let _guard = PEER_STORE_LOCK.lock();
-    let mut peers = list_peers();
+    let mut peers = load_peers_inner();
     let Some(peer) = peers.iter_mut().find(|peer| peer.device_id == device_id) else {
         return Ok(());
     };
@@ -123,7 +131,7 @@ pub fn mark_peer_seen(device_id: &str) -> Result<(), String> {
 
 pub fn remove_peer(device_id: &str) -> Result<bool, String> {
     let _guard = PEER_STORE_LOCK.lock();
-    let mut peers = list_peers();
+    let mut peers = load_peers_inner();
     let before = peers.len();
     peers.retain(|peer| peer.device_id != device_id);
     if peers.len() == before {
@@ -163,9 +171,30 @@ mod tests {
         );
     }
 
-    // 读路径的去重写盘也必须持锁——list_peers 发现重复配对时写回去重结果,
-    // 若绕过 PEER_STORE_LOCK,会与持锁的 upsert/mark_peer_seen 读-改-写并发,
-    // 旧快照整体覆盖丢配对。断言去重后的落盘先取锁再写。
+    // 持锁入口禁止再调 list_peers:list_peers 的去重写盘路径会二次取
+    // PEER_STORE_LOCK(parking_lot 不可重入),存储出现重复配对时死锁。
+    // 必须改调无锁读取 load_peers_inner。
+    #[test]
+    fn locked_mutations_use_lock_free_read_not_list_peers() {
+        let src = strip_line_comments(&source_file("src/services/sync_transfer/lan/peer_store.rs"));
+        for name in ["upsert_peer", "mark_peer_seen", "remove_peer"] {
+            let body = fn_body(&src, name);
+            assert!(
+                body.contains("load_peers_inner()"),
+                "{} 持锁后必须经 load_peers_inner 读列表,避免 list_peers 去重写盘二次加锁死锁",
+                name
+            );
+            assert!(
+                !body.contains("list_peers()"),
+                "{} 持锁入口禁止调用 list_peers(去重写盘会重复加锁)",
+                name
+            );
+        }
+    }
+
+    // 读路径(不持锁入口)的去重写盘也必须持锁——list_peers 发现重复配对时
+    // 写回去重结果,若绕过 PEER_STORE_LOCK,会与持锁的 upsert/mark_peer_seen
+    // 读-改-写并发,旧快照整体覆盖丢配对。断言去重后的落盘先取锁再写。
     #[test]
     fn list_peers_dedupe_write_holds_lock() {
         let src = strip_line_comments(&source_file("src/services/sync_transfer/lan/peer_store.rs"));
@@ -174,7 +203,6 @@ mod tests {
             .find("dedupe_peers(peers)")
             .unwrap_or_else(|| panic!("list_peers 必须先做去重"));
         let rest = &body[dedupe_pos..];
-        // 去重之后的写盘路径必须:先持锁、再经 save_peers_inner 落盘
         assert!(
             rest.contains("PEER_STORE_LOCK.lock()"),
             "list_peers 去重后的写盘必须持有 PEER_STORE_LOCK,否则与 upsert 读-改-写并发会丢配对"
