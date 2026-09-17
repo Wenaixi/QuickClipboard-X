@@ -729,7 +729,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
 
   // 单格 emoji 单元:memo 化后,只有高亮状态或 props 变化时才重渲染。
   // 把整个 row map 抽出来变成可单独 memo 的组件,避免方向键每次按都重建
-  // 全部可见格子。F16 性能护栏锁住这一前提。
+  // 全部可见格子。此性能护栏锁住该前提。
   const EmojiCell = useMemo(
     () =>
       memo(function EmojiCell({
@@ -855,7 +855,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
     if (section.type === 'row') {
       const shouldApplySkin = section.catId === 'people-body';
       // 高亮比较通过 ref 取最新 kbZone/kbRow/kbCol,避免 useCallback deps 含键盘状态
-      // (F16:方向键每次按都重建 useCallback → Virtuoso 重渲全部可见格子)。
+      // (方向键每次按都重建 useCallback → Virtuoso 重渲全部可见格子)。
       const zone = kbZoneRef.current;
       const currentRow = kbRowRef.current;
       const currentCol = kbColRef.current;
@@ -1015,7 +1015,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
 
   // 过滤热键(App handleFilterLeft/Right)切子模式前调用——保存当前 zone
   // 到挂起恢复意图,emojiMode effect 在数据重建后恢复,保住键盘导航态
-  // (grid 高亮/搜索激活),取代旧 G3 resetKbNav no-op(同值短路不生效,
+  // (grid 高亮/搜索激活),取代旧的 resetKbNav no-op(同值短路不生效,
   // effect 仍无条件重置)。
   const restoreKbNav = useCallback((zone) => {
     pendingRestoreZoneRef.current = zone || null;
@@ -1147,7 +1147,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
   // useNavigationKeyboard listen 读 store=true 但 kbZoneRef 仍是旧值,
   // resolveZoneNav 决策基于旧 zone。verifier 实证无用户可见 bug(<16ms
   // 自动连发才可达,人工按键间隔远超),此单点写是刻意设计:任何 setKbZone
-  // 路径都覆盖,避免双写竞态(F8 已删 5 处显式写收敛于此)。
+  // 路径都覆盖,避免双写竞态(此前 5 处显式写已删,收敛于此)。
   useEffect(() => {
     navigationStore.setEmojiKbActive(kbZone !== 'outside');
   }, [kbZone]);
