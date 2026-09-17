@@ -16,6 +16,7 @@ import SyncTransferSection from './sections/SyncTransferSection';
 import AIConfigSection from './sections/AIConfigSection';
 import TranslationSection from './sections/TranslationSection';
 import PreviewSection from './sections/PreviewSection';
+import ScreenshotSection from './sections/ScreenshotSection';
 import SoundSection from './sections/SoundSection';
 import AppFilterSection from './sections/AppFilterSection';
 import DataManagementSection from './sections/DataManagementSection';

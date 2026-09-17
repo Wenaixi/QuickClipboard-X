@@ -68,6 +68,30 @@ mod settings_window_guard {
         }
     }
 
+    // 设置窗口截图设置节接线必须完整:App.jsx 的渲染 switch 引用 ScreenshotSection
+    // 组件,就必须存在对应 import——上游合并把 import 行与 case 分支拆散,
+    // 只剩 case 没有 import,一旦有入口把 activeSection 切到 'screenshot',
+    // 渲染函数内对未声明的 ScreenshotSection 求值会抛 ReferenceError。
+    // 护栏断言 import 与 JSX 引用共存,且 import 位于文件顶部先于引用。
+    #[test]
+    fn settings_app_jsx_imports_screenshot_section_for_render_switch() {
+        let src = std::fs::read_to_string(format!(
+            "{}/../src/windows/settings/App.jsx",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读取设置窗口 App.jsx 失败");
+        let import_pos = src
+            .find("import ScreenshotSection from './sections/ScreenshotSection'")
+            .unwrap_or_else(|| panic!("App.jsx 必须 import ScreenshotSection,否则渲染截图设置节崩溃"));
+        let use_pos = src
+            .find("<ScreenshotSection settings={snap}")
+            .unwrap_or_else(|| panic!("App.jsx 渲染 switch 必须引用 ScreenshotSection"));
+        assert!(
+            import_pos < use_pos,
+            "ScreenshotSection 的 import 必须位于引用之前"
+        );
+    }
+
     // 恢复路径:设置窗口关闭(CloseRequested/Destroyed)必须按快照恢复
     // 导航键——打开时已禁用,不恢复则设置窗口关闭后主窗口导航键静默缺失。
     #[test]
