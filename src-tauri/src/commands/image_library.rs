@@ -63,11 +63,6 @@ pub struct DeleteImageGroupPayload {
 }
 
 #[tauri::command]
-pub fn il_init() -> Result<(), String> {
-    image_library::init_image_library()
-}
-
-#[tauri::command]
 pub async fn il_save_image(payload: SaveImagePayload) -> Result<image_library::ImageInfo, String> {
     let group = payload.group;
     let filename = payload.filename;
@@ -98,18 +93,6 @@ pub fn il_delete_image(payload: DeleteImagePayload) -> Result<(), String> {
 #[tauri::command]
 pub fn il_rename_image(payload: RenameImagePayload) -> Result<image_library::ImageInfo, String> {
     image_library::rename_image(&payload.group, &payload.old_filename, &payload.new_filename)
-}
-
-#[tauri::command]
-pub fn il_get_images_dir() -> Result<String, String> {
-    let path = image_library::get_images_dir()?;
-    Ok(path.to_string_lossy().to_string())
-}
-
-#[tauri::command]
-pub fn il_get_gifs_dir() -> Result<String, String> {
-    let path = image_library::get_gifs_dir()?;
-    Ok(path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
