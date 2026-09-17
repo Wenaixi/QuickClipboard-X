@@ -582,7 +582,7 @@ pub async fn show_menu(
 }
 
 #[cfg(test)]
-mod w1_menu_region_guard {
+mod menu_region_guard {
     use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
 
     // (区域被旧会话线程误清):start_cursor_passthrough_monitor 退出时必须

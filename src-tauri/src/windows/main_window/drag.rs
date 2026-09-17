@@ -278,7 +278,7 @@ fn wait_for_mouse_release(window: WebviewWindow) {
 }
 
 #[cfg(test)]
-mod w6_restore_wndproc_guard {
+mod restore_wndproc_guard {
     use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
 
     // (恢复装错窗口):stop_drag 恢复 WndProc 前必须比对 INSTALLED_WNDPROC_HWND

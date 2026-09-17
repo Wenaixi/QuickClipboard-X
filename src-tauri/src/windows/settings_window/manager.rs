@@ -31,7 +31,7 @@ pub fn open_settings_window(app: &AppHandle) -> Result<(), String> {
 }
 
 #[cfg(test)]
-mod hk1_settings_window_guard {
+mod settings_window_guard {
     use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
 
     // 设置窗口吞导航键:打开设置必须先快照 DESIRED 再禁用导航键——
