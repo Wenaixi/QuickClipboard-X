@@ -112,5 +112,30 @@ mod settings_window_guard {
             "恢复调用必须位于关闭/销毁事件处理内"
         );
     }
+
+    // 主窗口收藏页的返回顶部与导航重置必须接线完整:收藏页的滚动到顶
+    // 会调用 navigationStore.resetNavigation() 重置键盘导航状态,就必须存在
+    // 对应 import——合并历史上游 v0.5 曾把两个 Tab 组件的 import 行与
+    // 引用拆散(剪贴板页同款缺 import 已在合并修复中补齐,收藏页这一份
+    // 漏网),缺 import 时点击"返回顶部"即 ReferenceError 抛错,列表无法
+    // 回到顶部且导航状态残留。
+    #[test]
+    fn favorites_tab_imports_navigation_store_for_scroll_to_top() {
+        let src = std::fs::read_to_string(format!(
+            "{}/../src/windows/main/components/FavoritesTab.jsx",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读取 FavoritesTab.jsx 失败");
+        let import_pos = src
+            .find("import { navigationStore } from '@shared/store/navigationStore'")
+            .unwrap_or_else(|| panic!("FavoritesTab.jsx 必须 import navigationStore,否则返回顶部重置导航抛错"));
+        let use_pos = src
+            .find("navigationStore.resetNavigation()")
+            .unwrap_or_else(|| panic!("FavoritesTab.jsx 返回顶部必须调用 resetNavigation"));
+        assert!(
+            import_pos < use_pos,
+            "navigationStore 的 import 必须位于引用之前"
+        );
+    }
 }
 
