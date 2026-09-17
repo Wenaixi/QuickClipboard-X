@@ -75,6 +75,7 @@ jobs:
       CARGO_PROFILE_RELEASE_LTO: 'false'
       CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
       CARGO_PROFILE_RELEASE_OPT_LEVEL: '2'
+      CARGO_PROFILE_RELEASE_INCREMENTAL: 'true'
 
     steps:
       - name: Checkout
