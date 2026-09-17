@@ -19,42 +19,24 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
-  build:
-    name: Build (windows-latest)
+  # 测试面:前端三套测试 + Rust 单测。与 build job 零依赖,完全并行,取其大者。
+  test:
+    name: Test (windows-latest)
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 40
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: false
+          fetch-depth: 1
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: lts/*
           cache: npm
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: './src-tauri -> target'
-          # r8-ci-1:拆分 release/dev 两档缓存,避免单测编译(dev profile 无 LTO)
-          # 与 release 打包(lto=fat)互相污染缓存键命中率。
-          key: ci
-
-      - name: Cache frontend build
-        uses: actions/cache@v4
-        with:
-          path: node_modules/.vite
-          key: vite-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('vite.config.js', 'src/shared/**', 'src/windows/main/**') }}
-          restore-keys: |
-            vite-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
-            vite-${{ runner.os }}-
 
       - name: Install frontend deps
         run: npm ci
@@ -68,11 +50,60 @@ jobs:
       - name: Run mouse-guard tests
         run: npm run test:mouse-guard
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # 单测走 dev profile,缓存与 release 分离,避免互相挤占与传输。
+      - name: Cache Rust (test)
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: ci-test
+
       - name: Run Rust unit tests
         run: npm run test:rust
 
+  # 构建面:vite build + release 打包 + artifact 上传。
+  build:
+    name: Build (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    # 只用环境变量把 release profile 从 fat LTO 调成 thin LTO + 并行 codegen,
+    # 大幅缩短 CI 编译时间;发布路径 release.yml 仍走 Cargo.toml 的 fat LTO
+    # 最优产物,二者互不影响。
+    env:
+      CARGO_PROFILE_RELEASE_LTO: thin
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: '2'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Install frontend deps
+        run: npm ci
+
       - name: Build frontend
         run: npm run build
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust (release)
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: ci-release
 
       - name: Build Tauri executable
         run: npm run tauri:build -- --bundles nsis --no-sign
