@@ -36,11 +36,6 @@ fn require_screenshot_window(window: &WebviewWindow) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn set_mouse_position(x: i32, y: i32) -> Result<(), String> {
-    crate::utils::mouse::set_cursor_position(x, y)
-}
-
-#[tauri::command]
 pub fn get_mouse_position() -> (i32, i32) {
     crate::utils::mouse::get_cursor_position()
 }
@@ -206,10 +201,4 @@ pub async fn complete_screenshot(
 pub fn close_screenshot_window(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
     require_screenshot_window(&window)?;
     screenshot_window::close_screenshot_window(&app)
-}
-
-#[cfg(target_os = "windows")]
-#[tauri::command]
-pub fn start_normal_screenshot(app: AppHandle) -> Result<(), String> {
-    start_screenshot(app)
 }

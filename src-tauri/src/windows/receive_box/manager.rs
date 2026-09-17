@@ -4,21 +4,10 @@ use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
 use super::types::{ReceiveBoxCloudFile, ReceiveBoxLanFile};
-use super::window::{create_receive_box_window, RECEIVE_BOX_LABEL};
+use super::window::create_receive_box_window;
 
 pub fn open_receive_box(app: &AppHandle) -> Result<(), String> {
     create_receive_box_window(app, true).map(|_| ())
-}
-
-pub fn focus_receive_box(app: &AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window(RECEIVE_BOX_LABEL) {
-        let _ = window.unminimize();
-        let _ = window.show();
-        return window
-            .set_focus()
-            .map_err(|e| format!("聚焦收件盒窗口失败: {}", e));
-    }
-    open_receive_box(app)
 }
 
 pub fn list_lan_files() -> Result<Vec<ReceiveBoxLanFile>, String> {

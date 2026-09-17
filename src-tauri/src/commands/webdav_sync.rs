@@ -21,11 +21,6 @@ pub async fn webdav_download_all() -> Result<services::webdav_sync::SyncReport, 
 }
 
 #[tauri::command]
-pub fn webdav_get_status() -> Result<services::webdav_sync::WebdavStatus, String> {
-    Ok(services::webdav_sync::status())
-}
-
-#[tauri::command]
 pub fn webdav_get_last_report() -> Result<Option<services::webdav_sync::sync_scheduler::WebdavSyncReportEvent>, String> {
     Ok(services::webdav_sync::sync_scheduler::get_last_report())
 }

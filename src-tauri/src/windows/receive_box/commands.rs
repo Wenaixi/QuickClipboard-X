@@ -9,11 +9,6 @@ pub async fn receive_box_open(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn receive_box_focus(app: AppHandle) -> Result<(), String> {
-    manager::focus_receive_box(&app)
-}
-
-#[tauri::command]
 pub fn receive_box_list_lan_files() -> Result<Vec<ReceiveBoxLanFile>, String> {
     manager::list_lan_files()
 }

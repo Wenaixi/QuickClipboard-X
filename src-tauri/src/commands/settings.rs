@@ -1,4 +1,4 @@
-use crate::services::{AppSettings, get_settings, update_settings, get_data_directory};
+use crate::services::{AppSettings, get_settings, update_settings};
 use crate::services::settings::storage::SettingsStorage;
 use tauri::Manager;
 use serde_json::Value;
@@ -194,11 +194,6 @@ pub fn reset_settings_to_default(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn get_settings_cmd() -> AppSettings {
-    get_settings()
-}
-
-#[tauri::command]
 pub fn set_edge_hide_enabled(enabled: bool, app: tauri::AppHandle) -> Result<(), String> {
     let mut settings = get_settings();
     settings.edge_hide_enabled = enabled;
@@ -242,13 +237,6 @@ pub fn get_app_version() -> Result<Value, String> {
     }))
 }
 
-// 获取数据目录路径
-#[tauri::command]
-pub fn get_data_directory_cmd() -> Result<String, String> {
-    let path = get_data_directory()?;
-    Ok(path.to_string_lossy().to_string())
-}
-
 // 设置开机自启动
 #[tauri::command]
 pub fn set_auto_start(enabled: bool) -> Result<(), String> {
@@ -271,12 +259,6 @@ pub fn get_auto_start_status() -> Result<bool, String> {
     // 校验触发器/参数(管理员模式自启任务带登录触发器,手动提权任务无触发器),
     // 硬编码 true 会让"已关闭自启"的状态查询仍按自启任务形状匹配,误报已启用。
     crate::services::system::get_auto_start_status(settings.auto_start, settings.run_as_admin)
-}
-
-// 重新加载快捷键
-#[tauri::command]
-pub fn reload_hotkeys() -> Result<(), String> {
-    crate::hotkey::reload_from_settings()
 }
 
 // 启用快捷键

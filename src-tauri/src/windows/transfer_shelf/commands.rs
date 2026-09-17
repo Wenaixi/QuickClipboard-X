@@ -5,7 +5,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::task::JoinSet;
 
 use super::manager::{
-    append_files_to_shelf, close_shelf, focus_shelf, list_shelves, load_shelf_state, open_or_create_shelf,
+    append_files_to_shelf, close_shelf, list_shelves, load_shelf_state, open_or_create_shelf,
     rename_shelf, save_shelf_state,
 };
 use super::storage::{self, ShelfGeometryPersisted};
@@ -14,7 +14,7 @@ use super::types::{
     ShelfSendError, ShelfSendTarget, ShelfSendTaskPayload, ShelfStateSnapshot, ShelfSummary,
     TASK_PROGRESS_EVENT,
 };
-use super::window::{apply_shelf_geometry, resolve_shelf_geometry};
+use super::window::resolve_shelf_geometry;
 
 const FILE_SEND_CONCURRENCY: usize = 4;
 
@@ -58,11 +58,6 @@ pub async fn transfer_shelf_create(app: AppHandle) -> Result<ShelfSummary, Strin
 #[tauri::command]
 pub fn transfer_shelf_list() -> Vec<ShelfSummary> {
     list_shelves()
-}
-
-#[tauri::command]
-pub fn transfer_shelf_focus(app: AppHandle, id: String) -> Result<(), String> {
-    focus_shelf(&app, &id)
 }
 
 #[tauri::command]
@@ -654,19 +649,4 @@ pub fn transfer_shelf_save_geometry(
     };
     let geometry = resolve_shelf_geometry(&app, &geometry).unwrap_or(geometry);
     storage::upsert_geometry(&id, geometry)
-}
-
-#[tauri::command]
-pub fn transfer_shelf_apply_geometry(app: AppHandle, id: String) -> Result<bool, String> {
-    let geometry = match storage::load().geometries.get(&id).cloned() {
-        Some(value) => value,
-        None => return Ok(false),
-    };
-    let label = label_for(&id);
-    let window = app
-        .get_webview_window(&label)
-        .ok_or_else(|| format!("找不到文件盒窗口: {}", id))?;
-    let resolved = apply_shelf_geometry(&app, &window, &geometry)?;
-    let _ = storage::upsert_geometry(&id, resolved);
-    Ok(true)
 }

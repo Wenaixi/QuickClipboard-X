@@ -258,14 +258,6 @@ pub fn hide_drop_proxy(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-pub fn dispose_drop_proxy(app: &AppHandle) -> Result<(), String> {
-    let _ = set_target_label(None);
-    if let Some(window) = app.get_webview_window(DROP_PROXY_LABEL) {
-        let _ = window.close();
-    }
-    Ok(())
-}
-
 pub fn route_paths_at_cursor(
     app: &AppHandle,
     source_label: &str,

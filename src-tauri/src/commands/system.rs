@@ -1,35 +1,6 @@
-use serde_json::Value;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 // 截图启动、窗口就绪和完成命令统一位于 commands::screenshot。
-
-// 检查 AI 翻译配置
-#[tauri::command]
-pub fn check_ai_translation_config() -> Result<Value, String> {
-    use crate::services::get_settings;
-    
-    let settings = get_settings();
-    let is_configured = !settings.ai_api_key.is_empty() 
-        && settings.ai_translation_enabled;
-    
-    Ok(serde_json::json!({
-        "is_configured": is_configured,
-        "enabled": settings.ai_translation_enabled,
-        "api_key_set": !settings.ai_api_key.is_empty(),
-    }))
-}
-
-// 启用 AI 翻译取消快捷键
-#[tauri::command]
-pub fn enable_ai_translation_cancel_shortcut() -> Result<(), String> {
-    Ok(())
-}
-
-// 禁用 AI 翻译取消快捷键
-#[tauri::command]
-pub fn disable_ai_translation_cancel_shortcut() -> Result<(), String> {
-    Ok(())
-}
 
 // 复制纯文本到剪贴板
 #[tauri::command]
@@ -40,24 +11,6 @@ pub fn copy_text_to_clipboard(text: String) -> Result<(), String> {
         .map_err(|e| format!("创建剪贴板上下文失败: {}", e))?;
     ctx.set_text(text)
         .map_err(|e| format!("设置文本到剪贴板失败: {}", e))
-}
-
-// 检查 Win+V 是否已在系统中被禁用
-#[tauri::command]
-pub fn check_win_v_hotkey_disabled() -> Result<bool, String> {
-    Ok(crate::services::system::win_v_hotkey::is_win_v_hotkey_disabled())
-}
-
-// 禁用系统 Win+V 快捷键并重启资源管理器
-#[tauri::command]
-pub fn disable_win_v_hotkey_and_restart() -> Result<(), String> {
-    crate::services::system::win_v_hotkey::disable_win_v_hotkey()
-}
-
-// 启用系统 Win+V 快捷键并重启资源管理器
-#[tauri::command]
-pub fn enable_win_v_hotkey_and_restart() -> Result<(), String> {
-    crate::services::system::win_v_hotkey::enable_win_v_hotkey()
 }
 
 #[tauri::command]

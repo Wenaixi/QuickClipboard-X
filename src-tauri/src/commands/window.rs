@@ -94,17 +94,6 @@ pub fn start_custom_drag(window: WebviewWindow, mouse_screen_x: i32, mouse_scree
 }
 
 #[tauri::command]
-pub fn stop_custom_drag(window: WebviewWindow) -> Result<(), String> {
-    crate::stop_drag(&window)
-}
-
-#[tauri::command]
-pub fn toggle_main_window(app: AppHandle) -> Result<(), String> {
-    crate::toggle_main_window_visibility(&app);
-    Ok(())
-}
-
-#[tauri::command]
 pub fn hide_main_window(window: WebviewWindow) -> Result<(), String> {
     crate::hide_main_window(&window);
     Ok(())
@@ -119,21 +108,6 @@ pub fn show_main_window(window: WebviewWindow) -> Result<(), String> {
 #[tauri::command]
 pub fn raise_main_window_topmost(window: WebviewWindow) -> Result<(), String> {
     crate::windows::main_window::refresh_always_on_top(&window)
-}
-
-#[tauri::command]
-pub fn check_window_snap(window: WebviewWindow) -> Result<(), String> {
-    crate::check_snap(&window)
-}
-
-#[tauri::command]
-pub fn position_window_at_cursor(window: WebviewWindow) -> Result<(), String> {
-    crate::position_at_cursor(&window)
-}
-
-#[tauri::command]
-pub fn center_main_window(window: WebviewWindow) -> Result<(), String> {
-    crate::center_window(&window)
 }
 
 #[tauri::command]
@@ -196,12 +170,6 @@ pub fn set_window_pinned(window: WebviewWindow, pinned: bool) -> Result<(), Stri
     window.set_always_on_top(pinned)
         .map_err(|e| format!("设置窗口置顶失败: {}", e))?;
     
-    Ok(())
-}
-
-#[tauri::command]
-pub fn toggle_window_visibility(app: AppHandle) -> Result<(), String> {
-    crate::toggle_main_window_visibility(&app);
     Ok(())
 }
 

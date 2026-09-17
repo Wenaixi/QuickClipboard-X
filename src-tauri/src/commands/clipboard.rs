@@ -2,7 +2,7 @@ use crate::services::database::{
     clear_clipboard_history as db_clear_clipboard_history,
     delete_clipboard_item as db_delete_clipboard_item, delete_clipboard_items as db_delete_clipboard_items,
     get_clipboard_count,
-    get_clipboard_data_items, get_clipboard_item_by_id, limit_clipboard_history, move_clipboard_item_to_top,
+    get_clipboard_data_items, get_clipboard_item_by_id, move_clipboard_item_to_top,
     move_clipboard_item_by_id as db_move_clipboard_item_by_id,
     query_clipboard_items, update_clipboard_item as db_update_clipboard_item,
     increment_paste_counts as db_increment_paste_counts,
@@ -135,12 +135,6 @@ pub fn move_clipboard_item_by_id(from_id: i64, to_id: i64) -> Result<(), String>
         notify_lan_change("clipboard");
     }
     result
-}
-
-// 应用历史记录数量限制
-#[tauri::command]
-pub fn apply_history_limit(limit: u64) -> Result<(), String> {
-    limit_clipboard_history(limit)
 }
 
 // 粘贴参数
@@ -338,36 +332,6 @@ pub fn copy_image_to_clipboard(file_path: String) -> Result<(), String> {
     crate::services::paste::clipboard_content::set_clipboard_image_file_recordable(
         &saved_path.to_string_lossy(),
     )
-}
-
-// 复制文件列表到剪贴板
-#[tauri::command]
-pub fn copy_files_to_clipboard(paths: Vec<String>) -> Result<(), String> {
-    use clipboard_rs::{Clipboard, ClipboardContext};
-
-    if paths.is_empty() {
-        return Err("没有可复制的文件".to_string());
-    }
-
-    let normalized_paths = paths
-        .into_iter()
-        .map(|path| {
-            let trimmed = path.trim().to_string();
-            if trimmed.is_empty() {
-                return Err("文件路径不能为空".to_string());
-            }
-            if !Path::new(&trimmed).exists() {
-                return Err(format!("文件不存在: {}", trimmed));
-            }
-            Ok(trimmed)
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-
-    let ctx = ClipboardContext::new()
-        .map_err(|e| format!("创建剪贴板上下文失败: {}", e))?;
-
-    ctx.set_files(normalized_paths)
-        .map_err(|e| format!("设置文件到剪贴板失败: {}", e))
 }
 
 // 复制剪贴板项内容（不记录到历史）

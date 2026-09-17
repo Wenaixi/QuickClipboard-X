@@ -1,11 +1,4 @@
 use crate::services::sound::{SoundPlayer, AppSounds};
-use std::path::Path;
-
-#[tauri::command]
-pub fn play_sound(path: String, volume: f32) -> Result<(), String> {
-    SoundPlayer::play(Path::new(&path), volume);
-    Ok(())
-}
 
 #[tauri::command]
 pub fn play_beep(frequency: f32, duration_ms: u64, volume: f32) -> Result<(), String> {
