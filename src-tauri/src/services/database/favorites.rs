@@ -1044,7 +1044,7 @@ pub fn update_favorite(
         }
         tx.commit()?;
         Ok(())
-    }).map_err(|e| if e.contains("QueryReturnedNoRows") {
+    }).map_err(|e| if e.contains("Query returned no rows") {
         format!("收藏项不存在: {}", id)
     } else { e })?;
 
@@ -1219,6 +1219,49 @@ mod content_type_like_tests {
         assert!(
             !fn_body.contains("delete_clipboard_data_items"),
             "update_favorite 禁止闭包外独立连接删除旧格式,必须事务内直删"
+        );
+    }
+
+    /// 不存在项的友好错误映射必须匹配 rusqlite 的 Display 输出(小写 r),
+    /// 而不是 Error 变体名——with_connection 已把错误 format 成文本后,
+    /// contains 驼峰变体名永远不命中,用户拿不到"收藏项不存在: {id}"提示。
+    #[test]
+    fn update_favorite_maps_no_rows_to_friendly_message() {
+        let source = fs::read_to_string(format!(
+            "{}/src/services/database/favorites.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读 favorites.rs");
+        let body: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = body
+            .find("pub fn update_favorite")
+            .expect("找不到 update_favorite");
+        let after = &body[start..];
+        let end = after
+            .find("\nfn ")
+            .or_else(|| after.find("\n#[cfg(test)]"))
+            .map(|i| start + i)
+            .unwrap_or(body.len());
+        let fn_body = &body[start..end];
+        assert!(
+            fn_body.contains("Query returned no rows"),
+            "必须匹配 rusqlite 对 QueryReturnedNoRows 的 Display 输出(小写 r)"
+        );
+        let map_pos = fn_body
+            .find("Query returned no rows")
+            .expect("找不到错误映射");
+        let map_seg = &fn_body[map_pos..];
+        assert!(
+            map_seg.contains("收藏项不存在"),
+            "不存在项必须映射为友好消息"
+        );
+        assert!(
+            !fn_body.contains("contains(\"QueryReturnedNoRows\")"),
+            "不得拿驼峰变体名做字符串匹配(永远为 false)——只能匹配 Display 输出"
         );
     }
 }

@@ -1239,7 +1239,7 @@ pub fn update_clipboard_item(
         tx.commit()?;
         Ok(())
     })
-    .map_err(|e| if e.contains("QueryReturnedNoRows") {
+    .map_err(|e| if e.contains("Query returned no rows") {
         format!("剪贴板项不存在: {}", id)
     } else { e })?;
 
@@ -1360,6 +1360,38 @@ mod upsert_null_uuid_guard {
         assert!(
             update_seg.contains("(uuid IS NULL OR uuid = '') AND CAST(id AS TEXT) = ?15"),
             "UPDATE 分支 WHERE 必须覆盖 NULL/空串 uuid 行"
+        );
+    }
+}
+
+// 友好错误映射必须匹配 rusqlite 的 Display 输出,而不是 Error 变体名——
+// with_connection 已把错误 format 成 "数据库操作失败: {e}",此时 e 是
+// Display 文本 "Query returned no rows"(小写 r)。若继续 contains 驼峰
+// 变体名 QueryReturnedNoRows 永远不命中,用户只会看到生硬报错而拿不到
+// "剪贴板项不存在: {id}" 的友好提示。
+#[cfg(test)]
+mod no_rows_friendly_message_guard {
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+    #[test]
+    fn update_clipboard_item_maps_no_rows_to_friendly_message() {
+        let src = strip_line_comments(&source_file("src/services/database/clipboard.rs"));
+        let body = fn_body(&src, "update_clipboard_item");
+        assert!(
+            body.contains("Query returned no rows"),
+            "必须匹配 rusqlite 对 QueryReturnedNoRows 的 Display 输出(小写 r)"
+        );
+        let map_pos = body
+            .find("Query returned no rows")
+            .unwrap_or_else(|| panic!("找不到错误映射"));
+        let map_seg = &body[map_pos..];
+        assert!(
+            map_seg.contains("剪贴板项不存在"),
+            "不存在项必须映射为友好消息"
+        );
+        assert!(
+            !body.contains("contains(\"QueryReturnedNoRows\")"),
+            "不得拿驼峰变体名做字符串匹配(永远为 false)——只能匹配 Display 输出"
         );
     }
 }
