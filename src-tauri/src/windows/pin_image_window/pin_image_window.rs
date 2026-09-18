@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use std::collections::HashMap;
 use once_cell::sync::OnceCell;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Listener, Manager, WebviewWindow, WebviewWindowBuilder, Size, LogicalSize, PhysicalPosition, PhysicalSize};
+use tauri::{AppHandle, WebviewWindow};
 
 static PIN_IMAGE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 static PIN_IMAGE_DATA_MAP: OnceCell<Mutex<HashMap<String, PinImageData>>> = OnceCell::new();
@@ -14,8 +14,7 @@ static PIN_IMAGE_DATA_MAP: OnceCell<Mutex<HashMap<String, PinImageData>>> = Once
 // 锁可跨 await 持有,命令 future 保持 Send;OnceCell 惰性初始化同 PIN_IMAGE_DATA_MAP。
 static PREVIEW_WINDOW_LOCK: OnceCell<tokio::sync::Mutex<()>> = OnceCell::new();
 
-// 锁 helper:OnceCell + Mutex poison 双重处理
-// ponytail:9 个调用点都走这里,统一 poison 恢复语义
+// 锁 helper:OnceCell + Mutex poison 双重处理统一恢复语义
 fn lock_pin_data() -> std::sync::MutexGuard<'static, HashMap<String, PinImageData>> {
     PIN_IMAGE_DATA_MAP
         .get_or_init(|| Mutex::new(HashMap::new()))
@@ -125,6 +124,7 @@ pub async fn pin_image_from_file(
     // 下两个并发请求(如预览与真实贴图交错、或 menu hover 连续触发)会交错执行:
     // A 关闭旧窗、A 写入数据、B 关闭 A 新窗、A/B 各自 create 同一标签(第二个
     // WebviewWindowBuilder::build 对已存在 label 抛错或复用),窗口与其数据错位。
+    // 注:文字描述历史实现——GDI 版已不用 WebviewWindowBuilder,此注释保留背景。
     // 非预览窗口标签唯一(PIN_IMAGE_COUNTER 递增),无此竞态,不需要取锁。
     let _preview_guard = if is_preview {
         Some(PREVIEW_WINDOW_LOCK.get_or_init(|| tokio::sync::Mutex::new(())).lock().await)
@@ -133,9 +133,22 @@ pub async fn pin_image_from_file(
     };
 
     if is_preview {
-        if let Some(existing) = app.get_webview_window(&window_label) {
-            let _ = existing.close();
+        // 预览模式固定标签:建窗前先清理旧窗口与旧数据(与 WebView 版
+        // close 旧窗语义一致)。此处已持有 PREVIEW_WINDOW_LOCK,不能调
+        // close_image_preview(它会 blocking_lock 同一把锁造成死锁),
+        // 直接移除数据 + PostMessage(WM_CLOSE) 即可。
+        if super::gdi::find_gdi_window(&window_label).is_some() {
             lock_pin_data().remove(&window_label);
+            if let Some(hwnd) = super::gdi::find_gdi_window(&window_label) {
+                let _ = unsafe {
+                    windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                        hwnd,
+                        windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
+                        windows::Win32::Foundation::WPARAM(0),
+                        windows::Win32::Foundation::LPARAM(0),
+                    )
+                };
+            }
         }
     }
     
@@ -154,14 +167,8 @@ pub async fn pin_image_from_file(
             edit_data,
         },
     );
-    
-    let window = create_pin_image_window(&app, &window_label, img_width, img_height, pos_x, pos_y).await?;
-    
-    if is_preview {
-        window.set_ignore_cursor_events(true).map_err(|e| format!("设置鼠标穿透失败: {}", e))?;
-    }
-    
-    window.show().map_err(|e| format!("显示贴图窗口失败: {}", e))?;
+
+    create_pin_image_window(&app, &window_label, img_width, img_height, pos_x, pos_y).await?;
     Ok(())
 }
 
@@ -249,38 +256,36 @@ async fn create_pin_image_window(
     height: u32,
     physical_x: i32,
     physical_y: i32,
-) -> Result<WebviewWindow, String> {
-    let window = WebviewWindowBuilder::new(
-        app, label,
-        tauri::WebviewUrl::App("windows/pinImage/pinImage.html".into()),
-    )
-    .title("贴图")
-    .inner_size(width as f64 + 10.0, height as f64 + 10.0)
-    .min_inner_size(1.0, 1.0)
-    .resizable(false)
-    .maximizable(false)
-    .decorations(false)
-    .transparent(true)
-    .shadow(false)
-    .always_on_top(true)
-    .skip_taskbar(true)
-    .focused(false)
-    .visible(false)
-    .drag_and_drop(false)
-    .build()
-    .map_err(|e| format!("创建贴图窗口失败: {}", e))?;
-    
-    window.set_position(PhysicalPosition::new(physical_x, physical_y))
-        .map_err(|e| format!("设置窗口位置失败: {}", e))?;
-    
-    Ok(window)
+) -> Result<(), String> {
+    // 走 GDI 分层窗口:原 WebView 版 inner_size(logical)+set_position(physical)
+    // 混合折算,GDI 版直接按目标屏 scale 折算物理尺寸建窗,逻辑一致。
+    let scale = crate::utils::screen::ScreenUtils::get_scale_factor_at_point(app, physical_x, physical_y);
+    let (physical_w, physical_h) = (
+        ((width as f64 + 10.0) * scale).round() as u32,
+        ((height as f64 + 10.0) * scale).round() as u32,
+    );
+    let image_path = {
+        let map = lock_pin_data();
+        map.get(label).map(|d| d.file_path.clone())
+    };
+    let hwnd = super::gdi::create_gdi_window(label, physical_x, physical_y, physical_w, physical_h, is_preview_label(label))?;
+    if let Some(path) = image_path {
+        super::gdi::render_image(hwnd, &path, 255)?;
+    }
+    Ok(())
 }
 
-// 前端请求获取图片数据
-#[tauri::command]
-pub fn get_pin_image_data(window: WebviewWindow) -> Result<serde_json::Value, String> {
+/// 预览窗口固定标签
+fn is_preview_label(label: &str) -> bool {
+    label == "image-preview"
+}
+
+// 图片数据查询:由 GDI 菜单/另存/清理按标签读 PIN_IMAGE_DATA_MAP。
+// 原命令壳 get_pin_image_data(WebviewWindow 版)随前端删除后无调用者,
+// 按 R37 同标准删除命令注册,服务逻辑保留在 close/save 内部。
+fn pin_image_data(label: &str) -> Result<serde_json::Value, String> {
     let map = lock_pin_data();
-    if let Some(data) = map.get(window.label()) {
+    if let Some(data) = map.get(label) {
         return Ok(json!({
             "file_path": data.file_path,
             "width": data.width,
@@ -295,33 +300,31 @@ pub fn get_pin_image_data(window: WebviewWindow) -> Result<serde_json::Value, St
     Err("未找到图片数据".to_string())
 }
 
-
-// 图片另存为
-#[tauri::command]
-pub async fn save_pin_image_as(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
+// 图片另存为:由 GDI 右键菜单按 label 调用(命令壳已删,保留服务函数)
+pub async fn save_pin_image_as(app: AppHandle, label: String) -> Result<(), String> {
     use std::path::Path;
     use tauri_plugin_dialog::DialogExt;
-    
+
     let file_path = {
         let map = lock_pin_data();
-        if let Some(data) = map.get(window.label()) {
+        if let Some(data) = map.get(&label) {
             data.file_path.clone()
         } else {
             return Err("未找到图片数据".to_string());
         }
     };
-    
+
     let path = Path::new(&file_path);
     if !path.exists() {
         return Err("图片文件不存在".to_string());
     }
-    
-    let filename = format!("QC_{}.png", 
+
+    let filename = format!("QC_{}.png",
         path.file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("image")
     );
-    
+
     let save_path = app.dialog().file()
         .set_file_name(&filename)
         .add_filter("PNG 图片", &["png"])
@@ -329,11 +332,11 @@ pub async fn save_pin_image_as(app: AppHandle, window: WebviewWindow) -> Result<
         .add_filter("所有文件", &["*"])
         .blocking_save_file()
         .ok_or("用户取消保存")?;
-    
+
     let dest = save_path.as_path().ok_or("无效的文件路径")?;
     std::fs::copy(&file_path, dest)
         .map_err(|e| format!("保存失败: {}", e))?;
-    
+
     Ok(())
 }
 
@@ -341,7 +344,7 @@ pub async fn save_pin_image_as(app: AppHandle, window: WebviewWindow) -> Result<
 // close/remove 同样纳入 PREVIEW_WINDOW_LOCK 串行化——否则建窗
 // 流程(pin_image_from_file 预览分支)await create_pin_image_window 期间,并发的
 // close_image_preview 可移除刚 insert 的 PinImageData 并关旧窗,建窗完成新窗
-// show 后其前端 get_pin_image_data 读 map 为空返回 Err,预览窗空屏+穿透残留。
+// 渲染后其数据读 map 为空返回 Err,预览窗空屏+穿透残留。
 // 本函数是同步 fn,取锁必须用 blocking_lock()——tokio::sync::Mutex
 // 的 .lock() 返回一个 future,在同步 fn 里从不被 poll,锁实际从未获取,串行化
 // 形同虚设。blocking_lock 是 tokio Mutex 提供的同步获取方式,与 pin_image_from_file
@@ -349,16 +352,21 @@ pub async fn save_pin_image_as(app: AppHandle, window: WebviewWindow) -> Result<
 #[tauri::command]
 pub fn close_image_preview(app: AppHandle) -> Result<(), String> {
     let label = "image-preview";
-    let _preview_guard = if app.get_webview_window(label).is_some() {
+    let _preview_guard = if super::gdi::find_gdi_window(label).is_some() {
         Some(PREVIEW_WINDOW_LOCK.get_or_init(|| tokio::sync::Mutex::new(())).blocking_lock())
     } else {
         None
     };
-    if let Some(window) = app.get_webview_window(label) {
-        lock_pin_data().remove(label);
-        let _ = window.hide();
-        let _ = window.set_size(Size::Logical(LogicalSize::new(1.0, 1.0)));
-        let _ = window.close();
+    lock_pin_data().remove(label);
+    if let Some(hwnd) = super::gdi::find_gdi_window(label) {
+        let _ = unsafe {
+            windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                hwnd,
+                windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
+                windows::Win32::Foundation::WPARAM(0),
+                windows::Win32::Foundation::LPARAM(0),
+            )
+        };
     }
     Ok(())
 }
@@ -391,17 +399,25 @@ pub fn cleanup_all_pin_images() {
 }
 
 // 关闭贴图窗口
-#[tauri::command]
-pub fn close_pin_image_window_by_self(window: WebviewWindow) -> Result<(), String> {
-    let label = window.label().to_string();
-    cleanup_pin_image_data(&label);
-    let _ = window.set_size(Size::Logical(LogicalSize::new(1.0, 1.0)));
-    window.close().map_err(|e| format!("关闭窗口失败: {}", e))?;
-
+/// 关闭贴图窗口:由 GDI 双键/菜单"关闭"直接调用(命令壳已删,服务函数保留)。
+/// 走 cleanup_pin_image_data 统一清理语义(移除数据 + 删除不再被引用的临时文件),
+/// 然后通知 GDI 层关闭窗口(WM_CLOSE → WM_DESTROY 清理 HWND 表)。
+pub fn close_pin_image_window(label: &str) -> Result<(), String> {
+    cleanup_pin_image_data(label);
+    if let Some(hwnd) = super::gdi::find_gdi_window(label) {
+        let _ = unsafe {
+            windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                hwnd,
+                windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
+                windows::Win32::Foundation::WPARAM(0),
+                windows::Win32::Foundation::LPARAM(0),
+            )
+        };
+    }
     Ok(())
 }
 
-// 启动贴图编辑模式
+/// 启动贴图编辑模式
 #[tauri::command]
 pub async fn start_pin_edit_mode(
     _app: AppHandle,
@@ -418,21 +434,24 @@ pub async fn start_pin_edit_mode(
     Err("贴图编辑功能当前不可用".to_string())
 }
 
-#[tauri::command]
+/// 窗口缩放动画:由 GDI 缩略图切换/窗口缩放调用(命令壳已删,转内部函数)。
+/// 复用原缓动公式 1 - 2^(-10t),逐帧 SetWindowPos(SWP_NOACTIVATE 防抢焦点)。
 pub fn animate_window_resize(
-    window: WebviewWindow,
+    label: String,
     start_w: f64, start_h: f64,
     start_x: i32, start_y: i32,
     end_w: f64, end_h: f64,
     end_x: i32, end_y: i32,
     duration_ms: u64,
 ) -> Result<(), String> {
-    let window = window.clone();
-    
     tauri::async_runtime::spawn(async move {
         let start_time = Instant::now();
         let duration = Duration::from_millis(duration_ms);
         let frame_duration = Duration::from_millis(16);
+        let mut current_w = start_w as u32;
+        let mut current_h = start_h as u32;
+        let mut current_x = start_x as i32;
+        let mut current_y = start_y as i32;
 
         let dw = end_w - start_w;
         let dh = end_h - start_h;
@@ -442,28 +461,45 @@ pub fn animate_window_resize(
         loop {
             let elapsed = start_time.elapsed();
             if elapsed >= duration {
-                let _ = window.set_size(PhysicalSize::new(end_w as u32, end_h as u32));
-                let _ = window.set_position(PhysicalPosition::new(end_x, end_y));
+                let _ = set_gdi_window_geometry(&label, end_w as u32, end_h as u32, end_x, end_y);
                 break;
             }
 
             let progress = elapsed.as_secs_f64() / duration.as_secs_f64();
-
             let eased = 1.0 - 2f64.powf(-10.0 * progress);
 
-            let cur_w = (start_w + dw * eased).round() as u32;
-            let cur_h = (start_h + dh * eased).round() as u32;
-            let cur_x = start_x + (dx as f64 * eased).round() as i32;
-            let cur_y = start_y + (dy as f64 * eased).round() as i32;
+            current_w = (start_w + dw * eased).round() as u32;
+            current_h = (start_h + dh * eased).round() as u32;
+            current_x = start_x + (dx as f64 * eased).round() as i32;
+            current_y = start_y + (dy as f64 * eased).round() as i32;
 
-            let _ = window.set_size(PhysicalSize::new(cur_w, cur_h));
-            let _ = window.set_position(PhysicalPosition::new(cur_x, cur_y));
+            let _ = set_gdi_window_geometry(&label, current_w, current_h, current_x, current_y);
 
             tokio::time::sleep(frame_duration).await;
         }
     });
 
     Ok(())
+}
+
+/// 设置 GDI 窗口几何(尺寸+位置):内部 helper,动画与菜单共用
+fn set_gdi_window_geometry(label: &str, w: u32, h: u32, x: i32, y: i32) -> Result<(), String> {
+    use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOSENDCHANGING};
+    let Some(hwnd) = super::gdi::find_gdi_window(label) else {
+        return Err("贴图窗口不存在".to_string());
+    };
+    unsafe {
+        SetWindowPos(
+            hwnd,
+            Some(HWND_TOPMOST),
+            x,
+            y,
+            w as i32,
+            h as i32,
+            SWP_NOACTIVATE | SWP_NOSENDCHANGING,
+        )
+    }
+    .map_err(|e| format!("调整贴图窗口失败: {}", e))
 }
 
 #[cfg(test)]
@@ -676,9 +712,9 @@ mod tests {
     // close 未纳入串行化:close_image_preview 的 remove+close 必须
     // 与 pin_image_from_file 预览分支共用同一把 PREVIEW_WINDOW_LOCK——否则建窗
     // 流程 await create_pin_image_window 期间并发的 close(菜单 mouseleave/主窗
-    // 隐藏路径)可移除刚 insert 的数据并关旧窗,建窗完成新窗 show 后前端
-    // get_pin_image_data 读 map 空返回 Err,预览窗空屏+穿透残留。close 是同步
-    // fn,阻塞持有锁极短,不拖慢建窗。反证:删 close 的取锁块 → FAILED。
+    // 隐藏路径)可移除刚 insert 的数据并关旧窗,建窗完成新窗渲染后其数据
+    // 读 map 空返回 Err,预览窗空屏+穿透残留。close 是同步 fn,阻塞持有锁
+    // 极短,不拖慢建窗。反证:删 close 的取锁块 → FAILED。
     #[test]
     fn close_image_preview_serialized_under_preview_lock() {
         let src = strip_line_comments(&source_file("src/windows/pin_image_window/pin_image_window.rs"));
@@ -690,11 +726,11 @@ mod tests {
             .find("lock_pin_data().remove(label)")
             .expect("close 必须移除数据");
         let close_call_pos = close_body
-            .find(".close()")
+            .find("PostMessageW")
             .expect("close 必须关闭窗口");
         assert!(
             lock_pos < remove_pos && remove_pos < close_call_pos,
-            "close_image_preview 必须先取锁再 remove 再 close(与建窗流程互斥)"
+            "close_image_preview 必须先取锁再 remove 再关闭窗口(与建窗流程互斥)"
         );
         // 负向:不能先 remove 再取锁(取锁必须在 remove 之前)
         assert!(
@@ -710,6 +746,44 @@ mod tests {
         assert!(
             close_body.contains(".blocking_lock()"),
             "close_image_preview 必须用 .blocking_lock() 同步获取预览锁"
+        );
+    }
+
+    // 贴图窗口必须走 GDI 分层窗口(不再创建 WebView):
+    // 创建路径必须调用 gdi::create_gdi_window,且不得再出现 WebviewWindowBuilder。
+    #[test]
+    fn pin_image_window_is_created_through_gdi() {
+        let stripped: String = source_file("src/windows/pin_image_window/pin_image_window.rs")
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            stripped.contains("gdi::create_gdi_window"),
+            "贴图窗口必须走 gdi::create_gdi_window(GDI 分层窗口)"
+        );
+        assert!(
+            stripped.contains("super::gdi::render_image"),
+            "建窗后必须渲染图片到 GDI 窗口"
+        );
+        assert!(
+            !stripped.contains("WebviewWindowBuilder"),
+            "贴图窗口不得再创建 WebView(WebviewWindowBuilder 已废弃)"
+        );
+    }
+
+    // 预览窗口穿透由 GDI 层处理:pin_image_from_file 内不得再出现
+    // set_ignore_cursor_events(WebView API, GDI 窗口无此方法)。
+    #[test]
+    fn preview_transparency_is_handled_in_gdi_layer() {
+        let stripped: String = source_file("src/windows/pin_image_window/pin_image_window.rs")
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !stripped.contains("set_ignore_cursor_events"),
+            "贴图穿透必须由 GDI 层(WS_EX_TRANSPARENT)处理,不得再调 WebView API"
         );
     }
 }
