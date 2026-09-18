@@ -445,7 +445,7 @@ pub(crate) fn find_gdi_window(label: &str) -> Option<HWND> {
 }
 
 /// 收集全部贴图窗口句柄(focus.rs 排除表用——GDI 窗口不进 tauri webview_windows)
-pub(crate) fn collect_pin_image_hwnds() -> Vec<isize> {
+pub fn collect_pin_image_hwnds() -> Vec<isize> {
     lock_hwnd_map()
         .values()
         .filter(|hwnd| !hwnd.is_invalid())
@@ -580,6 +580,10 @@ mod tests {
             tail.contains("lock_hwnd_map().retain"),
             "WM_DESTROY 必须从 HWND 表移除本窗口"
         );
+        assert!(
+            tail.contains("lock_state_map().remove"),
+            "WM_DESTROY 必须移除本窗口的状态记录"
+        );
     }
 
     // HWND 表 helper 存在(collect_pin_image_hwnds 供 focus.rs 排除表)
@@ -591,8 +595,8 @@ mod tests {
             "必须提供按标签查询句柄的入口"
         );
         assert!(
-            stripped.contains("pub(crate) fn collect_pin_image_hwnds"),
-            "必须提供收集全部贴图句柄的入口(focus.rs 排除表用)"
+            stripped.contains("pub fn collect_pin_image_hwnds"),
+            "必须提供收集全部贴图句柄的入口(focus.rs 排除表用),且为 pub 对外可见"
         );
     }
 }
