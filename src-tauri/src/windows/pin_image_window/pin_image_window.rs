@@ -496,16 +496,17 @@ pub fn animate_window_resize(
     Ok(())
 }
 
-/// 设置 GDI 窗口几何(尺寸+位置):内部 helper,动画与菜单共用
+/// 设置 GDI 窗口几何(尺寸+位置):内部 helper,动画与菜单共用。
 fn set_gdi_window_geometry(label: &str, w: u32, h: u32, x: i32, y: i32) -> Result<(), String> {
-    use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOSENDCHANGING};
+    use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOSENDCHANGING};
     let Some(hwnd) = super::gdi::find_gdi_window(label) else {
         return Err("贴图窗口不存在".to_string());
     };
+    let insert_after = if super::gdi::is_topmost(hwnd) { HWND_TOPMOST } else { HWND_NOTOPMOST };
     unsafe {
         SetWindowPos(
             hwnd,
-            Some(HWND_TOPMOST),
+            Some(insert_after),
             x,
             y,
             w as i32,
@@ -783,6 +784,36 @@ mod tests {
         assert!(
             !stripped.contains("WebviewWindowBuilder"),
             "贴图窗口不得再创建 WebView(WebviewWindowBuilder 已废弃)"
+        );
+    }
+
+    // 窗口几何/动画不得改变置顶状态:set_gdi_window_geometry 用窗口当前
+    // 置顶状态选 hWndInsertAfter(TOPMOST/NOTOPMOST)——SetWindowPos 只按
+    // 插入点生效,若固定 HWND_TOPMOST,一次动画就把用户取消的置顶给恢复。
+    #[test]
+    fn window_resize_keeps_topmost_state() {
+        let stripped: String = source_file("src/windows/pin_image_window/pin_image_window.rs")
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = stripped
+            .find("fn set_gdi_window_geometry")
+            .expect("缺 set_gdi_window_geometry");
+        let rest = &stripped[start..];
+        let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(stripped.len());
+        let body = &stripped[start..end];
+        assert!(
+            body.contains("gdi::is_topmost(hwnd)"),
+            "几何变更必须按窗口当前置顶状态选插入点"
+        );
+        assert!(
+            body.contains("HWND_NOTOPMOST"),
+            "非置顶窗口必须用 HWND_NOTOPMOST 插入点,否则动画偷回置顶"
+        );
+        assert!(
+            !body.contains("Some(HWND_TOPMOST)") && !body.contains("HWND_TOPMOST,"),
+            "不得无条件 HWND_TOPMOST 插入(会覆盖用户取消的置顶)"
         );
     }
 
