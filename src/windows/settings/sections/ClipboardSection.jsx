@@ -157,7 +157,12 @@ function ClipboardSection({
         </SettingItem>
 
         <SettingItem label={t('settings.clipboard.edgeHideOffset')} description={t('settings.clipboard.edgeHideOffsetDesc')}>
-          <Input type="number" value={settings.edgeHideOffset ?? 3} onChange={e => onSettingChange('edgeHideOffset', parseInt(e.target.value))} min={0} max={50} className="w-24" suffix={t('settings.common.pixels')} />
+          <Input type="number" value={settings.edgeHideOffset ?? 3} onChange={e => {
+            const next = parseInt(e.target.value)
+            // 清空/非法输入(空串 → NaN)保留现有设置,不把 NaN 写进设置
+            const value = Number.isFinite(next) ? Math.min(50, Math.max(0, next)) : settings.edgeHideOffset
+            onSettingChange('edgeHideOffset', value)
+          }} min={0} max={50} className="w-24" suffix={t('settings.common.pixels')} />
         </SettingItem>
 
         <SettingItem label={t('settings.clipboard.autoScrollToTop')} description={t('settings.clipboard.autoScrollToTopDesc')}>

@@ -41,7 +41,7 @@ function SoundSection({
         </SettingItem>
 
         <SettingItem label={t('settings.sound.volume')} description={t('settings.sound.volumeDesc')}>
-          <Slider value={settings.soundVolume || 50} onChange={value => onSettingChange('soundVolume', value)} min={0} max={100} step={5} unit="%" className="w-64" />
+          <Slider value={settings.soundVolume ?? 50} onChange={value => onSettingChange('soundVolume', value)} min={0} max={100} step={5} unit="%" className="w-64" />
         </SettingItem>
 
         <SettingItem label={t('settings.sound.copySound')} description={t('settings.sound.copySoundDesc')}>
