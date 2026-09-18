@@ -10,7 +10,8 @@
 //
 // 阴影/像素级显示在 GDI 下无 CSS filter 等价物:shadow 记录开关状态(视觉
 // 阴影留 DIB 边框增强项),pixel_render 记录状态(重渲染时最近邻缩放增强项)。
-// 两者与 lock_position/restore_mode/opacity 同进每窗口状态,由 T4 持久化。
+// 两者与 lock_position/restore_mode/opacity 同进每窗口状态,由全局设置
+// 文件持久化(gdi_settings)。
 
 use windows::Win32::Foundation::{HMENU, HWND, POINT};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -215,8 +216,8 @@ pub(crate) fn handle_pin_menu_action(label: &str, hwnd: HWND, id: usize) -> Resu
             Ok(())
         }
         PinMenuId::OpacityCustom as usize => {
-            // 自定义透明度经 input_dialog 命令输入;T4 接线持久化前保留占位
-            Err("自定义透明度待 T4 接线".to_string())
+            // 自定义透明度经 input_dialog 命令输入;接线持久化前保留占位
+            Err("自定义透明度待接线".to_string())
         }
         PinMenuId::Copy as usize => {
             let path = pin_image_window::pin_image_file_path(label)?;

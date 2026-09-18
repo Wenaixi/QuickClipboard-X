@@ -5,18 +5,11 @@
 // 新贴图窗口创建时按此默认应用(置顶/阴影/锁定/像素级/透明度/缩略图
 // 恢复模式),菜单里改的开关与透明度写回此文件,跨窗口一致。
 //
-// 对齐原前端 8 项默认值(settings.js DEFAULT_SETTINGS):
-//   alwaysOnTop false / shadow false / lockPosition false / pixelRender false
-//   opacity 100 / thumbnailMode false / thumbnailRestoreMode "follow"
-//   savedThumbnailPosition null
-// 其中 alwaysOnTop 由 gdi 层 toggle_topmost 运行时读窗口扩展样式处理,
-// thumbnailMode 进入交互任务(R1-b)后按窗口即时状态,两者不在此文件
-// 持有布尔默认(状态表已在 gdi::PinWindowState),文件只存:
-//   shadow / lockPosition / pixelRender / opacity / restoreMode
-// 5 项可跨窗口共享的偏好 + thumbnail_restore_mode 对齐原 key 命名。
-//
 // 失败策略:文件缺失/损坏时静默回退默认值并重写干净文件,绝不让
 // 贴图功能因设置文件问题而不可用。
+//
+// 文件只存 5 项可跨窗口共享的偏好;置顶是运行时窗口扩展样式,缩略图
+// 模式进入交互任务后按窗口即时状态,两者都不在此文件持有布尔默认。
 
 use std::fs;
 use std::path::PathBuf;

@@ -1,7 +1,7 @@
 // 贴图 GDI 分层窗口实现
 //
 // 目标:把贴图窗口从"每图一个 WebView(约 40-100MB renderer)"换成原生
-// GDI 分层窗口,内存占用趋近于零。本文件是 R0-a 的核心——窗口类注册、
+// GDI 分层窗口,内存占用趋近于零。本文件是核心——窗口类注册、
 // CreateWindowExW(WS_EX_LAYERED) 建窗、DIB 位图渲染(UpdateLayeredWindow)、
 // 消息循环、HWND 表。
 //
@@ -22,7 +22,6 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use once_cell::sync::OnceCell;
-use serde::{Deserialize, Serialize};
 
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM};
@@ -53,10 +52,9 @@ fn lock_hwnd_map() -> std::sync::MutexGuard<'static, HashMap<String, HWND>> {
         .unwrap_or_else(|p| p.into_inner())
 }
 
-/// 每窗口运行时状态:菜单 T3 交互需要(e.g. 阴影/锁定/像素级开关、恢复模式、
-/// 透明度)。状态跨线程共享由 GDI 层 Mutex 保护;T4 持久化到磁盘。
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(default)]
+/// 每窗口运行时状态:菜单交互需要(e.g. 阴影/锁定/像素级开关、恢复模式、
+/// 透明度)。状态跨线程共享由 GDI 层 Mutex 保护;持久化由 gdi_settings 完成。
+#[derive(Clone, Debug)]
 pub(crate) struct PinWindowState {
     pub shadow: bool,
     pub lock_position: bool,
@@ -81,8 +79,8 @@ impl Default for PinWindowState {
 
 /// 全局贴图窗口默认状态(新窗口默认应用;与前端旧 localStorage 默认 8 项
 /// 对齐:alwaysOnTop/shadow/lockPosition/pixelRender/opacity 100/thumbnailMode
-/// false/thumbnailRestoreMode follow/savedThumbnailPosition null)。由 T4
-/// 从磁盘文件加载;这里提供默认值保证 GDI 建窗前状态可用。
+/// false/thumbnailRestoreMode follow/savedThumbnailPosition null)。由
+/// gdi_settings 从磁盘文件加载注入;这里提供默认值保证建窗前状态可用。
 static PIN_DEFAULT_STATE: OnceCell<PinWindowState> = OnceCell::new();
 
 /// 取全局默认状态(未初始化时返回内置默认)
@@ -202,8 +200,8 @@ pub(crate) fn create_gdi_window(
 
     // 置顶偏好:默认建窗置顶(WS_EX_TOPMOST),菜单可切换置顶(对齐原版
     // alwaysOnTop 默认 false 到 WebView 窗口置顶行为)。全局默认状态
-    // shadow/lock_position/pixel_render/opacity/restore_mode 由 T4 加载;
-    // 置顶是运行时窗口扩展样式,不落状态表。
+    // shadow/lock_position/pixel_render/opacity/restore_mode 由 gdi_settings
+    // 加载注入;置顶是运行时窗口扩展样式,不落状态表。
     let mut ex_style = WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
     if preview {
         ex_style |= WS_EX_TRANSPARENT;
@@ -409,7 +407,7 @@ unsafe extern "system" fn pin_image_window_proc(
         WM_CREATE => LRESULT(0),
         WM_ACTIVATE | WM_NCHITTEST | WM_LBUTTONDOWN | WM_LBUTTONUP | WM_LBUTTONDBLCLK
         | WM_MOUSEMOVE | WM_MOUSEWHEEL => DefWindowProcW(hwnd, msg, wparam, lparam),
-        // 右键菜单:在光标处弹出 T3 原生菜单,选中后分发动作再返回 0
+        // 右键菜单:在光标处弹出原生菜单,选中后分发动作再返回 0
         WM_RBUTTONUP => {
             let Some(label) = label_for_hwnd(hwnd) else {
                 return LRESULT(0);
