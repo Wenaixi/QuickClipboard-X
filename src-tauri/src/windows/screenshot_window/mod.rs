@@ -749,6 +749,24 @@ mod source_guards {
         assert!(!source.contains("fs:default"));
         assert!(!source.contains("\"path\": \"**\""));
     }
+
+    #[test]
+    fn capability_array_references_the_screenshot_capability() {
+        let source = source_file("../tauri.conf.json");
+        // 只匹配 capabilities 数组块内，避免误命中窗口声明的同名 label 字面。
+        let start = source
+            .find("\"capabilities\": [")
+            .expect("tauri.conf.json 缺少 capabilities 数组");
+        let rest = &source[start..];
+        let end = rest.find(']').expect("capabilities 数组缺少结束符");
+        let array = &rest[..end];
+        // 数组非空时 Tauri 只按逐项列出的能力加载，截图能力文件必须被数组引用，
+        // 否则截图窗口的 core 事件/窗口权限在运行时被过滤掉。
+        assert!(
+            array.contains("\"screenshot\""),
+            "capabilities 数组必须包含 screenshot 能力项"
+        );
+    }
 }
 
 fn cleanup_plan(plan: crate::services::screenshot::CleanupPlan, app: &AppHandle) -> Result<(), String> {
