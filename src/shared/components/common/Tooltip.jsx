@@ -244,7 +244,7 @@ export default function Tooltip({
     );
 
     setPosition({ top: clampedTop, left: clampedLeft });
-    setEffectivePlacement((prev) => (prev === base.placement ? prev : base.placement));
+    setEffectivePlacement(base.placement);
 
     const triggerCenterX = triggerRect.left + triggerRect.width / 2;
     const triggerCenterY = triggerRect.top + triggerRect.height / 2;
