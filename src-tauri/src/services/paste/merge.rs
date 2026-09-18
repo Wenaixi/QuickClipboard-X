@@ -1,5 +1,3 @@
-use std::io::Cursor;
-
 use base64::{engine::general_purpose, Engine as _};
 use clipboard_rs::ClipboardContext;
 use image::ImageFormat;
@@ -252,25 +250,6 @@ fn normalize_image_content(item: &ClipboardItem) -> Result<String, String> {
     });
 
     Ok(format!("files:{}", file_data))
-}
-
-fn image_path_to_data_url(path: &str) -> Result<String, String> {
-    let bytes = std::fs::read(path).map_err(|e| format!("读取图片失败 [{}]: {}", path, e))?;
-    let image = image::ImageReader::new(Cursor::new(bytes))
-        .with_guessed_format()
-        .map_err(|e| format!("识别图片格式失败 [{}]: {}", path, e))?
-        .decode()
-        .map_err(|e| format!("解码图片失败 [{}]: {}", path, e))?;
-
-    let mut png_data = Vec::new();
-    image
-        .write_to(&mut Cursor::new(&mut png_data), ImageFormat::Png)
-        .map_err(|e| format!("编码图片失败 [{}]: {}", path, e))?;
-
-    Ok(format!(
-        "data:image/png;base64,{}",
-        general_purpose::STANDARD.encode(png_data)
-    ))
 }
 
 fn image_path_to_data_url_fast(path: &str) -> Result<String, String> {
