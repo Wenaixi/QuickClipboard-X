@@ -33,7 +33,6 @@ pub fn mark_paste_operation() {
 enum SoundCommand {
     PlayFile(PathBuf, f32),
     PlayBytes(&'static [u8], f32),
-    PlayBeep(f32, u64, f32),
 }
 
 static SOUND_SENDER: Lazy<Sender<SoundCommand>> = Lazy::new(|| {
@@ -82,7 +81,6 @@ impl AudioContext {
         let sink = match cmd {
             SoundCommand::PlayFile(path, volume) => play_file(&self.handle, path, *volume),
             SoundCommand::PlayBytes(bytes, volume) => play_bytes(&self.handle, bytes, *volume),
-            SoundCommand::PlayBeep(freq, dur, vol) => play_beep(&self.handle, *freq, *dur, *vol),
         }?;
 
         self.sinks.push(sink);
@@ -186,24 +184,6 @@ fn play_bytes(handle: &OutputStreamHandle, bytes: &'static [u8], volume: f32) ->
     Ok(sink)
 }
 
-fn play_beep(handle: &OutputStreamHandle, frequency: f32, duration_ms: u64, volume: f32) -> Result<Sink, String> {
-    let sink = Sink::try_new(handle).map_err(|e| e.to_string())?;
-
-    let sample_rate = 44100u32;
-    let duration_samples = ((sample_rate as f64 * duration_ms as f64) / 1000.0) as usize;
-    let two_pi_freq = 2.0 * std::f32::consts::PI * frequency;
-    let sample_rate_f = sample_rate as f32;
-
-    let samples: Vec<f32> = (0..duration_samples)
-        .map(|i| (two_pi_freq * i as f32 / sample_rate_f).sin())
-        .collect();
-
-    let source = rodio::buffer::SamplesBuffer::new(1, sample_rate, samples);
-    sink.set_volume(volume);
-    sink.append(source);
-    Ok(sink)
-}
-
 #[inline]
 fn send_command(cmd: SoundCommand) {
     let _ = SOUND_SENDER.send(cmd);
@@ -220,11 +200,6 @@ impl SoundPlayer {
     #[inline]
     pub fn play_bytes(bytes: &'static [u8], volume: f32) {
         send_command(SoundCommand::PlayBytes(bytes, volume));
-    }
-
-    #[inline]
-    pub fn play_beep(frequency: f32, duration_ms: u64, volume: f32) {
-        send_command(SoundCommand::PlayBeep(frequency, duration_ms, volume));
     }
 }
 

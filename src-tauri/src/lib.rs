@@ -300,7 +300,6 @@ pub fn run() {
                 commands::enter_low_memory_mode,
                 commands::exit_low_memory_mode,
                 commands::is_low_memory_mode,
-                commands::play_beep,
                 commands::play_copy_sound,
                 commands::play_paste_sound,
                 commands::play_scroll_sound,

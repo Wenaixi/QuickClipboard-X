@@ -1,12 +1,6 @@
 use crate::services::sound::{SoundPlayer, AppSounds};
 
 #[tauri::command]
-pub fn play_beep(frequency: f32, duration_ms: u64, volume: f32) -> Result<(), String> {
-    SoundPlayer::play_beep(frequency, duration_ms, volume);
-    Ok(())
-}
-
-#[tauri::command]
 pub fn play_copy_sound() {
     AppSounds::play_copy();
 }
