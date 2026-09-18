@@ -164,23 +164,37 @@ pub(crate) fn show_pin_menu(hwnd: HWND, label: &str) -> Result<usize, String> {
     Ok(selected.0 as usize)
 }
 
-/// 处理菜单选中的动作。label 为贴图窗口标签。
+/// 处理菜单选中的动作。label 为贴图窗口标签。透明度档与开关切换写回
+/// 每窗口状态(GDI 状态表),同时落盘共享偏好设置文件(跨窗口一致)。
+/// 由 WM_RBUTTONUP 在 UI 线程调用,状态写入轻量无阻塞。
 pub(crate) fn handle_pin_menu_action(label: &str, hwnd: HWND, id: usize) -> Result<(), String> {
     if let Some(opacity) = opacity_from_id(id) {
         let mut state = gdi::pin_state(label);
         state.opacity = opacity as u8;
         gdi::set_pin_state(label, state);
+        persist_state_preferences(label);
         return gdi::render_current(label, hwnd);
     }
 
     match id {
-        PinMenuId::ToggleTop as usize => gdi::toggle_topmost(hwnd),
-        PinMenuId::ToggleShadow as usize => gdi::toggle_state_bool(label, gdi::PinStateFlag::Shadow),
+        PinMenuId::ToggleTop as usize => {
+            gdi::toggle_topmost(hwnd)?;
+            Ok(())
+        }
+        PinMenuId::ToggleShadow as usize => {
+            gdi::toggle_state_bool(label, gdi::PinStateFlag::Shadow)?;
+            persist_state_preferences(label);
+            Ok(())
+        }
         PinMenuId::ToggleLockPosition as usize => {
-            gdi::toggle_state_bool(label, gdi::PinStateFlag::LockPosition)
+            gdi::toggle_state_bool(label, gdi::PinStateFlag::LockPosition)?;
+            persist_state_preferences(label);
+            Ok(())
         }
         PinMenuId::TogglePixelRender as usize => {
-            gdi::toggle_state_bool(label, gdi::PinStateFlag::PixelRender)
+            gdi::toggle_state_bool(label, gdi::PinStateFlag::PixelRender)?;
+            persist_state_preferences(label);
+            Ok(())
         }
         PinMenuId::ToggleThumbnail as usize => {
             // 缩略图切换:窗口缩放动画到 50x50。完整恢复语义(记录原尺寸/
@@ -191,10 +205,14 @@ pub(crate) fn handle_pin_menu_action(label: &str, hwnd: HWND, id: usize) -> Resu
             Ok(())
         }
         PinMenuId::RestoreModeFollow as usize => {
-            gdi::set_state_str(label, gdi::PinStateFlag::RestoreMode, "follow")
+            gdi::set_state_str(label, gdi::PinStateFlag::RestoreMode, "follow")?;
+            persist_state_preferences(label);
+            Ok(())
         }
         PinMenuId::RestoreModeKeep as usize => {
-            gdi::set_state_str(label, gdi::PinStateFlag::RestoreMode, "keep")
+            gdi::set_state_str(label, gdi::PinStateFlag::RestoreMode, "keep")?;
+            persist_state_preferences(label);
+            Ok(())
         }
         PinMenuId::OpacityCustom as usize => {
             // 自定义透明度经 input_dialog 命令输入;T4 接线持久化前保留占位
@@ -217,6 +235,24 @@ pub(crate) fn handle_pin_menu_action(label: &str, hwnd: HWND, id: usize) -> Resu
         }
         PinMenuId::Close as usize => pin_image_window::close_pin_image_window(label),
         _ => Err("未知菜单项".to_string()),
+    }
+}
+
+/// 把当前窗口的可共享偏好(阴影/锁定/像素级/透明度/恢复模式)写回全局
+/// 设置文件,让后续新建的贴图窗口继承本次选择(对齐原版 localStorage
+/// 每窗口独立,这里一处全局,多开窗口行为一致)。写盘失败仅告警不阻断
+/// 菜单操作——设置文件是偏好,不是关键路径。
+fn persist_state_preferences(label: &str) {
+    let state = gdi::pin_state(label);
+    let settings = super::gdi_settings::PinImageSettings {
+        shadow: state.shadow,
+        lock_position: state.lock_position,
+        pixel_render: state.pixel_render,
+        opacity: state.opacity,
+        thumbnail_restore_mode: state.restore_mode.clone(),
+    };
+    if let Err(e) = super::gdi_settings::save_pin_image_settings(&settings) {
+        eprintln!("保存贴图设置失败: {}", e);
     }
 }
 
@@ -344,6 +380,33 @@ mod tests {
         assert!(
             menu_body.contains("gdi::window_is_topmost(label)"),
             "置顶勾选必须查询窗口实时置顶状态"
+        );
+    }
+
+    // 透明度档与共享偏好(阴影/锁定/像素级/恢复模式)切换后必须把状态
+    // 落盘到全局设置文件(persist_state_preferences),新窗口才能继承。
+    #[test]
+    fn menu_state_changes_persist_to_global_settings() {
+        let src = stripped_source();
+        let body_start = src
+            .find("pub(crate) fn handle_pin_menu_action")
+            .expect("缺 handle_pin_menu_action");
+        let body = &src[body_start..];
+        assert!(
+            body.contains("persist_state_preferences(label)"),
+            "菜单状态切换必须持久化到全局设置"
+        );
+        let persist_start = src
+            .find("fn persist_state_preferences")
+            .expect("缺 persist_state_preferences");
+        let persist_body = &src[persist_start..];
+        assert!(
+            persist_body.contains("save_pin_image_settings"),
+            "持久化必须走 gdi_settings::save_pin_image_settings"
+        );
+        assert!(
+            persist_body.contains("eprintln!(\"保存贴图设置失败"),
+            "写盘失败必须告警(不阻断菜单操作)"
         );
     }
 }

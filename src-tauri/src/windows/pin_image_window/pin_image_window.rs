@@ -43,6 +43,8 @@ pub fn init_pin_image_window() {
     if let Some(app) = crate::services::store::app_handle_raw() {
         super::gdi::init_app_handle(app);
     }
+    // 加载贴图设置文件并注入 GDI 默认状态(新窗口按此应用偏好)
+    super::gdi_settings::init_pin_image_settings();
 }
 
 

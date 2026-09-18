@@ -22,6 +22,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use once_cell::sync::OnceCell;
+use serde::{Deserialize, Serialize};
 
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM};
@@ -54,7 +55,8 @@ fn lock_hwnd_map() -> std::sync::MutexGuard<'static, HashMap<String, HWND>> {
 
 /// 每窗口运行时状态:菜单 T3 交互需要(e.g. 阴影/锁定/像素级开关、恢复模式、
 /// 透明度)。状态跨线程共享由 GDI 层 Mutex 保护;T4 持久化到磁盘。
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
 pub(crate) struct PinWindowState {
     pub shadow: bool,
     pub lock_position: bool,
@@ -75,6 +77,22 @@ impl Default for PinWindowState {
             thumbnail_mode: false,
         }
     }
+}
+
+/// 全局贴图窗口默认状态(新窗口默认应用;与前端旧 localStorage 默认 8 项
+/// 对齐:alwaysOnTop/shadow/lockPosition/pixelRender/opacity 100/thumbnailMode
+/// false/thumbnailRestoreMode follow/savedThumbnailPosition null)。由 T4
+/// 从磁盘文件加载;这里提供默认值保证 GDI 建窗前状态可用。
+static PIN_DEFAULT_STATE: OnceCell<PinWindowState> = OnceCell::new();
+
+/// 取全局默认状态(未初始化时返回内置默认)
+pub(crate) fn default_pin_state() -> PinWindowState {
+    PIN_DEFAULT_STATE.get().cloned().unwrap_or_default()
+}
+
+/// 设定全局默认状态(启动时从持久化文件加载后调用)
+pub(crate) fn set_default_pin_state(state: PinWindowState) {
+    let _ = PIN_DEFAULT_STATE.set(state);
 }
 
 /// 状态位开关(菜单切换用,避免逐个字段 setter)
@@ -98,7 +116,10 @@ fn lock_state_map() -> std::sync::MutexGuard<'static, HashMap<String, PinWindowS
 
 /// 读取窗口状态(缺省用默认值)
 pub(crate) fn pin_state(label: &str) -> PinWindowState {
-    lock_state_map().get(label).cloned().unwrap_or_default()
+    lock_state_map()
+        .get(label)
+        .cloned()
+        .unwrap_or_else(default_pin_state)
 }
 
 /// 写回窗口状态
@@ -179,6 +200,10 @@ pub(crate) fn create_gdi_window(
 ) -> Result<HWND, String> {
     register_window_class()?;
 
+    // 置顶偏好:默认建窗置顶(WS_EX_TOPMOST),菜单可切换置顶(对齐原版
+    // alwaysOnTop 默认 false 到 WebView 窗口置顶行为)。全局默认状态
+    // shadow/lock_position/pixel_render/opacity/restore_mode 由 T4 加载;
+    // 置顶是运行时窗口扩展样式,不落状态表。
     let mut ex_style = WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
     if preview {
         ex_style |= WS_EX_TRANSPARENT;
@@ -186,8 +211,10 @@ pub(crate) fn create_gdi_window(
 
     let class_name: Vec<u16> = PIN_IMAGE_WINDOW_CLASS.encode_utf16().collect();
     let title: Vec<u16> = "贴图".encode_utf16().collect();
-    // 建窗同时登记状态(缺省)
-    lock_state_map().entry(label.to_string()).or_default();
+    // 建窗同时登记状态:继承全局默认(置顶/阴影/锁定/像素级/透明度/恢复模式)
+    lock_state_map()
+        .entry(label.to_string())
+        .or_insert_with(|| pin_state(label));
 
     let hwnd = unsafe {
         CreateWindowExW(
