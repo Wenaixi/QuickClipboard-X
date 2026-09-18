@@ -92,6 +92,38 @@ mod settings_window_guard {
         );
     }
 
+    // 设置侧边栏必须保留截图节导航项:App.jsx 渲染 switch 有 case 'screenshot'
+    // 分支、ScreenshotSection 组件/语言包/后端命令全链路存留,唯独导航项在
+    // 上游合并时被裁决丢出——上游真删了截图,合并逐块裁决把本地这一项也
+    // 一并丢成"与上游一致"。侧边栏与设置搜索(sections 语言包同缺)双双
+    // 失去入口后,截图设置节成为死分支,14 个截图设置项永久无法配置。
+    #[test]
+    fn settings_sidebar_keeps_screenshot_navigation_item() {
+        let src = strip_line_comments(&source_file(
+            "../src/windows/settings/components/SettingsSidebar.jsx",
+        ));
+        assert!(
+            src.contains("id: 'screenshot'"),
+            "侧边栏导航必须保留截图节入口,否则 case 'screenshot' 分支不可达"
+        );
+        for (path, expected) in [
+            ("../src/shared/locales/zh-CN.json", "\"screenshot\": \"截图设置\""),
+            ("../src/shared/locales/en-US.json", "\"screenshot\": \"Screenshot\""),
+        ] {
+            let locale = std::fs::read_to_string(format!(
+                "{}/{}",
+                env!("CARGO_MANIFEST_DIR"),
+                path
+            ))
+            .expect("读取语言包失败");
+            assert!(
+                locale.contains(expected),
+                "语言包 {} 必须保留截图分组名,否则设置搜索与侧边栏无法展示",
+                path
+            );
+        }
+    }
+
     // 设置搜索高亮必须转义正则特殊字符:SettingsSearch 用用户输入的查询串
     // 构造 `(query)` 正则做 split 高亮,若不经 escapeRegExp 直接拼接,用户
     // 输入半角括号/星号/左方括号等字符会抛 "Invalid regular expression"
