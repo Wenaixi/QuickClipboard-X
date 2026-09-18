@@ -266,3 +266,54 @@ fn notify_lan_change(reason: &'static str) {
         crate::services::sync_transfer::lan_notify_local_change(app, reason);
     }
 }
+
+#[cfg(test)]
+mod favorite_html_preserved_guard {
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+    // 富文本收藏(html_content 非空)改标题或取色时必须把 html_content
+    // 原样带回 updateFavorite——数据库层对 html_content=None 会显式写
+    // NULL 清掉旧 HTML,若调用方只传 4 个参数,纯标题/取色更新就会
+    // 悄悄抹掉富文本列,前端富文本渲染降级为纯文本且不可恢复。
+    #[test]
+    fn title_save_forwards_html_content() {
+        // JSX 函数是 const 箭头函数签名,fn_body(Rust 签名解析)不适用,
+        // 直接对整文件做剥注释后的源码字面断言。
+        let src = strip_line_comments(&source_file(
+            "../src/windows/main/components/FavoriteItem.jsx",
+        ));
+        assert!(
+            src.contains(
+                "updateFavorite(item.id, newTitle, item.content, item.group_name, item.html_content)"
+            ),
+            "标题保存必须携带 item.html_content,否则改标题会清掉富文本列"
+        );
+    }
+
+    // 取色器保存路径(剪贴板内容取色后写回收藏)与标题保存同款:
+    // 必须带 item.html_content,否则取色更新把富文本抹成 NULL。
+    #[test]
+    fn color_save_forwards_html_content() {
+        let src = strip_line_comments(&source_file(
+            "../src/windows/main/components/ClipboardContent/TextContent.jsx",
+        ));
+        assert!(
+            src.contains(
+                "updateFavorite(item.id, item.title || '', nextContent, item.group_name, item.html_content)"
+            ),
+            "取色保存收藏必须携带 item.html_content,否则清掉富文本列"
+        );
+    }
+
+    // 命令壳必须把 html_content 参数原样透传给数据库层 update_favorite,
+    // 不得在命令壳丢弃——否则前端无论传什么,后端都写 NULL。
+    #[test]
+    fn update_quick_text_forwards_html_content_to_db() {
+        let src = strip_line_comments(&source_file("src/commands/favorites.rs"));
+        let body = fn_body(&src, "update_quick_text");
+        assert!(
+            body.contains("db_update_favorite(id, title, content, group_name, html_content)"),
+            "update_quick_text 必须把 html_content 透传给数据库层"
+        );
+    }
+}

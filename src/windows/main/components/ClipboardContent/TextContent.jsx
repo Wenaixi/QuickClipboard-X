@@ -130,7 +130,7 @@ function TextContent({
 
       if (source === 'favorite') {
         const { updateFavorite } = await import('@shared/api/favorites');
-        await updateFavorite(item.id, item.title || '', nextContent, item.group_name);
+        await updateFavorite(item.id, item.title || '', nextContent, item.group_name, item.html_content);
       } else {
         const { updateClipboardItem } = await import('@shared/api/clipboard');
         await updateClipboardItem(item.id, nextContent);

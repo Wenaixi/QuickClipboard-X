@@ -391,7 +391,7 @@ function FavoriteItem({
     const newTitle = nextTitle.trim();
     if (newTitle !== (item.title || '').trim()) {
       try {
-        await updateFavorite(item.id, newTitle, item.content, item.group_name);
+        await updateFavorite(item.id, newTitle, item.content, item.group_name, item.html_content);
         await refreshFavorites();
         toast.success(t('common.saved'), {
           size: TOAST_SIZES.EXTRA_SMALL,
