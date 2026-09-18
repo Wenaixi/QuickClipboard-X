@@ -143,16 +143,11 @@ export async function setupClipboardEventListener() {
     })
     unlisteners.push(unlisten2)
 
-    const unlisten3 = await listen('refreshQuickTexts', () => {
-      refreshFavorites(groupsStore.currentGroup).catch(() => {})
-    })
-    unlisteners.push(unlisten3)
-
-    const unlisten4 = await listen('main-window-refresh-needed', (event) => {
+    const unlisten3 = await listen('main-window-refresh-needed', (event) => {
       const payload = event.payload || {}
       handleMainWindowRefreshNeeded(payload).catch(() => {})
     })
-    unlisteners.push(unlisten4)
+    unlisteners.push(unlisten3)
   } catch (error) {
     console.error('设置事件监听失败:', error)
   }
