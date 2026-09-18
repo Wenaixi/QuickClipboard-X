@@ -3,6 +3,7 @@ import { useState, useMemo, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import './SettingsSearch.css';
 import { navigationItems } from './SettingsSidebar';
+import { escapeRegExp } from '@shared/utils/highlightText';
 
 function SettingsSearch({ onNavigate, className = '' }) {
   const { t, i18n } = useTranslation();
@@ -154,13 +155,14 @@ function SettingsSearch({ onNavigate, className = '' }) {
   // 高亮匹配文本
   const highlightMatch = (text, query) => {
     if (!query) return text;
-    
-    const regex = new RegExp(`(${query})`, 'gi');
+
+    const escaped = escapeRegExp(query);
+    const regex = new RegExp(`(${escaped})`, 'gi');
     const parts = text.split(regex);
-    
-    return parts.map((part, index) => 
-      regex.test(part) ? 
-        <mark key={index} className="settings-search-highlight">{part}</mark> : 
+
+    return parts.map((part, index) =>
+      regex.test(part) ?
+        <mark key={index} className="settings-search-highlight">{part}</mark> :
         part
     );
   };

@@ -26,7 +26,7 @@ export function highlightText(text, keyword) {
 }
 
 // 转义正则表达式特殊字符
-function escapeRegExp(string) {
+export function escapeRegExp(string) {
   return string.replace(/[.*+?^${}()|[\]\\]/g, (match) => '\\' + match);
 }
 

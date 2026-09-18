@@ -92,6 +92,42 @@ mod settings_window_guard {
         );
     }
 
+    // 设置搜索高亮必须转义正则特殊字符:SettingsSearch 用用户输入的查询串
+    // 构造 `(query)` 正则做 split 高亮,若不经 escapeRegExp 直接拼接,用户
+    // 输入半角括号/星号/左方括号等字符会抛 "Invalid regular expression"
+    // 运行时异常,界面立即崩溃。共享 highlightText 已导出转义能力,这里
+    // 断言必须复用(不得本地重复实现,也不得裸拼接)。
+    #[test]
+    fn settings_search_escapes_regex_special_characters() {
+        let src = strip_line_comments(&source_file(
+            "../src/windows/settings/components/SettingsSearch.jsx",
+        ));
+        assert!(
+            src.contains("from '@shared/utils/highlightText'"),
+            "必须从共享 highlightText 导入转义实现"
+        );
+        assert!(
+            !src.contains("function escapeRegExp"),
+            "不得在本地重复定义 escapeRegExp"
+        );
+        // 高亮分支前必须先完成转义:调用点必须是 escapeRegExp(query) 直呼,
+        // 下标顺序断言转义调用早于正则构造,防止"导入但未在构造前使用"。
+        let call_pos = src
+            .find("escapeRegExp(query)")
+            .expect("高亮前必须调用 escapeRegExp(query) 转义搜索查询");
+        let regex_pos = src
+            .find("new RegExp")
+            .expect("设置搜索必须构造高亮正则");
+        assert!(
+            call_pos < regex_pos,
+            "escapeRegExp(query) 必须位于 RegExp 构造之前"
+        );
+        assert!(
+            !src.contains("new RegExp(`(${query})`"),
+            "禁止以未转义的 query 直接构造高亮正则"
+        );
+    }
+
     // 恢复路径:设置窗口关闭(CloseRequested/Destroyed)必须按快照恢复
     // 导航键——打开时已禁用,不恢复则设置窗口关闭后主窗口导航键静默缺失。
     #[test]
