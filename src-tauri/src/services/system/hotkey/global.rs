@@ -878,12 +878,6 @@ pub fn get_shortcut_statuses() -> Vec<ShortcutStatus> {
     status_map.values().cloned().collect()
 }
 
-// 获取单个快捷键状态
-pub fn get_shortcut_status(id: &str) -> Option<ShortcutStatus> {
-    let status_map = SHORTCUT_STATUS.lock();
-    status_map.get(id).cloned()
-}
-
 // 清除快捷键状态（pub: navigation.rs 注销导航键时清除对应 id 状态，
 // 导航 id 不在 REGISTERED_SHORTCUTS，unregister_all 的清理覆盖不到）
 pub fn clear_shortcut_status(id: &str) {

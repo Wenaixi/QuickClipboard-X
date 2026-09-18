@@ -286,12 +286,6 @@ pub fn get_shortcut_statuses() -> Vec<crate::hotkey::ShortcutStatus> {
     crate::hotkey::get_shortcut_statuses()
 }
 
-// 获取单个快捷键状态
-#[tauri::command]
-pub fn get_shortcut_status(id: String) -> Option<crate::hotkey::ShortcutStatus> {
-    crate::hotkey::get_shortcut_status(&id)
-}
-
 // 切换剪贴板监听状态
 pub fn toggle_clipboard_monitor(app: &tauri::AppHandle) -> Result<(), String> {
     let mut settings = get_settings();

@@ -1377,22 +1377,3 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
     };
     cleanup_plan(plan, app)
 }
-
-pub fn close_screenshot_window(app: &AppHandle) -> Result<(), String> {
-    let session_id = {
-        let state = STATE.lock();
-        state.sessions.current().map(|session| session.session_id().to_string())
-    };
-
-    if let Some(session_id) = session_id {
-        cancel_screenshot(app, &session_id)?;
-        return Ok(());
-    }
-
-    if let Some(window) = app.get_webview_window(SCREENSHOT_WINDOW_LABEL) {
-        window
-            .hide()
-            .map_err(|error| format!("隐藏截图窗口失败: {error}"))?;
-    }
-    Ok(())
-}

@@ -86,7 +86,7 @@ mod tests {
     fn screenshot_session_commands_require_the_invoking_screenshot_window() {
         // 命令名带 \n 行首前缀：测试数组里是引号内字符串（前导是引号而非换行），
         // 不带前缀会让 source.find 命中测试代码而非生产声明，护栏永远绿
-        // （§10.4 自指陷阱，已实证：5 个命令全匹配到测试数组，guard 命中测试
+        // （§10.4 自指陷阱，已实证：命令全匹配到测试数组，guard 命中测试
         // 自身的 find 字面量，生产代码零覆盖）。
         let source = source();
         for command in [
@@ -94,7 +94,6 @@ mod tests {
             "\npub fn cancel_screenshot",
             "\npub fn find_screenshot_window_at_point",
             "\npub async fn complete_screenshot",
-            "\npub fn close_screenshot_window",
         ] {
             let start = source.find(command).expect("缺少截图会话命令");
             // 只搜声明之后到下一个 #[tauri::command] 之间的区域，确保校验属于本函数体。
@@ -194,11 +193,4 @@ pub async fn complete_screenshot(
 ) -> Result<(), String> {
     require_screenshot_window(&window)?;
     screenshot_window::complete_screenshot(&app, &session_id, selection, &action).await
-}
-
-#[cfg(target_os = "windows")]
-#[tauri::command]
-pub fn close_screenshot_window(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
-    require_screenshot_window(&window)?;
-    screenshot_window::close_screenshot_window(&app)
 }

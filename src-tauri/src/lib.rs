@@ -258,7 +258,6 @@ pub fn run() {
                 commands::disable_hotkeys,
                 commands::is_hotkeys_enabled,
                 commands::get_shortcut_statuses,
-                commands::get_shortcut_status,
                 commands::save_window_position,
                 commands::save_window_size,
                 commands::save_quickpaste_window_size,
@@ -292,8 +291,6 @@ pub fn run() {
                 commands::screenshot::find_screenshot_window_at_point,
                 #[cfg(target_os = "windows")]
                 commands::screenshot::complete_screenshot,
-                #[cfg(target_os = "windows")]
-                commands::screenshot::close_screenshot_window,
                 commands::copy_text_to_clipboard,
                 commands::prompt_disable_win_v_hotkey_if_needed,
                 commands::prompt_enable_win_v_hotkey,

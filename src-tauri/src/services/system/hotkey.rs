@@ -4,7 +4,6 @@ mod navigation;
 pub mod test_utils;
 
 pub use global::{
-    get_shortcut_status,
     get_shortcut_statuses,
     init_hotkey_manager,
     is_hotkeys_enabled,
