@@ -105,7 +105,7 @@ mod tests {
     #[test]
     fn store_lock_recovers_from_poison() {
         let poisoned = std::sync::Mutex::new(());
-        let handle = std::thread::spawn(|| {
+        let handle = std::thread::spawn(move || {
             let _guard = poisoned.lock().unwrap();
             panic!("force store APP_HANDLE poison");
         });
