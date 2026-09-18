@@ -27,6 +27,14 @@ pub fn init(app: &AppHandle) {
     *handle = Some(app.clone());
 }
 
+// 取全局 AppHandle(供其它模块 setup 阶段共享;poison 恢复语义同上)
+pub fn app_handle_raw() -> Option<AppHandle> {
+    APP_HANDLE
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone()
+}
+
 // 获取存储路径
 fn get_store_path(app: &AppHandle) -> PathBuf {
     app.path().app_data_dir()

@@ -39,6 +39,10 @@ struct PinImageData {
 pub fn init_pin_image_window() {
     PIN_IMAGE_COUNTER.store(0, Ordering::SeqCst);
     PIN_IMAGE_DATA_MAP.get_or_init(|| Mutex::new(HashMap::new()));
+    // 登记 AppHandle 供 GDI 菜单 SaveAs 使用(setup 阶段调用一次)
+    if let Some(app) = crate::services::store::app_handle_raw() {
+        super::gdi::init_app_handle(app);
+    }
 }
 
 
@@ -298,6 +302,14 @@ fn pin_image_data(label: &str) -> Result<serde_json::Value, String> {
         }));
     }
     Err("未找到图片数据".to_string())
+}
+
+// 按标签取贴图文件路径(菜单复制/另存/透明度重渲染共用)
+pub fn pin_image_file_path(label: &str) -> Result<String, String> {
+    let map = lock_pin_data();
+    map.get(label)
+        .map(|d| d.file_path.clone())
+        .ok_or_else(|| "未找到图片数据".to_string())
 }
 
 // 图片另存为:由 GDI 右键菜单按 label 调用(命令壳已删,保留服务函数)

@@ -52,6 +52,92 @@ fn lock_hwnd_map() -> std::sync::MutexGuard<'static, HashMap<String, HWND>> {
         .unwrap_or_else(|p| p.into_inner())
 }
 
+/// 每窗口运行时状态:菜单 T3 交互需要(e.g. 阴影/锁定/像素级开关、恢复模式、
+/// 透明度)。状态跨线程共享由 GDI 层 Mutex 保护;T4 持久化到磁盘。
+#[derive(Clone, Debug)]
+pub(crate) struct PinWindowState {
+    pub shadow: bool,
+    pub lock_position: bool,
+    pub pixel_render: bool,
+    pub opacity: u8,
+    pub restore_mode: String,
+    pub thumbnail_mode: bool,
+}
+
+impl Default for PinWindowState {
+    fn default() -> Self {
+        Self {
+            shadow: false,
+            lock_position: false,
+            pixel_render: false,
+            opacity: 100,
+            restore_mode: "follow".to_string(),
+            thumbnail_mode: false,
+        }
+    }
+}
+
+/// 状态位开关(菜单切换用,避免逐个字段 setter)
+#[derive(Clone, Copy)]
+pub(crate) enum PinStateFlag {
+    Shadow,
+    LockPosition,
+    PixelRender,
+    RestoreMode,
+}
+
+/// 每窗口状态表:label → PinWindowState,与 HWND 表并行
+static PIN_STATE_MAP: OnceCell<Mutex<HashMap<String, PinWindowState>>> = OnceCell::new();
+
+fn lock_state_map() -> std::sync::MutexGuard<'static, HashMap<String, PinWindowState>> {
+    PIN_STATE_MAP
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+}
+
+/// 读取窗口状态(缺省用默认值)
+pub(crate) fn pin_state(label: &str) -> PinWindowState {
+    lock_state_map().get(label).cloned().unwrap_or_default()
+}
+
+/// 写回窗口状态
+pub(crate) fn set_pin_state(label: &str, state: PinWindowState) {
+    lock_state_map().insert(label.to_string(), state);
+}
+
+/// 切换布尔状态位并写回
+pub(crate) fn toggle_state_bool(label: &str, flag: PinStateFlag) -> Result<(), String> {
+    let mut state = pin_state(label);
+    match flag {
+        PinStateFlag::Shadow => state.shadow = !state.shadow,
+        PinStateFlag::LockPosition => state.lock_position = !state.lock_position,
+        PinStateFlag::PixelRender => state.pixel_render = !state.pixel_render,
+        PinStateFlag::RestoreMode => unreachable!("RestoreMode 走 set_state_str"),
+    }
+    set_pin_state(label, state);
+    Ok(())
+}
+
+/// 设置字符串状态位(恢复模式)
+pub(crate) fn set_state_str(label: &str, _flag: PinStateFlag, value: &str) -> Result<(), String> {
+    let mut state = pin_state(label);
+    state.restore_mode = value.to_string();
+    set_pin_state(label, state);
+    Ok(())
+}
+
+/// 记录 AppHandle 供菜单 SaveAs 使用(仅 UI 线程,静态 OnceCell)
+static APP_HANDLE: OnceCell<tauri::AppHandle> = OnceCell::new();
+
+pub(crate) fn init_app_handle(app: tauri::AppHandle) {
+    let _ = APP_HANDLE.set(app);
+}
+
+pub(crate) fn app_handle() -> Option<tauri::AppHandle> {
+    APP_HANDLE.get().cloned()
+}
+
 /// 窗口类注册状态:RegisterClassW 只执行一次
 static CLASS_REGISTERED: OnceCell<()> = OnceCell::new();
 
@@ -100,6 +186,8 @@ pub(crate) fn create_gdi_window(
 
     let class_name: Vec<u16> = PIN_IMAGE_WINDOW_CLASS.encode_utf16().collect();
     let title: Vec<u16> = "贴图".encode_utf16().collect();
+    // 建窗同时登记状态(缺省)
+    lock_state_map().entry(label.to_string()).or_default();
 
     let hwnd = unsafe {
         CreateWindowExW(
@@ -248,6 +336,40 @@ fn premultiply(channel: u32, alpha: u32) -> u32 {
     ((channel * ae) >> 8) & 0xFF
 }
 
+/// 渲染当前状态到窗口:读取状态透明度并重渲染(菜单透明度档/阴影开关用)
+pub(crate) fn render_current(label: &str, hwnd: HWND) -> Result<(), String> {
+    let state = pin_state(label);
+    let path = crate::windows::pin_image_window::pin_image_file_path(label)?;
+    render_image(hwnd, &path, state.opacity)
+}
+
+/// 切换置顶:用 SetWindowPos 在 TOPMOST/NOTOPMOST 间切换(不抢焦点)
+pub(crate) fn toggle_topmost(hwnd: HWND) -> Result<(), String> {
+    use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOSENDCHANGING};
+    let target = if is_topmost(hwnd) { HWND_NOTOPMOST } else { HWND_TOPMOST };
+    unsafe {
+        SetWindowPos(
+            hwnd,
+            Some(target),
+            0, 0, 0, 0,
+            SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOSENDCHANGING,
+        )
+    }
+    .map_err(|e| format!("切换置顶失败: {}", e))
+}
+
+/// 查询窗口是否置顶
+pub(crate) fn is_topmost(hwnd: HWND) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW, GWL_EXSTYLE, WS_EX_TOPMOST};
+    let ex = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) };
+    ex & (WS_EX_TOPMOST.0 as isize) != 0
+}
+
+/// 查询贴图窗口 state(供菜单勾选/交互复用;缺省默认值)
+pub(crate) fn window_is_topmost(label: &str) -> bool {
+    find_gdi_window(label).map(is_topmost).unwrap_or(false)
+}
+
 /// 贴图窗口过程。交互分支(拖窗/缩放/平移/缩略图/右键菜单)逐任务接入,
 /// 本骨架先登记全部相关消息并走默认处理。
 unsafe extern "system" fn pin_image_window_proc(
@@ -259,13 +381,37 @@ unsafe extern "system" fn pin_image_window_proc(
     match msg {
         WM_CREATE => LRESULT(0),
         WM_ACTIVATE | WM_NCHITTEST | WM_LBUTTONDOWN | WM_LBUTTONUP | WM_LBUTTONDBLCLK
-        | WM_MOUSEMOVE | WM_MOUSEWHEEL | WM_RBUTTONUP => DefWindowProcW(hwnd, msg, wparam, lparam),
+        | WM_MOUSEMOVE | WM_MOUSEWHEEL => DefWindowProcW(hwnd, msg, wparam, lparam),
+        // 右键菜单:在光标处弹出 T3 原生菜单,选中后分发动作再返回 0
+        WM_RBUTTONUP => {
+            let Some(label) = label_for_hwnd(hwnd) else {
+                return LRESULT(0);
+            };
+            if let Ok(id) = super::menu::show_pin_menu(hwnd, &label) {
+                if id != 0 {
+                    let _ = super::menu::handle_pin_menu_action(&label, hwnd, id);
+                }
+            }
+            LRESULT(0)
+        }
         WM_DESTROY => {
             lock_hwnd_map().retain(|_, h| *h != hwnd);
+            // 窗口销毁时按标签移除状态(能反查则精确移除)
+            if let Some(label) = label_for_hwnd(hwnd) {
+                lock_state_map().remove(&label);
+            }
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
+}
+
+/// 按窗口句柄反查标签
+fn label_for_hwnd(hwnd: HWND) -> Option<String> {
+    lock_hwnd_map()
+        .iter()
+        .find(|(_, h)| **h == hwnd)
+        .map(|(label, _)| label.clone())
 }
 
 /// 供外部按标签查询窗口句柄(close/save/动画共用)
