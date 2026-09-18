@@ -298,13 +298,12 @@ fn log_auto_low_memory_state(next_state: AutoLowMemoryLogState) {
 
 // 销毁所有 WebView 窗口
 fn destroy_all_webviews(app: &AppHandle) {
+    // 贴图窗口是 GDI 原生窗口,不占 WebView renderer、不在此销毁;文件盒
+    // 是 transfer-shelf-{id} 动态标签 WebView,静态数组枚举不到,必须按
+    // 前缀遍历销毁——否则文件盒窗口开着时进入低占用,该窗口残留,退出后
+    // 主窗口重建完成但文件盒仍在,与自动检测不对称。
     for (label, window) in app.webview_windows() {
-        // pin-image-{uuid} 与 transfer-shelf-{id} 都是动态标签,静态数组
-        // 枚举不到,必须按前缀遍历销毁——否则文件盒窗口开着时进入低占用,
-        // 该窗口残留,退出后主窗口重建完成但文件盒仍在,与自动检测不对称。
-        if label.starts_with("pin-image-")
-            || label.starts_with(crate::windows::transfer_shelf::LABEL_PREFIX)
-        {
+        if label.starts_with(crate::windows::transfer_shelf::LABEL_PREFIX) {
             let _ = window.destroy();
         }
     }
@@ -666,15 +665,15 @@ mod tests {
             );
         }
         assert!(
-            body.contains("starts_with(\"pin-image-\")")
-                && body.contains("starts_with(crate::windows::transfer_shelf::LABEL_PREFIX)"),
-            "动态标签窗口(贴图/文件盒)必须按前缀遍历销毁"
+            body.contains("starts_with(crate::windows::transfer_shelf::LABEL_PREFIX)"),
+            "动态标签窗口(文件盒)必须按前缀遍历销毁"
         );
     }
 
     // 源码护栏:销毁文件盒窗口后必须清空内存 SHELVES 记录——静态 Vec 只增
     // 不减时,退出低占用后 list_shelves 返回"已销毁文件的盒"记录,前端按
     // 记录打开等于打开不存在的窗口;再加同名文件盒也会命中残留记录。
+    // 前缀销毁断言只覆盖 transfer-shelf(GDI 贴图不进 webview_windows)。
     #[test]
     fn destroy_all_webviews_clears_shelf_records_after_destroy() {
         let src = strip_line_comments(&manager_source());
@@ -691,24 +690,38 @@ mod tests {
         );
     }
 
-    // 源码护栏:贴图窗口销毁后必须整体清空贴图数据——window.destroy()
-    // 走不到前端主动关窗的清理逻辑,数据记录与独立临时文件会泄漏;整体
-    // 清理放在销毁循环之后,还覆盖"窗口已销毁但数据仍在"的漏网场景。
+    // 源码护栏:贴图是 GDI 原生窗口,不占 WebView renderer,销毁循环不得
+    // 再按 pin-image- 前缀销毁 WebView;但贴图数据与临时文件整体清理
+    // (cleanup_all_pin_images)必须保留——GDI 窗口销毁走不到前端清理逻辑,
+    // 不清理则 PIN_IMAGE_DATA_MAP 残留、独立临时文件泄漏。
     #[test]
-    fn destroy_all_webviews_cleans_pin_image_data_after_destroy() {
+    fn destroy_all_webviews_keeps_pin_image_data_cleanup() {
         let src = strip_line_comments(&manager_source());
+        let prod = &src[..src.find("#[cfg(test)]").unwrap_or(src.len())];
         let body = crate::services::system::hotkey::test_utils::fn_body(&src, "destroy_all_webviews");
+        assert!(
+            body.contains("cleanup_all_pin_images()"),
+            "贴图数据整体清理必须保留(GDI 窗口销毁走不到清理逻辑)"
+        );
         let destroy_pos = body
             .find("window.destroy()")
-            .expect("destroy_all_webviews 必须销毁贴图窗口");
+            .expect("destroy_all_webviews 必须销毁文件盒窗口");
         let cleanup_pos = body
             .find("cleanup_all_pin_images()")
-            .expect("销毁贴图窗口后必须整体清空贴图数据与临时文件");
+            .expect("缺 cleanup_all_pin_images 调用");
         assert!(
             destroy_pos < cleanup_pos,
-            "贴图数据整体清理必须发生在窗口销毁之后——直接 destroy 绕过清理造成残留"
+            "贴图数据清理必须发生在文件盒窗口销毁之后(与既有销毁后清理语义一致)"
+        );
+        // 负向:销毁循环不得再按 pin-image- 前缀销毁——GDI 贴图不占
+        // renderer,且 label 不再以 pin-image- 开头(GDI 标签仍沿用该前缀,
+        // 但循环枚举的是 webview_windows,不含 GDI 窗口)。
+        assert!(
+            !body.contains("starts_with(\"pin-image-\")"),
+            "GDI 贴图不在 webview_windows 枚举内,销毁循环不得再按 pin-image- 前缀销毁"
         );
     }
+}
 
     // 源码护栏:自动低占用检测的可见窗口扫描必须与销毁列表对称——收发盒/
     // 社区/拖放代理开着时仍会开始空闲计时;文件盒其实开着但静态表扫不到,
