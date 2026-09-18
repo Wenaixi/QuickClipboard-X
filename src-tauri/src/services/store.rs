@@ -104,7 +104,10 @@ mod tests {
     // panic 会让 APP_HANDLE 永久锁定,全部 store 服务直接崩溃。
     #[test]
     fn store_lock_recovers_from_poison() {
-        let poisoned = std::sync::Mutex::new(());
+        // 用 Arc 在两线程间共享同一把 Mutex:子线程持锁 panic 污染它,
+        // 主线程 join 后仍通过共享句柄取回内部值,验证 poison 恢复语义。
+        let poisoned = std::sync::Arc::new(std::sync::Mutex::new(()));
+        let shared = std::sync::Arc::clone(&poisoned);
         let handle = std::thread::spawn(move || {
             let _guard = poisoned.lock().unwrap();
             panic!("force store APP_HANDLE poison");
@@ -112,7 +115,7 @@ mod tests {
         let _ = handle.join();
 
         // 不 panic 才能代表运行时行为(与 lock_pin_data_recovers_from_poison 同款)
-        let guard = poisoned.lock().unwrap_or_else(|p| p.into_inner());
+        let guard = shared.lock().unwrap_or_else(|p| p.into_inner());
         assert_eq!(*guard, ());
     }
 
