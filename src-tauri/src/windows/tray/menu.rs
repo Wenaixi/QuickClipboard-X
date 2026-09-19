@@ -119,7 +119,12 @@ pub async fn show_tray_menu(app: AppHandle) -> Result<(), String> {
     
     let hotkeys_label = if settings.hotkeys_enabled { "禁用快捷键" } else { "启用快捷键" };
     let monitor_label = if settings.clipboard_monitor { "禁用剪贴板监听" } else { "启用剪贴板监听" };
-    
+    let recording_label = if crate::services::recording::current_session().is_some() {
+        "停止屏幕录制"
+    } else {
+        "开始屏幕录制"
+    };
+
     let mut items = vec![
         menu_item_with_state("toggle", "显示/隐藏", Some("ti ti-app-window"), is_force_update),
         separator_item(),
@@ -142,6 +147,9 @@ pub async fn show_tray_menu(app: AppHandle) -> Result<(), String> {
             ],
         )
         .with_disabled(is_force_update),
+        separator_item(),
+        #[cfg(target_os = "windows")]
+        menu_item_with_state("recording", recording_label, Some("ti ti-video"), is_force_update),
         separator_item(),
         menu_item_with_state("toggle-hotkeys", hotkeys_label, Some("ti ti-keyboard"), is_force_update),
         menu_item_with_state("toggle-clipboard-monitor", monitor_label, Some("ti ti-clipboard"), is_force_update),
@@ -236,6 +244,21 @@ fn handle_tray_menu_selection(app: &AppHandle, selected_id: &str) {
                 std::thread::sleep(std::time::Duration::from_millis(150));
                 if let Err(error) = crate::commands::screenshot::start_screenshot(app) {
                     eprintln!("启动截图窗口失败: {}", error);
+                }
+            });
+        }
+        // 录制开始/停止切换（与热键同语义）：有活动会话先停，否则开始。
+        #[cfg(target_os = "windows")]
+        "recording" => {
+            let app = app.clone();
+            std::thread::spawn(move || {
+                let result = if crate::services::recording::current_session().is_some() {
+                    crate::commands::screenshot::stop_screen_recording(app)
+                } else {
+                    crate::commands::screenshot::start_screen_recording(app)
+                };
+                if let Err(error) = result {
+                    eprintln!("屏幕录制操作失败: {}", error);
                 }
             });
         }
