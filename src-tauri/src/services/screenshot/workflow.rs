@@ -109,8 +109,8 @@ async fn run_copy_pin_action(
     app: &AppHandle,
     session_id: &str,
     stored: &StoredScreenshot,
-    is_processing: &dyn Fn(&str) -> bool,
-    begin_commit: &dyn Fn(&str) -> Result<(), String>,
+    is_processing: &(dyn Fn(&str) -> bool + Sync),
+    begin_commit: &(dyn Fn(&str) -> Result<(), String> + Sync),
 ) -> Result<String, String> {
     if !is_processing(session_id) {
         return Err("截图会话已取消".to_string());
@@ -140,8 +140,8 @@ async fn run_copy_action(
     app: &AppHandle,
     session_id: &str,
     stored: &StoredScreenshot,
-    is_processing: &dyn Fn(&str) -> bool,
-    begin_commit: &dyn Fn(&str) -> Result<(), String>,
+    is_processing: &(dyn Fn(&str) -> bool + Sync),
+    begin_commit: &(dyn Fn(&str) -> Result<(), String> + Sync),
 ) -> Result<String, String> {
     if !is_processing(session_id) {
         return Err("截图会话已取消".to_string());
@@ -158,8 +158,8 @@ async fn run_save_action(
     app: &AppHandle,
     session_id: &str,
     stored: &StoredScreenshot,
-    is_processing: &dyn Fn(&str) -> bool,
-    begin_commit: &dyn Fn(&str) -> Result<(), String>,
+    is_processing: &(dyn Fn(&str) -> bool + Sync),
+    begin_commit: &(dyn Fn(&str) -> Result<(), String> + Sync),
 ) -> Result<String, String> {
     if !is_processing(session_id) {
         return Err("截图会话已取消".to_string());
@@ -188,8 +188,8 @@ async fn run_pin_action(
     app: &AppHandle,
     session_id: &str,
     stored: &StoredScreenshot,
-    is_processing: &dyn Fn(&str) -> bool,
-    begin_commit: &dyn Fn(&str) -> Result<(), String>,
+    is_processing: &(dyn Fn(&str) -> bool + Sync),
+    begin_commit: &(dyn Fn(&str) -> Result<(), String> + Sync),
 ) -> Result<String, String> {
     if !is_processing(session_id) {
         return Err("截图会话已取消".to_string());
@@ -222,7 +222,7 @@ async fn run_edit_action(
     app: &AppHandle,
     session_id: &str,
     stored: &StoredScreenshot,
-    is_processing: &dyn Fn(&str) -> bool,
+    is_processing: &(dyn Fn(&str) -> bool + Sync),
 ) -> Result<String, String> {
     if !is_processing(session_id) {
         return Err("截图会话已取消".to_string());
@@ -239,8 +239,8 @@ async fn run_ai_action(
     app: &AppHandle,
     session_id: &str,
     stored: &StoredScreenshot,
-    is_processing: &dyn Fn(&str) -> bool,
-    begin_commit: &dyn Fn(&str) -> Result<(), String>,
+    is_processing: &(dyn Fn(&str) -> bool + Sync),
+    begin_commit: &(dyn Fn(&str) -> Result<(), String> + Sync),
 ) -> Result<String, String> {
     let settings = get_settings();
     if !settings.screenshot_ai_enabled {
@@ -294,8 +294,8 @@ async fn run_upload_action(
     _app: &AppHandle,
     session_id: &str,
     stored: &StoredScreenshot,
-    is_processing: &dyn Fn(&str) -> bool,
-    begin_commit: &dyn Fn(&str) -> Result<(), String>,
+    is_processing: &(dyn Fn(&str) -> bool + Sync),
+    begin_commit: &(dyn Fn(&str) -> Result<(), String> + Sync),
 ) -> Result<String, String> {
     if !is_processing(session_id) {
         return Err("截图会话已取消".to_string());
