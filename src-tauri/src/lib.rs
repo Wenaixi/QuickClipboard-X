@@ -306,6 +306,8 @@ pub fn run() {
                 commands::screenshot::save_qr_png_base64,
                 #[cfg(target_os = "windows")]
                 commands::screenshot::hash_file_sha256,
+                #[cfg(target_os = "windows")]
+                commands::screenshot::open_ruler,
                 windows::annotation::open_annotation_window,
                 windows::annotation::annotation_finished,
                 windows::annotation::annotation_cancelled,

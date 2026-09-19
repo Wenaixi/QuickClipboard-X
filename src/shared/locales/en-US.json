@@ -1260,7 +1260,8 @@
       "tools": "Tools",
       "colorPicker": "Color Picker",
       "qrGenerator": "QR Code Generator",
-      "fileHash": "File Hash"
+      "fileHash": "File Hash",
+      "ruler": "Screen Ruler"
     },
     "qrPrompt": "Enter text or link to generate a QR code",
     "qrGenerated": "QR code generated and copied to clipboard",

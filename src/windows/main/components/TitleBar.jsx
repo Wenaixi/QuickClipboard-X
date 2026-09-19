@@ -459,6 +459,11 @@ const TitleBar = forwardRef(
           label: t("tools.moreMenu.fileHash", "文件哈希"),
           icon: "ti ti-hash",
         }),
+        createMenuItem({
+          id: "menu-open-ruler",
+          label: t("tools.moreMenu.ruler", "屏幕标尺"),
+          icon: "ti ti-ruler",
+        }),
       ];
       const fileHubItem = createMenuItem({
         id: "menu-file-hub-group",
@@ -673,6 +678,15 @@ const TitleBar = forwardRef(
             toast.success(t("tools.hashCopied", "文件 SHA-256 已复制"));
           } catch (error) {
             console.error("计算文件哈希失败:", error);
+          }
+          break;
+        }
+        case "menu-open-ruler": {
+          try {
+            const { openRuler } = await import("@shared/api/tools");
+            await openRuler();
+          } catch (error) {
+            console.error("打开屏幕标尺失败:", error);
           }
           break;
         }

@@ -15,3 +15,7 @@ export async function saveQrPngBase64(pngBase64) {
 export async function hashFileSha256(filePath) {
   return await invoke('hash_file_sha256', { filePath });
 }
+
+export async function openRuler() {
+  return await invoke('open_ruler');
+}

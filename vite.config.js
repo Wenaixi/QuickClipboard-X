@@ -97,6 +97,10 @@ export default defineConfig({
         if (existsSync(colorPickerPath)) {
           inputs.colorPicker = colorPickerPath
         }
+        const rulerPath = resolve(__dirname, 'src/windows/ruler/index.html')
+        if (existsSync(rulerPath)) {
+          inputs.ruler = rulerPath
+        }
         return inputs
       })(),
 

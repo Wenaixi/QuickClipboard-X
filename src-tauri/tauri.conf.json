@@ -80,6 +80,25 @@
         "shadow": false,
         "dragDropEnabled": false,
         "visibleOnAllWorkspaces": true
+      },
+      {
+        "label": "ruler",
+        "title": "屏幕标尺",
+        "url": "windows/ruler/index.html",
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "resizable": true,
+        "width": 400,
+        "height": 300,
+        "minWidth": 120,
+        "minHeight": 80,
+        "focus": true,
+        "shadow": false,
+        "dragDropEnabled": false,
+        "visibleOnAllWorkspaces": true
       }
     ],
     "security": {
@@ -98,7 +117,8 @@
         "preview-window",
         "transfer-shelf",
         "receive-box",
-        "updater"
+        "updater",
+        "ruler"
       ],
       "assetProtocol": {
         "enable": true,

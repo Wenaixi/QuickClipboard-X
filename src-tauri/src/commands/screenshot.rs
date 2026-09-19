@@ -253,3 +253,9 @@ pub async fn hash_file_sha256(file_path: String) -> Result<String, String> {
     .await
     .map_err(|error| format!("哈希计算线程失败: {error}"))?
 }
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+pub fn open_ruler() -> Result<(), String> {
+    crate::windows::ruler_window::open_ruler()
+}

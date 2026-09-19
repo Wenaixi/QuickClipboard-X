@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>屏幕标尺</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+        user-select: none;
+      }
+      canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+      #size-value {
+        position: fixed;
+        right: 8px;
+        bottom: 8px;
+        padding: 2px 8px;
+        border-radius: 6px;
+        background: rgba(30, 30, 30, 0.8);
+        color: #fff;
+        font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+        font-size: 13px;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="ruler-canvas"></canvas>
+    <div id="size-value"></div>
+    <script type="module" src="./index.js"></script>
+  </body>
+</html>
