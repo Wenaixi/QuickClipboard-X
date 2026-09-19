@@ -573,7 +573,6 @@ mod tests {
             .expect("上传成功后必须复制可访问 URL");
         assert!(commit < copy, "必须先提交会话再复制链接");
     }
-}
 
     // 保存动作:用户取消=失败(对齐 ShareX SaveImageToFileWithDialog 取消
     // 即放弃保存),文件 IO 必须走线程池不占异步运行时;提交先于写盘。
