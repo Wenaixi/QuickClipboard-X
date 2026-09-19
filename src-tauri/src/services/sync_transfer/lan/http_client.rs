@@ -7,6 +7,7 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio::io::AsyncRead;
 use tokio_util::io::ReaderStream;
+use futures_util::TryStreamExt;
 
 pub const LAN_UNAUTHORIZED: &str = "局域网设备未授权（配对已失效）";
 const FILE_TRANSFER_BUFFER_SIZE: usize = 1024 * 1024;
@@ -222,27 +223,31 @@ pub async fn fetch_peer_image(peer: &super::peer_store::PairedPeer, image_id: &s
                 return Err(format!("局域网图片响应体超过 {} 字节上限", MAX_PEER_IMAGE_BODY_BYTES));
             }
         }
-        match response
-            .bytes_stream()
-            .try_fold(Vec::new(), |mut acc, chunk| async move {
-                if acc.len() + chunk.len() > MAX_PEER_IMAGE_BODY_BYTES {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!("局域网图片响应体超过 {} 字节上限", MAX_PEER_IMAGE_BODY_BYTES),
-                    ));
-                }
-                acc.extend_from_slice(&chunk);
-                Ok(acc)
-            })
-            .await
-        {
-            Ok(bytes) => return Ok(Some(bytes)),
-            Err(e) if should_retry_transport_error(&e) && attempt + 1 < IMAGE_REQUEST_MAX_ATTEMPTS => {
+        // 限量累积:按 chunk 推进并计量,超上限立即拒绝;
+        // 传输中途断流属可重试错误,未达重试上限则退避重来。
+        let mut collected = Vec::with_capacity(response.content_length().unwrap_or(0) as usize);
+        let mut stream = response.bytes_stream();
+        let mut stream_error: Option<reqwest::Error> = None;
+        while let Some(chunk) = match stream.try_next().await {
+            Ok(chunk) => chunk,
+            Err(err) => {
+                stream_error = Some(err);
+                None
+            }
+        } {
+            if collected.len() + chunk.len() > MAX_PEER_IMAGE_BODY_BYTES {
+                return Err(format!("局域网图片响应体超过 {} 字节上限", MAX_PEER_IMAGE_BODY_BYTES));
+            }
+            collected.extend_from_slice(&chunk);
+        }
+        if let Some(err) = stream_error {
+            if should_retry_transport_error(&err) && attempt + 1 < IMAGE_REQUEST_MAX_ATTEMPTS {
                 wait_before_image_retry(attempt).await;
                 continue;
             }
-            Err(e) => return Err(format!("读取局域网图片内容失败: {}", e)),
+            return Err(format!("读取局域网图片内容失败: {}", err));
         }
+        return Ok(Some(collected));
     }
     Err("读取局域网图片失败: 多次重试后仍无法连接".to_string())
 }
