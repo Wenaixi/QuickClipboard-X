@@ -56,7 +56,8 @@ fn is_webview_renderer_name(name: &str) -> bool {
 
 #[cfg(windows)]
 fn process_working_set(pid: u32) -> (u32, u64) {
-    let Ok(handle) = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) } else {
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) };
+    let Ok(handle) = handle else {
         return (pid, 0);
     };
 
