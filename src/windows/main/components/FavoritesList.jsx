@@ -210,6 +210,7 @@ const FavoritesList = forwardRef(({
         groupName: groupsSnap.currentGroup,
         contentType: favSnap.contentType !== 'all' ? favSnap.contentType : undefined,
         search: favSnap.filter || undefined,
+        pasteStatus: favSnap.pasteStatus !== 'all' ? favSnap.pasteStatus : undefined,
       });
 
       result.items.forEach((item, itemOffset) => {
@@ -227,7 +228,7 @@ const FavoritesList = forwardRef(({
     }
 
     return entries;
-  }, [favSnap.contentType, favSnap.filter, groupsSnap.currentGroup]);
+  }, [favSnap.contentType, favSnap.filter, groupsSnap.currentGroup, favSnap.pasteStatus]);
 
   const handleItemClick = useCallback(async (item, index, event) => {
     if (settings.modifierClickMultiSelect === false) {

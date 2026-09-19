@@ -65,6 +65,10 @@ pub fn refresh_excluded_hwnds(app_handle: &tauri::AppHandle) {
         "input-dialog",
         "quickpaste",
         "community",
+        crate::windows::color_picker_window::COLOR_PICKER_WINDOW_LABEL,
+        crate::windows::ruler_window::RULER_WINDOW_LABEL,
+        crate::windows::whiteboard_window::WHITEBOARD_WINDOW_LABEL,
+        crate::windows::annotation::ANNOTATION_WINDOW_LABEL,
     ] {
         if let Some(win) = app_handle.get_webview_window(label) {
             if let Ok(hwnd) = win.hwnd() {
@@ -356,6 +360,10 @@ fn is_ignored_foreground_window(class_name: &str, name: &str) -> bool {
         || name == "更新"
         || name == "截图"
         || name == "拖放接收层"
+        || name == "取色器"
+        || name == "屏幕标尺"
+        || name == "白板"
+        || name == "图像编辑器"
 }
 
 #[cfg(windows)]
@@ -474,6 +482,9 @@ mod tests {
     // "input-dialog",标题是调用方传入的任意 title 不能按标题过滤)必须
     // 同时进排除列表与忽略表——两者聚焦时若不过滤,LAST_FOCUS_HWND 被记
     // 为自身窗口,恢复焦点把焦点设回已隐藏的自身窗口。
+    // R6 四窗口(取色器/屏幕标尺/白板/图像编辑器)与截图同类:全屏透明置顶
+    // focused 建窗,若聚焦不被过滤,LAST_FOCUS_HWND 被记为工具窗句柄,
+    // 关闭后句柄失效,restore_last_focus 只清记录,外部应用焦点归还失败。
     #[test]
     fn screenshot_and_input_dialog_windows_covered_by_excluded_and_ignore() {
         let src = strip_line_comments(&focus_source());
@@ -491,6 +502,34 @@ mod tests {
             helper.contains("name == \"截图\""),
             "截图窗口标题必须进忽略表"
         );
+    }
+
+    // R6 四窗口(取色器/屏幕标尺/白板/图像编辑器)必须同时进排除列表与
+    // 忽略表——它们全屏透明置顶 focused 建窗,聚焦事件不被过滤时
+    // LAST_FOCUS_HWND 被记为工具窗句柄,关闭后句柄失效,restore_last_focus
+    // 只清记录,外部应用焦点归还失败。标签用各窗口 pub 常量防字符串漂移。
+    #[test]
+    fn r6_windows_covered_by_excluded_and_ignore() {
+        let src = strip_line_comments(&focus_source());
+        let excluded_body = fn_body(&src, "refresh_excluded_hwnds");
+        for (label_const, title) in [
+            ("COLOR_PICKER_WINDOW_LABEL", "取色器"),
+            ("RULER_WINDOW_LABEL", "屏幕标尺"),
+            ("WHITEBOARD_WINDOW_LABEL", "白板"),
+            ("ANNOTATION_WINDOW_LABEL", "图像编辑器"),
+        ] {
+            assert!(
+                excluded_body.contains(label_const),
+                "排除列表必须覆盖 {} 窗口标签常量",
+                label_const
+            );
+            let helper = fn_body(&src, "is_ignored_foreground_window");
+            assert!(
+                helper.contains(&format!("name == \"{}\"", title)),
+                "忽略表必须过滤 {} 窗口标题",
+                title
+            );
+        }
     }
 
     // 焦点未归还仍挂起执行键:restore_last_focus 必须在焦点成功归还外部

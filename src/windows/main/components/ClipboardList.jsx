@@ -292,6 +292,7 @@ const ClipboardList = forwardRef(({
         limit,
         contentType: clipSnap.contentType !== 'all' ? clipSnap.contentType : undefined,
         search: clipSnap.filter || undefined,
+        pasteStatus: clipSnap.pasteStatus !== 'all' ? clipSnap.pasteStatus : undefined,
       });
 
       result.items.forEach((item, itemOffset) => {
@@ -309,7 +310,7 @@ const ClipboardList = forwardRef(({
     }
 
     return entries;
-  }, [clipSnap.contentType, clipSnap.filter]);
+  }, [clipSnap.contentType, clipSnap.filter, clipSnap.pasteStatus]);
 
   const handleItemClick = useCallback(async (item, index, event) => {
     if (settings.modifierClickMultiSelect === false) {

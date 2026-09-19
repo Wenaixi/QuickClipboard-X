@@ -25,6 +25,10 @@ const WEBVIEW_LABELS: &[&str] = &[
     "community",
     "drop-proxy",
     "preview-window",
+    "color-picker",
+    "ruler",
+    "whiteboard",
+    "annotation",
 ];
 
 const AUTO_LOW_MEMORY_WINDOW_LABELS: &[&str] = &[
@@ -36,6 +40,10 @@ const AUTO_LOW_MEMORY_WINDOW_LABELS: &[&str] = &[
     "receive-box",
     "community",
     "drop-proxy",
+    "color-picker",
+    "ruler",
+    "whiteboard",
+    "annotation",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -657,6 +665,10 @@ mod tests {
             "community",
             "drop-proxy",
             "preview-window",
+            "color-picker",
+            "ruler",
+            "whiteboard",
+            "annotation",
         ] {
             assert!(
                 prod.contains(label),
@@ -736,6 +748,10 @@ mod tests {
             "community",
             "drop-proxy",
             "preview-window",
+            "color-picker",
+            "ruler",
+            "whiteboard",
+            "annotation",
         ] {
             assert!(
                 prod.contains(label),

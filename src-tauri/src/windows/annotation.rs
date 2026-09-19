@@ -35,6 +35,10 @@ pub fn open_annotation_window(app: &AppHandle, image_path: &str) -> Result<(), S
         .min_inner_size(480.0, 320.0)
         .build()
         .map_err(|error| format!("创建编辑器窗口失败: {error}"))?;
+    // 新窗口加入自身窗口排除列表——编辑器窗透明置顶 focused 建窗,不排除
+    // 则聚焦编辑器会被记为 LAST_FOCUS_HWND,恢复焦点把焦点设回编辑器自身。
+    #[cfg(windows)]
+    crate::services::system::focus::refresh_excluded_hwnds(app);
     window
         .emit(ANNOTATION_LOAD_EVENT, image_path)
         .map_err(|error| format!("推送编辑器初始加载事件失败: {error}"))?;
@@ -105,5 +109,17 @@ mod tests {
         assert!(source.contains("close_annotation_window(&app)"), "命令必须关闭窗口");
         assert!(source.contains("annotation_finished"), "必须提供完成命令");
         assert!(source.contains("annotation_cancelled"), "必须提供取消命令");
+    }
+
+    // 新窗口必须加入自身窗口排除列表——编辑器窗透明置顶 focused 建窗,
+    // 不排除则聚焦编辑器会被记为 LAST_FOCUS_HWND,恢复焦点把焦点设回
+    // 编辑器自身(单例复用窗口,开着期间 restore 会把焦点设回置顶编辑窗)。
+    #[test]
+    fn editor_window_refreshes_excluded_hwnds_after_build() {
+        let source = source();
+        assert!(
+            source.contains("refresh_excluded_hwnds(app)"),
+            "创建编辑器窗口后必须刷新自身窗口排除列表"
+        );
     }
 }

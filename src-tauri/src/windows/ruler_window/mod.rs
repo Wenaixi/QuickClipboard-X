@@ -6,9 +6,14 @@ use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 pub const RULER_WINDOW_LABEL: &str = "ruler";
 
+// 取全局 AppHandle（setup 阶段由 store::init 注册；未注册即尚未就绪）。
+fn app_handle() -> Result<tauri::AppHandle, String> {
+    crate::services::store::app_handle_raw().ok_or_else(|| "应用尚未初始化".to_string())
+}
+
 /// 打开标尺窗口（复用标签防重入：已存在则聚焦不重建）。
 pub fn open_ruler() -> Result<(), String> {
-    let app = tauri::AppHandle::current();
+    let app = app_handle()?;
     if let Some(window) = app.get_webview_window(RULER_WINDOW_LABEL) {
         let _ = window.show();
         let _ = window.set_focus();
@@ -32,7 +37,13 @@ pub fn open_ruler() -> Result<(), String> {
     .shadow(false)
     .build()
     .map(|_| ())
-    .map_err(|error| format!("创建屏幕标尺窗口失败: {error}"))
+    .map_err(|error| format!("创建屏幕标尺窗口失败: {error}"))?;
+
+    // 新窗口加入自身窗口排除列表——标尺窗透明置顶 focused 建窗,不排除
+    // 则聚焦标尺会被记为 LAST_FOCUS_HWND,恢复焦点把焦点设回隐藏自身窗口。
+    #[cfg(windows)]
+    crate::services::system::focus::refresh_excluded_hwnds(&app);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -53,5 +64,21 @@ mod tests {
         assert!(source.contains(".resizable(true)"), "标尺窗必须可调大小");
         // 复用标签防重入：已存在只聚焦不重建。
         assert!(source.contains("RULER_WINDOW_LABEL"), "必须复用标签防重入");
+    }
+
+    // 新窗口必须加入自身窗口排除列表——标尺窗透明置顶 focused 建窗,
+    // 不排除则聚焦标尺会被记为 LAST_FOCUS_HWND,恢复焦点把焦点设回隐藏
+    // 自身窗口。
+    #[test]
+    fn ruler_window_refreshes_excluded_hwnds_after_build() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/windows/ruler_window/mod.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读取标尺窗口源码失败");
+        assert!(
+            source.contains("refresh_excluded_hwnds(&app)"),
+            "创建标尺窗口后必须刷新自身窗口排除列表"
+        );
     }
 }
