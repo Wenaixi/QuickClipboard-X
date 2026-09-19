@@ -43,6 +43,9 @@ jobs:
       - name: Run screenshot tests
         run: npm run test:screenshot
 
+      - name: Run annotation tests
+        run: npm run test:annotation
+
       - name: Run emoji-kb tests
         run: npm run test:emoji-kb
 
