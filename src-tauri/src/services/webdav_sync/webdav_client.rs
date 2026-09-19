@@ -279,7 +279,9 @@ impl WebdavClient {
         Ok(Some(resp.bytes().await.map_err(map_reqwest_error)?.to_vec()))
     }
 
-    async fn put_raw_bytes(&self, path: &str, bytes: Vec<u8>) -> Result<(), String> {
+    /// 原始 PUT（明文，不经加密）：R5 上传目标（WebDAV uploader）复用此
+    /// 原语，把产物文件直接上传到服务端 uploads/ 目录并回读可访问 URL。
+    pub async fn put_raw_bytes(&self, path: &str, bytes: Vec<u8>) -> Result<(), String> {
         let resp = self
             .request(Method::PUT, path)
             .body(bytes)
@@ -411,6 +413,13 @@ impl WebdavClient {
 
     fn encryption_scope(&self) -> String {
         format!("{}\n{}", self.base_url, self.config.username.trim())
+    }
+}
+
+/// 服务端完整路径根（含配置 root_path，如 `…/quickclipboard`）。
+impl WebdavClient {
+    pub fn base_url(&self) -> String {
+        self.base_url.clone()
     }
 }
 

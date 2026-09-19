@@ -16,6 +16,7 @@ pub mod store;
 pub mod sync_transfer;
 pub mod secure_credentials;
 pub mod webdav_sync;
+pub mod upload;
 #[cfg(target_os = "windows")]
 pub mod recording;
 
