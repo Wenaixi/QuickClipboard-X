@@ -311,7 +311,7 @@ test('遮罩与描边先于三分线标尺手柄渲染且手柄来自模型', ()
   const selectionLine = render.indexOf('screenshot-selection-line');
   const thirds = render.indexOf('<ThirdsGrid bounds={bootstrap.bounds} />');
   const ruler = render.indexOf('<Ruler bounds={bootstrap.bounds} />');
-  const handles = render.indexOf('{selection && <SelectionHandles selection={selection} />}');
+  const handles = render.indexOf('<SelectionHandles selection={selection} />');
   assert.ok([maskTop, maskLeft, maskRight, maskBottom, selectionLine, thirds, ruler, handles].every((i) => i >= 0), '遮罩/描边/三分线/标尺/手柄渲染必须全部存在');
   assert.ok(Math.max(maskTop, maskLeft, maskRight, maskBottom) < selectionLine, '四方向遮罩必须先于选区描边');
   assert.ok(selectionLine < thirds && thirds < ruler && ruler < handles, '描边必须先于三分线/标尺/手柄');
@@ -325,7 +325,7 @@ test('选区建立后渲染八个调整手柄', () => {
   const source = readSource('./App.jsx');
   assert.ok(source.includes('import { selectionHandles } from \'./handleModel.js\';'));
   assert.ok(source.includes('selectionHandles(selection).map((handle) =>'));
-  assert.ok(source.includes('{selection && <SelectionHandles selection={selection} />}'));
+  assert.ok(source.includes('<SelectionHandles selection={selection} />'));
   assert.ok(source.includes('data-screenshot-handle="true"'));
   assert.ok(source.includes('screenshot-handle-${handle.edge}'));
 });
@@ -765,7 +765,7 @@ test('新拖拽开始时先递增手势并清空选区历史', () => {
   assert.ok(source.includes('gestureIdRef.current += 1;'), '新拖拽必须递增手势代号');
   // 锚定 handlePointerDown 内的草稿拖拽块（含唯一 draftRef 赋值），避免与
   // 其它 reset 路径的相邻序列误命中：手势递增必须紧邻并先于历史清空。
-  const draftAnchor = "gestureIdRef.current += 1;\n    selectionHistoryRef.current = [];\n    draftRef.current = { start, end: start };";
+  const draftAnchor = "gestureIdRef.current += 1;\n    selectionHistoryRef.current = [];\n    draftRef.current = { start, end: start";;
   assert.ok(source.includes(draftAnchor), '手势递增必须紧邻并先于历史清空');
 });
 
@@ -920,8 +920,9 @@ test('交互状态机修复护栏：ref 同步与 busyAction 守卫与放大镜�
   // configure 与取消时复位放大镜缩放倍率。
   assert.ok(source.includes('setMagnifierScale(DEFAULT_MAGNIFIER_SCALE);'));
   assert.ok(source.includes('const DEFAULT_MAGNIFIER_SCALE = 6;'));
-  // bounds 变化时重建键盘闭包。
-  assert.ok(source.includes("}, [bootstrap.sessionId, bootstrap.bounds, busyAction, showHelp]);"));
+  // bounds 变化时重建键盘闭包（captureMode 参与键盘 Tab 切换模式，一并
+  // 重建避免陈旧模式状态）。
+  assert.ok(source.includes("}, [bootstrap.sessionId, bootstrap.bounds, busyAction, showHelp, captureMode]);"));
 });
 
 test('截图键盘微调默认 1px 且 Ctrl 加速 10px', () => {
@@ -969,11 +970,18 @@ test('快速动作 initialAction 从配置事件接收并在指针释放后一�
   // 配置事件必须把后端初始动作写入 ref。
   assert.ok(source.includes('initialActionRef.current = nextBootstrap.initialAction;'), 'configure 必须写入快速动作');
   // 指针释放后读取并立即清空，确保同一会话内只触发一次。
-  assert.ok(source.includes('const action = initialActionRef.current;'), '指针释放必须读取快速动作');
+  assert.ok(source.includes('const action = initialActionRef.current;'), '矩形路径必须读取快速动作');
   assert.ok(source.includes("initialActionRef.current = '';"), '消费后必须清空快速动作');
-  assert.ok(source.includes('void completeScreenshot(action);'), '快速动作必须直接走完成流程');
-  // 顺序：读取 ref 必须在清空之前。
-  const readIndex = source.indexOf('const action = initialActionRef.current;');
-  const clearIndex = source.indexOf("initialActionRef.current = '';");
-  assert.ok(readIndex !== -1 && clearIndex !== -1 && readIndex < clearIndex, '必须先读取再清空');
+  assert.ok(source.includes('void completeScreenshot(action);'), '矩形路径快速动作必须直接走完成流程');
+  // 顺序：矩形路径读取 ref 必须在清空之前（全局首个清空在多边形闭合路径里，
+  // 必须在矩形块内部切片比较，避免跨路径误配）。
+  const rectStart = source.indexOf('if (initialActionRef.current) {');
+  const rectEnd = source.indexOf('\n  };', rectStart);
+  const rectBlock = source.slice(rectStart, rectEnd);
+  const readIndex = rectBlock.indexOf('const action = initialActionRef.current;');
+  const clearIndex = rectBlock.indexOf("initialActionRef.current = '';");
+  assert.ok(readIndex !== -1 && clearIndex !== -1 && readIndex < clearIndex, '矩形路径必须先读取再清空');
+  // 多边形/手绘闭合路径：整表达式读取后必须随后清空（防止重复触发）。
+  const polyConsume = 'void completeScreenshot(initialActionRef.current || \'\');\n    initialActionRef.current = \'\';';
+  assert.ok(source.includes(polyConsume), '多边形闭合路径必须读后即清');
 });

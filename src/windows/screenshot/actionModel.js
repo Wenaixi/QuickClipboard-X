@@ -11,6 +11,11 @@ const HOTKEY_ACTIONS = {
 };
 
 export function actionForHotkey(key) {
+  // 防御式容错：真实事件对象 key 恒为字符串，但非字符串入参（数字等）
+  // 若直接查表会被 JS 强制转字符串误命中，必须显式守卫。
+  if (typeof key !== 'string') {
+    return null;
+  }
   return HOTKEY_ACTIONS[key] || null;
 }
 

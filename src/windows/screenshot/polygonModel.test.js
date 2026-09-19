@@ -52,7 +52,8 @@ test('pointInPolygon 射线法判定内部与外部点', () => {
   assert.equal(pointInPolygon({ x: 50, y: 150 }, square), false);
   const concave = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 60, y: 40 }, { x: 0, y: 100 }];
   assert.equal(pointInPolygon({ x: 20, y: 60 }, concave), true);
-  assert.equal(pointInPolygon({ x: 80, y: 60 }, concave), false);
+  assert.equal(pointInPolygon({ x: 80, y: 60 }, concave), true, '凹多边形内点（主轮廓内但凹入侧以外）也必须判内');
+  assert.equal(pointInPolygon({ x: 60, y: 60 }, concave), false, '凹入缺口内的点必须判外');
   assert.equal(pointInPolygon({ x: 0, y: 0 }, [{ x: 0, y: 0 }, { x: 1, y: 1 }]), false, '不足 3 点必须返回 false');
 });
 

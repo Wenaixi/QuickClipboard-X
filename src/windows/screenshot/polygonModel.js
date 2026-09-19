@@ -86,7 +86,8 @@ export function pointInPolygon(point, points) {
 }
 
 // 多边形轴对齐包围盒：{ left, top, width, height, right, bottom }，
-// 返回 null 当顶点不足或退化（无面积）。
+// 返回 null 当顶点不足或退化（无面积——含全部顶点共线：三点横跨
+// 对角时 right/left 与 bottom/top 都有跨度但实际无面积）。
 export function polygonBounds(points) {
   assertPoints(points);
   if (points.length < 3) {
@@ -101,7 +102,18 @@ export function polygonBounds(points) {
   if (right <= left || bottom <= top) {
     return null;
   }
-  return { left, top, right, bottom, width: right - left, height: bottom - top };
+  // 面积退化：全部顶点共线（叉积恒为零）时无面，返回 null 供调用方
+  // 回退矩形选区（对齐后端 CaptureRect::from_polygon_bounds 退化拒绝）。
+  const first = points[0];
+  const second = points[1];
+  for (let i = 2; i < points.length; i += 1) {
+    const p = points[i];
+    const cross = (second.x - first.x) * (p.y - first.y) - (second.y - first.y) * (p.x - first.x);
+    if (cross !== 0) {
+      return { left, top, right, bottom, width: right - left, height: bottom - top };
+    }
+  }
+  return null;
 }
 
 export function polygonPathPoints(points) {
