@@ -81,11 +81,12 @@ impl WebdavUploadTarget {
         let remote = format!("{UPLOAD_DIR}/{}", filename.trim());
         self.client.put_raw_bytes(&remote, bytes).await?;
         let url = self.remote_url(filename.trim());
+        let delete_url = url.clone();
         Ok(UploadResult {
             // 可访问 URL（上传完成后 PUT 已成功，路径已存在）。
             url,
             // 删除 URL：同文件路径再 PUT 空即覆盖删除，此处标注同一地址。
-            delete_url: url.clone(),
+            delete_url,
             // 缩略图 URL：WebDAV 无缩略图概念，回退原 URL（对齐
             // ShareX 三 URL 同构：无 thumbnail 的 provider 填原 URL）。
             thumb_url: url.clone(),

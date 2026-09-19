@@ -309,7 +309,8 @@ async fn run_upload_action(
     // 文件读取放线程池,不占用异步运行时。
     let path = stored.absolute_path.clone();
     let bytes = tokio::task::spawn_blocking(move || std::fs::read(&path)).await
-        .map_err(|error| format!("读取产物线程失败: {error}"))??;
+        .map_err(|error| format!("读取产物线程失败: {error}"))?
+        .map_err(|error| format!("读取产物文件失败: {error}"))?;
     let filename = format!("QC_{}_{}.png", stored.image_id, std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())

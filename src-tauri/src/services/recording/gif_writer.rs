@@ -33,7 +33,7 @@ pub fn encode_rgba_frames(frames: &[(u32, u32, &[u8])], frame_rate: GifFrameRate
     if width == 0 || height == 0 {
         return Err("GIF 帧尺寸无效".to_string());
     }
-    let delay = Delay::from_millis(frame_rate.delay_ms());
+    let delay = Delay::from_numer_denom_ms(frame_rate.delay_ms(), 1);
     let mut bytes = Vec::new();
     {
         let mut encoder = GifEncoder::new(&mut bytes);
@@ -48,7 +48,7 @@ pub fn encode_rgba_frames(frames: &[(u32, u32, &[u8])], frame_rate: GifFrameRate
             let image = RgbaImage::from_raw(width, height, rgba.to_vec())
                 .ok_or_else(|| "GIF 帧像素缓冲无效".to_string())?;
             encoder
-                .encode_delay(Frame::new(image), delay)
+                .encode_frame(Frame::from_parts(image, 0, 0, delay))
                 .map_err(|error| format!("GIF 编码失败: {error}"))?;
         }
     }
