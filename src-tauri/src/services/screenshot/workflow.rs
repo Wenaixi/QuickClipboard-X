@@ -1,25 +1,24 @@
 // 截图动作链引擎
 //
-// 复刻 ShareX 任务系统(AfterCaptureTasks 位标志 + WorkerTask 后台线程
-// 流水线):把截图完成后的动作从"单动作命令"升级为"有序步骤流水线"。
-// 与 ShareX 的差异:用有序 step 列表表达动作组合(可表达顺序/依赖,
-// 位标志只能表达集合),失败策略为"失败继续+汇总"(每步独立 try/catch,
-// 结束后返回汇总,截图不因某步失败而丢)。
+// 深度参考 ShareX WorkerTask.cs(已读源码):DoAfterCaptureJobs 按位标志
+// 顺序执行 Beautify→Effects→Annotate→Copy→Pin→Save→Upload,每个动作
+// 各自 try/catch 不中断,错误累加进 Info.Result.Errors,任务最终按
+// IsError 置 Failed 但已生效动作结果保留,ShowErrorWindow 单独展示错误
+// 列表。本引擎用有序 step 列表表达同样的"顺序+失败继续+汇总"语义:
+// 列表可表达顺序/依赖,位标志只能表达集合;失败策略=每步独立收集,
+// 截图不因某步失败而丢,结束时按 is_total_failure 决定是否整体失败。
 //
-// 设计:
-//   - WorkflowStep:单个动作及其参数(copy/save/pin/ai)
-//   - 各动作闭包注册在 execute_workflow 的 match 中(动作处理自足,
-//     不依赖窗口会话的内部状态——会话提交/取消守卫由调用方负责)
-//   - execute_workflow 遍历步骤:每步成功推入 succeeded,失败推入
-//     failed 并继续下一步;结束后若 all failed 返回 Err(调用方统一
-//     失败清理),否则返回汇总(部分成功也是完成)
-//   - 与既有护栏的衔接:复制/贴图必须先 begin_commit 锁定会话再写
-//     剪贴板/建窗(调用方在 execute_workflow 前调用);单步内不再做
-//     会话守卫,由 complete_screenshot 的既有会话处理统一负责
+// 动作实现内聚本文件(对齐 ShareX 自带 DoAfterCaptureJobs 实现),会话
+// 守卫/提交由调用方以回调注入(screenshot_window 的 is_current_processing_
+// session / begin_screenshot_commit),引擎只做流水线与动作分发。
 
 use tauri::AppHandle;
 
+use super::actions::{copy_screenshot, copy_screenshot_text, emit_screenshot_history_update, save_screenshot, ScreenshotActionError};
+use super::ai_vision::recognize_image;
+use super::image_store::prepare_pin_path;
 use super::StoredScreenshot;
+use crate::services::settings::get_settings;
 
 /// 单步动作及其参数
 #[derive(Debug, Clone)]
@@ -33,10 +32,7 @@ impl WorkflowStep {
     }
 }
 
-/// 单步执行结果(成功为 Ok,失败为 Err 文本)
-pub type StepResult = Result<(), String>;
-
-/// 动作链汇总结果
+/// 动作链汇总结果(对齐 ShareX Info.Result.Errors 累加语义)
 #[derive(Debug, Clone)]
 pub struct WorkflowActionResult {
     pub succeeded: Vec<String>,
@@ -44,22 +40,39 @@ pub struct WorkflowActionResult {
 }
 
 impl WorkflowActionResult {
-    /// 是否完全失败(无任何成功步骤)
+    /// 是否完全失败(无任何成功步骤)——对齐 ShareX Status=Failed
     pub fn is_total_failure(&self) -> bool {
         self.succeeded.is_empty()
     }
+
+    /// 汇总展示文本(对齐 ShareX ShowErrorWindow 的 ErrorsToString):
+    /// 完全失败返回错误明细,部分成功返回"部分动作成功"提示。
+    pub fn error_summary(&self) -> String {
+        if self.failed.is_empty() {
+            return String::new();
+        }
+        let details: Vec<String> = self
+            .failed
+            .iter()
+            .map(|(action, error)| format!("{}: {}", action, error))
+            .collect();
+        if self.is_total_failure() {
+            format!("截图动作全部失败:\n{}", details.join("\n"))
+        } else {
+            format!("部分动作失败(其余已生效):\n{}", details.join("\n"))
+        }
+    }
 }
 
-/// 执行截图后动作链:遍历步骤,每步失败继续下一步,汇总返回。
-/// 参数闭包(已做会话提交守卫)分派到各动作实现。
+/// 执行截图后动作链:遍历步骤,每步失败继续,汇总返回。
+/// 会话守卫/提交回调由调用方注入;动作实现内聚本文件。
 pub async fn execute_workflow(
     app: &AppHandle,
+    session_id: &str,
     stored: &StoredScreenshot,
     steps: &[WorkflowStep],
-    mut copy_action: impl FnMut(&AppHandle, &StoredScreenshot) -> Result<String, String>,
-    mut save_action: impl FnMut(&AppHandle, &StoredScreenshot) -> Result<String, String>,
-    mut pin_action: impl FnMut(&AppHandle, &StoredScreenshot) -> Result<String, String>,
-    mut ai_action: impl FnMut(&AppHandle, &StoredScreenshot) -> Result<String, String>,
+    is_processing: impl Fn(&str) -> bool,
+    begin_commit: impl Fn(&str) -> Result<(), String>,
 ) -> WorkflowActionResult {
     let mut result = WorkflowActionResult {
         succeeded: Vec::new(),
@@ -68,10 +81,10 @@ pub async fn execute_workflow(
 
     for step in steps {
         let step_result: Result<String, String> = match step.action.as_str() {
-            "copy" => copy_action(app, stored),
-            "save" => save_action(app, stored),
-            "pin" => pin_action(app, stored),
-            "ai" => ai_action(app, stored),
+            "copy" => run_copy_action(app, session_id, stored, &is_processing, &begin_commit).await,
+            "save" => run_save_action(app, session_id, stored, &is_processing, &begin_commit).await,
+            "pin" => run_pin_action(app, session_id, stored, &is_processing, &begin_commit).await,
+            "ai" => run_ai_action(app, session_id, stored, &is_processing, &begin_commit).await,
             other => Err(format!("不支持的截图动作: {other}")),
         };
 
@@ -82,6 +95,169 @@ pub async fn execute_workflow(
     }
 
     result
+}
+
+// 复制动作:对齐 ShareX CopyImageToClipboard——必须先 begin_commit 锁定
+// 会话为 Committing 再写剪贴板,避免幽灵文本;成功通知主窗口历史刷新。
+async fn run_copy_action(
+    app: &AppHandle,
+    session_id: &str,
+    stored: &StoredScreenshot,
+    is_processing: &dyn Fn(&str) -> bool,
+    begin_commit: &dyn Fn(&str) -> Result<(), String>,
+) -> Result<String, String> {
+    if !is_processing(session_id) {
+        return Err("截图会话已取消".to_string());
+    }
+    begin_commit(session_id)?;
+    let clipboard_id = copy_screenshot(stored).map_err(|e| e.to_string())?;
+    emit_screenshot_history_update(app, clipboard_id).map_err(|e| e.to_string())?;
+    Ok("已复制到剪贴板".to_string())
+}
+
+// 保存动作:对齐 ShareX SaveImageToFileWithDialog——用户取消等同保存失败,
+// 统一走失败清理避免会话卡在处理中;文件 IO 放线程池不占用异步运行时。
+async fn run_save_action(
+    app: &AppHandle,
+    session_id: &str,
+    stored: &StoredScreenshot,
+    is_processing: &dyn Fn(&str) -> bool,
+    begin_commit: &dyn Fn(&str) -> Result<(), String>,
+) -> Result<String, String> {
+    if !is_processing(session_id) {
+        return Err("截图会话已取消".to_string());
+    }
+    let destination = match super::actions::choose_screenshot_save_destination(stored, app) {
+        Ok(Some(destination)) => destination,
+        Ok(None) => return Err("已取消保存截图".to_string()),
+        Err(error) => return Err(error.to_string()),
+    };
+    if !is_processing(session_id) {
+        return Err("截图会话已取消".to_string());
+    }
+    begin_commit(session_id)?;
+    let stored = stored.clone();
+    match tokio::task::spawn_blocking(move || save_screenshot(&stored, &destination)).await {
+        Ok(Ok(())) => Ok("已保存截图".to_string()),
+        Ok(Err(error)) => Err(error.to_string()),
+        Err(error) => Err(format!("保存截图线程失败: {error}")),
+    }
+}
+
+// 贴图动作:对齐 ShareX PinToScreen——先 prepare 持久化文件,再提交会话
+// 再建贴图窗口(贴图窗口依赖已提交的持久化文件);prepare 失败两条路径
+// (文件错误/线程错误)统一报错。
+async fn run_pin_action(
+    app: &AppHandle,
+    session_id: &str,
+    stored: &StoredScreenshot,
+    is_processing: &dyn Fn(&str) -> bool,
+    begin_commit: &dyn Fn(&str) -> Result<(), String>,
+) -> Result<String, String> {
+    if !is_processing(session_id) {
+        return Err("截图会话已取消".to_string());
+    }
+    let stored_for_pin = stored.clone();
+    let pin_path = match tokio::task::spawn_blocking(move || prepare_pin_path(&stored_for_pin)).await {
+        Ok(Ok(pin_path)) => pin_path,
+        Ok(Err(error)) => return Err(error.to_string()),
+        Err(error) => return Err(format!("贴图文件准备线程失败: {error}")),
+    };
+    if !is_processing(session_id) {
+        return Err("截图会话已取消".to_string());
+    }
+    begin_commit(session_id)?;
+    crate::windows::pin_image_window::pin_image_from_file(
+        app.clone(),
+        pin_path.to_string_lossy().to_string(),
+        None, None, None, None, None, None, None, None, None, None, None,
+    )
+    .await
+    .map_err(|e| format!("贴图失败: {e}"))?;
+    Ok("已贴图到屏幕".to_string())
+}
+
+// AI 动作:对齐 ShareX DoOCR(任务系统的 OCR 位标志)——配置校验+云端发送
+// 确认+识别+文本入剪贴板;识别失败且仍在 Processing 时保留会话供改用
+// 其它动作(由调用方 is_total_failure 判定)。
+async fn run_ai_action(
+    app: &AppHandle,
+    session_id: &str,
+    stored: &StoredScreenshot,
+    is_processing: &dyn Fn(&str) -> bool,
+    begin_commit: &dyn Fn(&str) -> Result<(), String>,
+) -> Result<String, String> {
+    let settings = get_settings();
+    if !settings.screenshot_ai_enabled {
+        return Err("截图 AI 识别已关闭".to_string());
+    }
+    if super::ai_vision::validate_configuration(&settings.ai_api_key, &settings.ai_base_url, &settings.ai_model).is_err() {
+        return Err("截图 AI 识别尚未完成配置".to_string());
+    }
+    if !settings.screenshot_ai_cloud_confirmed {
+        let confirmed = tokio::task::spawn_blocking({
+            let app_clone = app.clone();
+            move || confirm_screenshot_ai_cloud_access(&app_clone)
+        })
+        .await
+        .map_err(|error| format!("AI 确认对话框线程失败: {error}"))??;
+        if !confirmed {
+            return Err("已取消云端 AI 识别".to_string());
+        }
+    }
+    if !is_processing(session_id) {
+        return Err("截图会话已取消".to_string());
+    }
+    let result = recognize_image(
+        &stored.absolute_path,
+        &settings.ai_api_key,
+        &settings.ai_base_url,
+        &settings.ai_model,
+        Some(&settings.screenshot_ai_prompt),
+    )
+    .await
+    .map_err(|e| e.to_string());
+    if !is_processing(session_id) {
+        return Err("截图会话已取消".to_string());
+    }
+    match result {
+        Ok(result) if !result.text.trim().is_empty() => {
+            begin_commit(session_id)?;
+            let clipboard_id = copy_screenshot_text(&result.text).map_err(|e| e.to_string())?;
+            emit_screenshot_history_update(app, clipboard_id).map_err(|e| e.to_string())?;
+            Ok("AI 识别文本已复制".to_string())
+        }
+        Ok(_) => Err("AI 未识别出文本".to_string()),
+        Err(error) => Err(error),
+    }
+}
+
+// AI 云端发送确认(对齐既有 confirm_screenshot_ai_cloud_access)
+fn confirm_screenshot_ai_cloud_access(app: &AppHandle) -> Result<bool, String> {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+
+    let settings = get_settings();
+    if settings.screenshot_ai_cloud_confirmed {
+        return Ok(true);
+    }
+
+    let message = if settings.language.starts_with("zh") {
+        "AI 识别会将当前截图选区发送至你配置的 AI 服务进行处理。图片不会使用本地 OCR 静默替代。\n\n是否继续？"
+    } else {
+        "AI recognition sends the current screenshot selection to your configured AI service. It will not silently fall back to local OCR.\n\nContinue?"
+    };
+    if !app
+        .dialog()
+        .message(message)
+        .buttons(MessageDialogButtons::OkCancel)
+        .blocking_show()
+    {
+        return Ok(false);
+    }
+
+    crate::services::settings::update_with(|settings| settings.screenshot_ai_cloud_confirmed = true)
+        .map_err(|error| format!("保存截图 AI 隐私确认失败: {error}"))?;
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -96,19 +272,29 @@ mod tests {
         .expect("读取动作链源码失败")
     }
 
-    // 动作链必须"失败继续+汇总":遍历步骤、每步 try/catch 式收集失败并
-    // 继续下一步(不是失败即中断)。源码字面可反证(删循环/改 early return
-    // FAILED)。
+    fn prod_source() -> String {
+        source()
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or(&source())
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    // 动作链必须"失败继续+汇总"(对齐 ShareX DoAfterCaptureJobs 各动作
+    // try/catch 不中断):遍历步骤、每步失败推入 failed 并继续。可反证
+    // (删循环/改 early return FAILED)。
     #[test]
     fn workflow_continues_on_step_failure_and_collects_results() {
-        let src = source();
+        let src = prod_source();
         let start = src
             .find("pub async fn execute_workflow")
             .expect("缺 execute_workflow");
         let rest = &src[start..];
         let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(src.len());
         let body = &src[start..end];
-        // 每步结果按成功/失败分推入汇总(失败不中断)
         assert!(
             body.contains("result.succeeded.push(summary)"),
             "每步成功必须推入 succeeded 汇总"
@@ -116,11 +302,6 @@ mod tests {
         assert!(
             body.contains("result.failed.push((step.action.clone(), error))"),
             "每步失败必须推入 failed 汇总并继续"
-        );
-        // 失败收集在 match 之内,遍历循环必须完整遍历所有步骤(无 early break)
-        assert!(
-            body.contains("for step in steps"),
-            "动作链必须遍历全部步骤"
         );
         let for_pos = body.find("for step in steps").expect("缺遍历循环");
         let after_for = &body[for_pos..];
@@ -130,9 +311,10 @@ mod tests {
         );
     }
 
-    // 结果汇总结构必须含成功/失败两部分(WorkflowActionResult)
+    // 汇总结构必须含成功/失败列表与完全失败判定、错误汇总文本
+    // (对齐 ShareX Result.IsError + ErrorsToString)
     #[test]
-    fn workflow_result_has_succeeded_and_failed_lists() {
+    fn workflow_result_has_summary_structure() {
         let src = source();
         assert!(
             src.contains("pub struct WorkflowActionResult"),
@@ -149,6 +331,92 @@ mod tests {
         assert!(
             src.contains("pub fn is_total_failure"),
             "必须提供完全失败判定"
+        );
+        assert!(
+            src.contains("pub fn error_summary"),
+            "必须提供错误汇总文本(对齐 ErrorsToString)"
+        );
+    }
+
+    // 复制动作必须先提交会话再写剪贴板(既有 copy_action_commits_before
+    // _clipboard_write 语义收编进引擎后保留)
+    #[test]
+    fn copy_action_commits_before_clipboard_write() {
+        let src = prod_source();
+        let start = src
+            .find("async fn run_copy_action")
+            .expect("缺 run_copy_action");
+        let rest = &src[start..];
+        let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(src.len());
+        let body = &src[start..end];
+        let commit = body
+            .find("begin_commit(session_id)?")
+            .expect("缺少会话提交");
+        let copy = body
+            .find("copy_screenshot(stored)")
+            .expect("缺少剪贴板写入");
+        assert!(
+            commit < copy,
+            "必须先提交会话再写剪贴板(避免幽灵文本)"
+        );
+        assert!(
+            body.contains("emit_screenshot_history_update(app, clipboard_id)"),
+            "复制成功必须通知历史刷新"
+        );
+    }
+
+    // 贴图动作 prepare 失败两条路径必须报错且 commit 先于建窗
+    #[test]
+    fn pin_action_commits_before_window_creation_and_prepare_failures_report() {
+        let src = prod_source();
+        let start = src
+            .find("async fn run_pin_action")
+            .expect("缺 run_pin_action");
+        let rest = &src[start..];
+        let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(src.len());
+        let body = &src[start..end];
+        let commit = body
+            .find("begin_commit(session_id)?")
+            .expect("缺少会话提交");
+        let pin_window = body
+            .find("pin_image_from_file(")
+            .expect("缺少贴图窗口创建");
+        assert!(
+            commit < pin_window,
+            "必须先提交会话再创建贴图窗口"
+        );
+        assert!(
+            body.contains("prepare_pin_path(&stored_for_pin)"),
+            "贴图必须先 prepare 持久化文件"
+        );
+        assert!(
+            body.contains("贴图文件准备线程失败"),
+            "prepare 线程失败必须报错"
+        );
+    }
+
+    // AI 动作:配置校验+云端确认先于识别请求
+    #[test]
+    fn ai_action_validates_and_confirms_before_request() {
+        let src = prod_source();
+        let start = src
+            .find("async fn run_ai_action")
+            .expect("缺 run_ai_action");
+        let rest = &src[start..];
+        let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(src.len());
+        let body = &src[start..end];
+        let config = body
+            .find("validate_configuration(")
+            .expect("AI 动作缺少可用性校验");
+        let confirm = body
+            .find("confirm_screenshot_ai_cloud_access")
+            .expect("AI 动作缺少云端发送确认");
+        let request = body
+            .find("recognize_image(")
+            .expect("AI 动作缺少识别请求");
+        assert!(
+            config < confirm && confirm < request,
+            "必须先校验配置、确认云端发送，再发起 AI 请求"
         );
     }
 }
