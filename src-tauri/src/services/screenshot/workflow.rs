@@ -85,6 +85,7 @@ pub async fn execute_workflow(
             "save" => run_save_action(app, session_id, stored, &is_processing, &begin_commit).await,
             "pin" => run_pin_action(app, session_id, stored, &is_processing, &begin_commit).await,
             "ai" => run_ai_action(app, session_id, stored, &is_processing, &begin_commit).await,
+            "edit" => run_edit_action(app, session_id, stored, &is_processing).await,
             "copy+pin" => {
                 // 组合预设:复制后贴图,共享一次会话提交(对齐 ShareX
                 // AfterCaptureTasks CopyImageToClipboard | PinToScreen 位组合)。
@@ -202,6 +203,24 @@ async fn run_pin_action(
     .await
     .map_err(|e| format!("贴图失败: {e}"))?;
     Ok("已贴图到屏幕".to_string())
+}
+
+// 编辑动作:对齐 ShareX 任务系统 DoAfterCaptureJobs 的 AnnotateImage——
+// 打开图像编辑器窗口引导用户标注。编辑器是交互动作,完成后由编辑器
+// 前端保存编辑结果并通过命令封闭编辑会话;此处只负责打开编辑器,
+// 不推进会话提交(编辑前仍是 Processing,供编辑后继续其它动作)。
+async fn run_edit_action(
+    app: &AppHandle,
+    session_id: &str,
+    stored: &StoredScreenshot,
+    is_processing: &dyn Fn(&str) -> bool,
+) -> Result<String, String> {
+    if !is_processing(session_id) {
+        return Err("截图会话已取消".to_string());
+    }
+    let image_path = stored.absolute_path.to_string_lossy().to_string();
+    crate::windows::annotation::open_annotation_window(app, &image_path)?;
+    Ok("已打开图像编辑器".to_string())
 }
 
 // AI 动作:对齐 ShareX DoOCR(任务系统的 OCR 位标志)——配置校验+云端发送
@@ -424,8 +443,7 @@ mod tests {
 
     // AI 动作:配置校验+云端确认先于识别请求
     #[test]
-    fn ai_action_validates_and_confirms_before_request() {
-        let src = prod_source();
+    fn ai_action_validates_and_confirms_before_request() {        let src = prod_source();
         let start = src
             .find("async fn run_ai_action")
             .expect("缺 run_ai_action");
@@ -459,6 +477,28 @@ mod tests {
         let rest = &src[start..];
         let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(src.len());
         let body = &src[start..end];
+
+        // 编辑动作:打开图像编辑器且不推进会话提交(编辑前仍是 Processing,
+        // 供编辑后继续其它动作)。
+        let edit_start = src
+            .find("async fn run_edit_action")
+            .expect("缺编辑动作");
+        let edit_rest = &src[edit_start..];
+        let edit_end = edit_rest.find("\n}\n").map(|i| edit_start + i).unwrap_or(src.len());
+        let edit_body = &src[edit_start..edit_end];
+        assert!(
+            edit_body.contains("open_annotation_window(app, &image_path)"),
+            "编辑动作必须打开图像编辑器窗口"
+        );
+        assert!(
+            edit_body.contains("is_processing(session_id)"),
+            "编辑动作必须做会话处理中守卫"
+        );
+        assert!(
+            edit_body.contains("已打开图像编辑器"),
+            "编辑动作成功必须返回提示"
+        );
+    }
         // 必须整体一次会话提交(不能拆步骤,否则贴图误判已取消)。
         let commit = body
             .find("begin_commit(session_id)?;")
