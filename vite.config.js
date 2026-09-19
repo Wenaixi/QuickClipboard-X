@@ -89,6 +89,10 @@ export default defineConfig({
         if (existsSync(screenshotPath)) {
           inputs.screenshot = screenshotPath
         }
+        const annotationPath = resolve(__dirname, 'src/windows/annotation/index.html')
+        if (existsSync(annotationPath)) {
+          inputs.annotation = annotationPath
+        }
         return inputs
       })(),
 
