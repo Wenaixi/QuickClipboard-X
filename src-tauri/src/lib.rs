@@ -292,6 +292,10 @@ pub fn run() {
                 commands::screenshot::find_screenshot_window_at_point,
                 #[cfg(target_os = "windows")]
                 commands::screenshot::complete_screenshot,
+                #[cfg(target_os = "windows")]
+                commands::screenshot::start_screen_recording,
+                #[cfg(target_os = "windows")]
+                commands::screenshot::stop_screen_recording,
                 windows::annotation::open_annotation_window,
                 windows::annotation::annotation_finished,
                 windows::annotation::annotation_cancelled,

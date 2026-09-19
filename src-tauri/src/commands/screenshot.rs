@@ -203,3 +203,15 @@ pub async fn complete_screenshot(
     require_screenshot_window(&window)?;
     screenshot_window::complete_screenshot(&app, &session_id, selection, polygon_vertices, &action).await
 }
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+pub fn start_screen_recording(app: AppHandle) -> Result<(), String> {
+    crate::services::recording::start_recording_for_user(&app)
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+pub fn stop_screen_recording(app: AppHandle) -> Result<(), String> {
+    crate::services::recording::stop_recording(&app)
+}
