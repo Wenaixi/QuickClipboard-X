@@ -22,6 +22,14 @@ pub struct ScreenshotSelection {
 }
 
 #[cfg(target_os = "windows")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenshotPolygonVertex {
+    pub x: u32,
+    pub y: u32,
+}
+
+#[cfg(target_os = "windows")]
 fn start_screenshot_by_mode(app: &AppHandle, action: Option<&str>) -> Result<(), String> {
     screenshot_window::start_screenshot(app, action)
 }
@@ -189,8 +197,9 @@ pub async fn complete_screenshot(
     window: WebviewWindow,
     session_id: String,
     selection: ScreenshotSelection,
+    polygon_vertices: Option<Vec<ScreenshotPolygonVertex>>,
     action: String,
 ) -> Result<(), String> {
     require_screenshot_window(&window)?;
-    screenshot_window::complete_screenshot(&app, &session_id, selection, &action).await
+    screenshot_window::complete_screenshot(&app, &session_id, selection, polygon_vertices, &action).await
 }

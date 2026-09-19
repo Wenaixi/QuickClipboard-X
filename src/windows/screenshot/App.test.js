@@ -198,6 +198,18 @@ test('完成动作成功后清理占用且 AI 未配置回落配置入口', () =
   assert.ok(source.includes("if (action === 'ai') void openAiSettings();"));
 });
 
+test('多边形/手绘完成时携带物理顶点并入命令面', () => {
+  const source = readSource('./App.jsx');
+  const start = source.indexOf('const completeScreenshot = async (action) => {');
+  const body = source.slice(start);
+  // 多边形路径存在时转物理顶点，矩形选区走既有 selectionToPhysical；
+  // invoke 携带 polygonVertices 参数（后端按包围盒捕获）。
+  assert.ok(body.includes('polygonPhysicalVertices(currentSelection.polygonPath, bootstrap.dpr)'), '多边形路径必须转物理顶点');
+  assert.ok(body.includes('polygonVertices,'), 'invoke 必须携带 polygonVertices 参数');
+  assert.ok(body.includes('selectionToPhysical(currentSelection, bootstrap.dpr, currentBounds)'), '矩形选区必须走既有转换');
+  assert.ok(body.includes('Array.isArray(currentSelection.polygonPath)'), '必须检测多边形路径');
+});
+
 test('帮助面板打开时按 Esc 关闭且失焦不打断处理', () => {
   const source = readSource('./App.jsx');
   assert.ok(source.includes("if (event.key === 'Escape' && showHelp) { event.preventDefault(); setShowHelp(false); return; }"));

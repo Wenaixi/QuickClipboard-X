@@ -183,6 +183,30 @@ struct PhysicalWindowRect {
     bottom: i32,
 }
 
+// 多边形模式的包围盒裁剪：前端送来的物理像素顶点按 min/max 求捕获区域；
+// 顶点退化（不足 3 个或无面积）返回 None，回退矩形选区（Selection 口径）。
+fn capture_monitor_rect_from_polygon(
+    vertices: &[crate::commands::screenshot::ScreenshotPolygonVertex],
+    fallback: &crate::commands::screenshot::ScreenshotSelection,
+) -> Option<CaptureRect> {
+    if vertices.len() < 3 {
+        return None;
+    }
+    let left = vertices.iter().map(|v| v.x).min()?;
+    let top = vertices.iter().map(|v| v.y).min()?;
+    let right = vertices.iter().map(|v| v.x).max()?;
+    let bottom = vertices.iter().map(|v| v.y).max()?;
+    if right <= left || bottom <= top {
+        return None;
+    }
+    // 端点整数差即为宽高（与 CaptureRect::from_polygon_bounds 同口径），
+    // 落在显示器物理区域内（fallback 提供边界参考）。
+    if left >= fallback.width || top >= fallback.height {
+        return None;
+    }
+    Some(CaptureRect { left, top, width: right - left, height: bottom - top })
+}
+
 fn window_selection_from_rect(
     monitor: MonitorRect,
     rect: PhysicalWindowRect,
@@ -1079,7 +1103,7 @@ pub fn find_window_selection(
         })))
 }
 
-pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: crate::commands::screenshot::ScreenshotSelection, action: &str) -> Result<(), String> {
+pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: crate::commands::screenshot::ScreenshotSelection, polygon_vertices: Option<Vec<crate::commands::screenshot::ScreenshotPolygonVertex>>, action: &str) -> Result<(), String> {
     if selection.width == 0 || selection.height == 0 {
         finish_failed_screenshot(app, session_id);
         return Err("截图选区不能为空".to_string());
@@ -1118,12 +1142,26 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
         }
         let hmonitor_raw = hmonitor.0 as isize;
 
-        // 构建裁切选区（前端已转换为物理像素，参考 MonitorRect 原点偏移）
-        let capture_rect = CaptureRect {
-            left: selection.left,
-            top: selection.top,
-            width: selection.width,
-            height: selection.height,
+        // 构建裁切选区（前端已转换为物理像素，参考 MonitorRect 原点偏移；
+        // 多边形模式传己包围盒——前端 polygonPhysicalVertices 已把逻辑顶点转
+        // 物理像素，后端按顶点包围盒取捕获区域）。
+        let capture_rect = if let Some(vertices) = polygon_vertices.as_deref() {
+            // 多边形/手绘模式:按前端送来的物理像素顶点取包围盒捕获区域。
+            // 顶点退化或无面积时回退矩形选区(前端 polygonPhysicalVertices
+            // 与 polygonBounds 已保证非空,此处仅防御)。
+            capture_monitor_rect_from_polygon(vertices, &selection).unwrap_or(CaptureRect {
+                left: selection.left,
+                top: selection.top,
+                width: selection.width,
+                height: selection.height,
+            })
+        } else {
+            CaptureRect {
+                left: selection.left,
+                top: selection.top,
+                width: selection.width,
+                height: selection.height,
+            }
         };
 
         // 后台线程执行 WGC 捕获（需要 COM MTA 初始化）

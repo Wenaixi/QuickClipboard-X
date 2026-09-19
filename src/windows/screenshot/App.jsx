@@ -437,8 +437,19 @@ function App() {
     setBusyAction(action);
     setActionError('');
     try {
-      const physicalSelection = selectionToPhysical(currentSelection, bootstrap.dpr, bootstrap.physicalBounds);
-      await invoke(COMPLETE_COMMAND, { sessionId: bootstrap.sessionId, selection: physicalSelection, action });
+      const currentBounds = bootstrap.physicalBounds;
+      const physicalSelection = selectionToPhysical(currentSelection, bootstrap.dpr, currentBounds);
+      // 多边形/手绘模式:额外携带物理像素顶点,后端按包围盒裁剪形状
+      // (后端重复裁剪逻辑见 CaptureRect::from_polygon_bounds)。
+      const polygonVertices = Array.isArray(currentSelection.polygonPath) && currentSelection.polygonPath.length >= 3
+        ? polygonPhysicalVertices(currentSelection.polygonPath, bootstrap.dpr)
+        : null;
+      await invoke(COMPLETE_COMMAND, {
+        sessionId: bootstrap.sessionId,
+        selection: physicalSelection,
+        polygonVertices,
+        action,
+      });
     } catch (error) {
       setActionError(t('screenshot.actionFailed', { action: actionLabel(action, t), error: String(error) }));
       return;
