@@ -12,6 +12,7 @@ mod startup_diagnostics;
 mod utils;
 mod windows;
 
+pub use services::diagnostics;
 pub use utils::{mouse, screen};
 pub use services::{AppSettings, get_settings, update_settings, get_data_directory, hotkey, SoundPlayer, AppSounds};
 pub use services::system::input_monitor;

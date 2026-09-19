@@ -2,6 +2,7 @@ pub mod clipboard;
 #[cfg(target_os = "windows")]
 pub mod screenshot;
 pub mod database;
+pub mod diagnostics;
 pub mod data_management;
 pub mod notification;
 pub mod settings;
