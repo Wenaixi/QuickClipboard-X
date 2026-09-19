@@ -149,6 +149,26 @@ pub fn encode_and_store_png(
     store_png_bytes(width, height, png_bytes)
 }
 
+// R3 编辑器完成路径：编辑器前端把编辑结果以 PNG 字节回传（已含全部
+// 标注层栅格化），此处按内容寻址落盘为新的 cutboard 图片（复用截图
+// 存储链路，动作链后续复制/贴图/上传消费同一 StoredScreenshot）。
+pub fn encode_and_store_png_bytes(
+    png_bytes: Vec<u8>,
+) -> Result<StoredScreenshot, ImageStoreError> {
+    let dimensions = decode_png_dimensions(&png_bytes)?;
+    store_png_bytes(dimensions.0, dimensions.1, png_bytes)
+}
+
+fn decode_png_dimensions(png_bytes: &[u8]) -> Result<(u32, u32), ImageStoreError> {
+    let reader = image::ImageReader::new(std::io::Cursor::new(png_bytes))
+        .with_guessed_format()
+        .map_err(|error| ImageStoreError::Encode(error.to_string()))?;
+    let header = reader
+        .into_dimensions()
+        .map_err(|error| ImageStoreError::Encode(format!("解析编辑结果尺寸失败: {error}")))?;
+    Ok((header.0, header.1))
+}
+
 fn store_png_bytes(
     width: u32,
     height: u32,
