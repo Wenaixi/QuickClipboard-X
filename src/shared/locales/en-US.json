@@ -984,7 +984,14 @@
       "lifecycleModeAutoDesc": "Keeps the window temporarily after capture and automatically releases it if no screenshot is taken within the specified time.",
       "autoDisposeMinutes": "Auto Release Delay",
       "autoDisposeMinutesDesc": "In Smart Mode, the window will be automatically released if no screenshot is taken within this time after capture.",
-      "minutes": "min"
+      "minutes": "min",
+      "afterCapture": "After Capture Actions",
+      "afterCaptureDesc": "Action chain to run automatically after a screenshot, executed in the selected order (keep at least one action).",
+      "afterCaptureCopy": "Copy",
+      "afterCapturePin": "Pin",
+      "afterCaptureCopyPin": "Copy & Pin",
+      "afterCaptureAi": "AI Recognition",
+      "afterCaptureSave": "Save As"
     },
     "sound": {
       "title": "Sound",

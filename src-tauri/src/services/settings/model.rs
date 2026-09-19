@@ -76,6 +76,10 @@ pub struct AppSettings {
     pub screenshot_ai_enabled: bool,
     pub screenshot_ai_cloud_confirmed: bool,
     pub screenshot_ai_prompt: String,
+    // 截图完成后自动执行的动作链：逗号分隔的动作序列（空=仅选区进入剪贴板历史不自动执行）。
+    // 由动作链引擎 execute_workflow 消费，动作集与 SCREENSHOT_ACTIONS 对齐
+    //（copy/save/pin/ai/copy+pin）；设置 UI 用多选控件维护，初始默认"仅复制"。
+    pub screenshot_after_capture_actions: Vec<String>,
 
     // 预览窗口设置
     pub quickpaste_enabled: bool,
@@ -283,6 +287,7 @@ impl Default for AppSettings {
             screenshot_ai_enabled: true,
             screenshot_ai_cloud_confirmed: false,
             screenshot_ai_prompt: String::new(),
+            screenshot_after_capture_actions: vec!["copy".to_string()],
 
             quickpaste_enabled: true,
             quickpaste_shortcut: "Ctrl+`".to_string(),

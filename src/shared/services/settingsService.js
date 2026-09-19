@@ -150,6 +150,10 @@ export const defaultSettings = {
   screenshotAiEnabled: true,
   screenshotAiCloudConfirmed: false,
   screenshotAiPrompt: '',
+  // 截图完成后自动执行的动作链：与 Rust AppSettings.screenshot_after_capture_actions
+  // 对齐（动作集合含 copy/save/pin/ai/copy+pin）。默认仅复制。设置 UI 用
+  // MultiSegmentedControl 多选维护，空数组时回退复制（防止静默不动作）。
+  screenshotAfterCaptureActions: ['copy'],
   
   // AI 配置
   aiTranslationEnabled: false,

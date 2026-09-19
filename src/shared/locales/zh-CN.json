@@ -984,7 +984,14 @@
       "lifecycleModeAutoDesc": "结束截屏后暂时保留窗口，若在设定时间内未再次截屏，将自动释放资源。",
       "autoDisposeMinutes": "自动释放时间",
       "autoDisposeMinutesDesc": "智能模式下：截屏结束后若在此时间内未再次使用截屏功能，将自动释放窗口资源。",
-      "minutes": "分钟"
+      "minutes": "分钟",
+      "afterCapture": "截图后动作",
+      "afterCaptureDesc": "截图完成后自动执行的动作链，按选中顺序执行（至少保留一个动作）。",
+      "afterCaptureCopy": "复制",
+      "afterCapturePin": "贴图",
+      "afterCaptureCopyPin": "复制并贴图",
+      "afterCaptureAi": "AI 识别",
+      "afterCaptureSave": "另存为"
     },
     "sound": {
       "title": "音效设置",

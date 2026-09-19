@@ -8,6 +8,7 @@ import SettingItem from '../components/SettingItem';
 import Toggle from '@shared/components/ui/Toggle';
 import Select from '@shared/components/ui/Select';
 import Input from '@shared/components/ui/Input';
+import MultiSegmentedControl from '@shared/components/ui/MultiSegmentedControl';
 
 function ScreenshotSection({
   settings,
@@ -43,6 +44,25 @@ function ScreenshotSection({
   const lifecycleModeValue = settings.screenshotWindowLifecycleMode || 'quick';
   const [aiConfigured, setAiConfigured] = useState(false);
   const [testingAiConfig, setTestingAiConfig] = useState(false);
+
+  // 截图后动作链：与后端 AppSettings.screenshot_after_capture_actions 对齐。
+  // 动作集合（copy/save/pin/ai/copy+pin）由动作链引擎 execute_workflow 消费。
+  const afterCaptureOptions = [
+    { value: 'copy', label: t('settings.screenshot.afterCaptureCopy') },
+    { value: 'pin', label: t('settings.screenshot.afterCapturePin') },
+    { value: 'copy+pin', label: t('settings.screenshot.afterCaptureCopyPin') },
+    { value: 'ai', label: t('settings.screenshot.afterCaptureAi') },
+    { value: 'save', label: t('settings.screenshot.afterCaptureSave') },
+  ];
+  const afterCaptureActions = Array.isArray(settings.screenshotAfterCaptureActions) && settings.screenshotAfterCaptureActions.length > 0
+    ? settings.screenshotAfterCaptureActions
+    : ['copy'];
+  // 保存对话框需要交互，不能放进自动动作链（用户截完图直接离开场景）。
+  const handleAfterCaptureChange = (next) => {
+    // 至少保留一个动作：全清空会静默不动作，回退复制保证截图后默认可用。
+    const safe = Array.isArray(next) && next.length > 0 ? next : ['copy'];
+    onSettingChange('screenshotAfterCaptureActions', safe);
+  };
 
   useEffect(() => {
     let active = true;
@@ -109,6 +129,10 @@ function ScreenshotSection({
       {lifecycleModeValue === 'auto' && <SettingItem label={t('settings.screenshot.autoDisposeMinutes')} description={t('settings.screenshot.autoDisposeMinutesDesc')}>
           <Input type="number" value={settings.screenshotAutoDisposeMinutes ?? 10} onChange={e => onSettingChange('screenshotAutoDisposeMinutes', parseInt(e.target.value) || 10)} min={1} max={1440} className="w-24" suffix={t('settings.screenshot.minutes')} />
         </SettingItem>}
+
+      <SettingItem label={t('settings.screenshot.afterCapture')} description={t('settings.screenshot.afterCaptureDesc')}>
+        <MultiSegmentedControl values={afterCaptureActions} onChange={handleAfterCaptureChange} options={afterCaptureOptions} wrap columns={2} />
+      </SettingItem>
     </SettingsSection>;
 }
 export default ScreenshotSection;
