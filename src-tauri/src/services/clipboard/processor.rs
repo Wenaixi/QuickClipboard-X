@@ -440,7 +440,7 @@ fn fetch_remote_image(url: &str) -> Result<Vec<u8>, String> {
     // 预检 Content-Length:超过上限直接拒绝,不读 body。
     // 没有 Content-Length 的 chunked 响应在流式限量时同样受上限约束。
     if let Some(content_length) = response.headers().get(CONTENT_LENGTH) {
-        if let Some(len) = content_length.to_str().ok().and_then(|s| s.parse::<u64>()) {
+        if let Some(len) = content_length.to_str().ok().and_then(|s| s.parse::<u64>().ok()) {
             if len > MAX_REMOTE_IMAGE_BYTES as u64 {
                 return Err(format!(
                     "图片体积超过上限 {} MB,拒绝下载",
@@ -489,10 +489,13 @@ fn save_image_as_file(image_data: &[u8]) -> Result<String, String> {
         .with_guessed_format()
         .map_err(|e| format!("图片格式识别失败: {}", e))?;
     // 解码前先查像素数:小文件大像素(如 1x1 但声明 1 亿像素的恶意头)会在
-    // decode 时分配海量内存,必须按上限预检再解码。ImageReader 是 Cursor
-    // 写回(不可 Seek 重建),克隆一读先判像素、原 reader 留待 decode。
-    let mime_checked = reader
-        .clone()
+    // decode 时分配海量内存,必须按上限预检再解码。ImageReader 的
+    // into_dimensions 会消费 reader,先对 reader 重建的独立 reader 判
+    // 像素、原 reader 留待 decode。
+    let mut check_reader = image::ImageReader::new(Cursor::new(image_data))
+        .with_guessed_format()
+        .map_err(|e| format!("图片格式识别失败: {}", e))?;
+    let mime_checked = check_reader
         .into_dimensions()
         .map(|dimensions| {
             let pixel_count = dimensions.0 as u64 * dimensions.1 as u64;

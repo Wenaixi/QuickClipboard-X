@@ -519,9 +519,8 @@ fn text_row_to_string(row: &ClipboardDataItem) -> String {
             .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
             .collect();
         let trimmed = units.as_slice();
-        String::from_utf16(trimmed)
-            .or_else(|_| Ok(String::from_utf16_lossy(trimmed)))
-            .unwrap_or_else(|_: std::str::Utf16Error| String::from_utf8_lossy(&row.raw_data).into_owned())
+        let utf16 = String::from_utf16_lossy(trimmed);
+        String::from_utf16(trimmed).unwrap_or(utf16)
     } else {
         String::from_utf8_lossy(&row.raw_data).into_owned()
     }

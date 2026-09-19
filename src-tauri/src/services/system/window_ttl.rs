@@ -81,9 +81,11 @@ pub fn schedule_ttl_destroy(app: AppHandle, label: &str, idle_ms: u64) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_millis(idle_ms)).await;
 
-        let (label, version) = {
+        // 闭包 async move 只捕获 app 与 label 所有权,不再引用函数参数。
+        let owned_label = label.to_string();
+        let (entry_label, version) = {
             let map = TTL_WINDOWS.lock().unwrap_or_else(|p| p.into_inner());
-            match map.get(label.as_str()) {
+            match map.get(owned_label.as_str()) {
                 Some(entry) => {
                     let v = entry.version.load(Ordering::SeqCst);
                     (entry.label.clone(), v)
@@ -97,11 +99,11 @@ pub fn schedule_ttl_destroy(app: AppHandle, label: &str, idle_ms: u64) {
             return;
         }
 
-        if let Some(window) = app.get_webview_window(label.as_str()) {
+        if let Some(window) = app.get_webview_window(entry_label.as_str()) {
             let _ = window.hide();
             let _ = window.close();
         }
-        unregister_ttl_window(&label);
+        unregister_ttl_window(&entry_label);
     });
 }
 
