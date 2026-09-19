@@ -13,4 +13,6 @@ pub mod receive_box;
 pub mod drop_proxy;
 pub mod annotation;
 #[cfg(target_os = "windows")]
+pub mod color_picker_window;
+#[cfg(target_os = "windows")]
 pub mod screenshot_window;

@@ -1256,7 +1256,9 @@
       "openReceiveBox": "Open Inbox",
       "contentPreview": "Content Preview",
       "globalPaste": "Global Paste",
-      "settings": "Settings"
+      "settings": "Settings",
+      "tools": "Tools",
+      "colorPicker": "Color Picker"
     }
   },
   "floatingToolbar": {

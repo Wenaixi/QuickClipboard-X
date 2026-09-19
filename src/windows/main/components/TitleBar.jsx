@@ -438,6 +438,18 @@ const TitleBar = forwardRef(
           icon: checkIcon(oneTimePasteEnabled),
         }),
       ];
+      const toolsItem = createMenuItem({
+        id: "menu-tools-group",
+        label: t("tools.moreMenu.tools", "工具"),
+        icon: "ti ti-tools",
+      });
+      toolsItem.children = [
+        createMenuItem({
+          id: "menu-open-color-picker",
+          label: t("tools.moreMenu.colorPicker", "取色器"),
+          icon: "ti ti-color-picker",
+        }),
+      ];
       const fileHubItem = createMenuItem({
         id: "menu-file-hub-group",
         label: t("tools.moreMenu.fileHub", "文件中转"),
@@ -477,6 +489,7 @@ const TitleBar = forwardRef(
       const menuItems = [
         fileHubItem,
         webdavItem,
+        toolsItem,
         createSeparator(),
         previewItem,
         displayPriorityItem,
@@ -587,6 +600,16 @@ const TitleBar = forwardRef(
           break;
         case "menu-webdav-download":
           await handleWebdavAction(event, "pull");
+          break;
+        case "menu-open-color-picker":
+          try {
+            const { openColorPicker } = await import(
+              "@shared/api/tools"
+            );
+            await openColorPicker();
+          } catch (error) {
+            console.error("打开取色器失败:", error);
+          }
           break;
         case "menu-clear-clipboard-history":
           try {

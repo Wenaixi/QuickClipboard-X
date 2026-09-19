@@ -1257,7 +1257,9 @@
       "openReceiveBox": "打开收件盒",
       "contentPreview": "内容预览",
       "globalPaste": "全局粘贴",
-      "settings": "设置"
+      "settings": "设置",
+      "tools": "工具",
+      "colorPicker": "取色器"
     }
   },
   "floatingToolbar": {

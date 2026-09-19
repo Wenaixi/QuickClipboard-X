@@ -93,6 +93,10 @@ export default defineConfig({
         if (existsSync(annotationPath)) {
           inputs.annotation = annotationPath
         }
+        const colorPickerPath = resolve(__dirname, 'src/windows/colorPicker/index.html')
+        if (existsSync(colorPickerPath)) {
+          inputs.colorPicker = colorPickerPath
+        }
         return inputs
       })(),
 

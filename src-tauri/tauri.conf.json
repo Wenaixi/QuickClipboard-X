@@ -64,6 +64,22 @@
         "shadow": false,
         "dragDropEnabled": false,
         "visibleOnAllWorkspaces": true
+      },
+      {
+        "label": "color-picker",
+        "title": "取色器",
+        "url": "windows/colorPicker/index.html",
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "resizable": false,
+        "fullscreen": true,
+        "focus": true,
+        "shadow": false,
+        "dragDropEnabled": false,
+        "visibleOnAllWorkspaces": true
       }
     ],
     "security": {
@@ -76,6 +92,7 @@
         "text-editor",
         "screenshot",
         "annotation",
+        "color-picker",
         "input-dialog",
         "context-menu",
         "preview-window",

@@ -215,3 +215,21 @@ pub fn start_screen_recording(app: AppHandle) -> Result<(), String> {
 pub fn stop_screen_recording(app: AppHandle) -> Result<(), String> {
     crate::services::recording::stop_recording(&app)
 }
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+pub fn open_color_picker() -> Result<(), String> {
+    crate::windows::color_picker_window::open_color_picker()
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+pub fn color_picker_ready() {
+    crate::windows::color_picker_window::color_picker_ready()
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+pub fn color_picker_pick_at() -> Result<(), String> {
+    crate::windows::color_picker_window::color_picker_pick_at()
+}

@@ -296,6 +296,12 @@ pub fn run() {
                 commands::screenshot::start_screen_recording,
                 #[cfg(target_os = "windows")]
                 commands::screenshot::stop_screen_recording,
+                #[cfg(target_os = "windows")]
+                commands::screenshot::open_color_picker,
+                #[cfg(target_os = "windows")]
+                commands::screenshot::color_picker_ready,
+                #[cfg(target_os = "windows")]
+                commands::screenshot::color_picker_pick_at,
                 windows::annotation::open_annotation_window,
                 windows::annotation::annotation_finished,
                 windows::annotation::annotation_cancelled,
