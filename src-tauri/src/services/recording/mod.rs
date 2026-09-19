@@ -12,6 +12,9 @@ use crate::services::screenshot::capture::{capture_monitor, ensure_com_initializ
 
 use super::gif_writer::{encode_rgba_frames, GifFrameRate};
 
+pub mod storage;
+pub use storage::{store_recording_to_history, RecordingResult};
+
 pub const RECORDING_MIN_FPS: u8 = 10;
 pub const RECORDING_MAX_FPS: u8 = 15;
 
