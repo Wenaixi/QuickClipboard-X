@@ -4,6 +4,9 @@ use tauri::{AppHandle, Emitter, LogicalSize, Manager, WebviewWindow, WebviewWind
 const LABEL: &str = "context-menu";
 const INITIAL_WIDTH: f64 = 300.0;
 const INITIAL_HEIGHT: f64 = 400.0;
+/// 菜单窗口 hide 复用后的空闲 TTL:超过此时长未被再次弹菜单即销毁,
+/// 释放该窗口占用的 WebView renderer(右键菜单是最频繁的临时窗口)。
+pub(crate) const CONTEXT_MENU_IDLE_TTL_MS: u64 = 30_000;
 
 fn default_item_kind() -> String {
     "item".to_string()
@@ -462,6 +465,9 @@ fn build_or_reuse_window(app: &AppHandle, monitor: MonitorContext, is_tray: bool
         let _ = w.set_size(LogicalSize::new(INITIAL_WIDTH, INITIAL_HEIGHT));
         let _ = w.set_focusable(is_tray);
         let _ = w.set_ignore_cursor_events(false);
+        // 复用即推进 TTL 版本:让既有的空闲销毁计时任务失效(菜单将被
+        // 重新显示,不应在计时到点后被销毁)。
+        crate::services::system::window_ttl::touch_ttl_window(LABEL);
         return Ok(w);
     }
 
@@ -492,6 +498,10 @@ fn build_or_reuse_window(app: &AppHandle, monitor: MonitorContext, is_tray: bool
 
     let _ = window.set_ignore_cursor_events(false);
     let _ = window.set_position(tauri::PhysicalPosition::new(init_phys_x, init_phys_y));
+    // 建窗即登记进 TTL 管理:此后 hide 复用期间的版本推进由 show_menu 的
+    // 复用路径执行(见 build_or_reuse_window),空闲超时销毁由 close_all
+    // 的 schedule_destroy 调度。
+    crate::services::system::window_ttl::register_ttl_window(LABEL);
     Ok(window)
 }
 

@@ -1,4 +1,4 @@
-use super::window::{show_menu, ContextMenuRequest};
+use super::window::{show_menu, ContextMenuRequest, CONTEXT_MENU_IDLE_TTL_MS};
 use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition};
 
 #[cfg(test)]
@@ -56,8 +56,27 @@ mod close_all_sync_guard {
             !body.contains("sleep("),
             "close_all_context_menus 不得在 hide 后 sleep"
         );
+        // 菜单窗口 hide 后必须调度空闲 TTL 销毁(释放 renderer)
+        assert!(
+            body.contains("schedule_ttl_destroy"),
+            "close_all_context_menus 必须在 hide 后调度窗口空闲销毁"
+        );
+        let ttl_pos = body
+            .find("schedule_ttl_destroy")
+            .expect("缺 schedule_ttl_destroy");
+        assert!(
+            hide_pos < ttl_pos,
+            "空闲销毁必须调度于 hide 之后(空闲计时从隐藏时刻起算)"
+        );
+        assert!(
+            body.contains("CONTEXT_MENU_IDLE_TTL_MS"),
+            "菜单窗口 TTL 时长必须来自共享常量"
+        );
     }
 }
+
+// 菜单窗口 hide 复用后的空闲 TTL(毫秒):超过未被再次弹出即销毁。
+// window.rs 定义并公开,commands.rs 与 window.rs 共享同一常量。
 
 #[tauri::command]
 pub fn get_context_menu_options() -> Result<ContextMenuRequest, String> {
@@ -108,6 +127,11 @@ pub fn close_all_context_menus(app: AppHandle) {
     if let Some(w) = app.get_webview_window("context-menu") {
         let _ = w.hide();
     }
+
+    // 菜单窗口 hide 后启动空闲 TTL:超过时长未被再次弹出即销毁,释放
+    // 其 WebView renderer(右键菜单是最高频临时窗口,常驻内存大头)。
+    // 版本推进由 window_ttl 内部处理,下次弹菜单的复用路径 touch 取消。
+    crate::services::system::window_ttl::schedule_ttl_destroy(app, "context-menu", CONTEXT_MENU_IDLE_TTL_MS);
 }
 
 #[tauri::command]
