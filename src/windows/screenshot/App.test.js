@@ -15,7 +15,7 @@ test('截图浮窗中英文语言包完整提供动作和状态文案', () => {
   for (const locale of ['zh-CN', 'en-US']) {
     const messages = JSON.parse(readFileSync(new URL(`../../shared/locales/${locale}.json`, import.meta.url)));
     const screenshot = messages.screenshot;
-    assert.deepEqual(Object.keys(screenshot.actions).sort(), ['ai', 'configureAi', 'copy', 'copy+pin', 'pin', 'save']);
+    assert.deepEqual(Object.keys(screenshot.actions).sort(), ['ai', 'configureAi', 'copy', 'copy+pin', 'edit', 'pin', 'save']);
     for (const key of ['processing', 'selectionLabel', 'cancelLabel', 'cancelFailed', 'sessionNotReady', 'actionFailed', 'openAiSettingsFailed', 'shortcutHint', 'modeSwitchLabel']) {
       assert.equal(typeof screenshot[key], 'string', `${locale} 缺少 screenshot.${key}`);
     }
@@ -726,12 +726,13 @@ test('选区建立后数字键快捷执行动作且快捷键提示展示', () =>
 
 test('动作工具栏快捷键提示完整且点击走单一完成入口', () => {
   const source = readSource('./App.jsx');
-  // ACTIONS 定义：五个动作的快捷键映射必须完整正确（copy+pin 与 ai 无默认快捷键）。
+  // ACTIONS 定义：六个动作的快捷键映射必须完整正确（edit/copy+pin/ai 无默认快捷键）。
   const actionsStart = source.indexOf('const ACTIONS = [');
-  const actionsBody = source.slice(actionsStart, actionsStart + 260);
+  const actionsBody = source.slice(actionsStart, actionsStart + 300);
   assert.ok(actionsBody.includes("{ id: 'copy', shortcut: 'Enter' }"), 'copy 必须映射 Enter');
   assert.ok(actionsBody.includes("{ id: 'save', shortcut: 'Ctrl+S' }"), 'save 必须映射 Ctrl+S');
   assert.ok(actionsBody.includes("{ id: 'pin', shortcut: 'Ctrl+P' }"), 'pin 必须映射 Ctrl+P');
+  assert.ok(actionsBody.includes("{ id: 'edit', shortcut: '' }"), 'edit 必须无默认快捷键');
   assert.ok(actionsBody.includes("{ id: 'copy+pin', shortcut: '' }"), 'copy+pin 必须无默认快捷键');
   assert.ok(actionsBody.includes("{ id: 'ai', shortcut: '' }"), 'ai 必须无默认快捷键');
   // 按钮 title 必须合并 action.shortcut 与 hotkeyForAction（用户悬停可见完整快捷键）。
@@ -830,10 +831,10 @@ test('动作工具栏 id 与热键映射一致且处理中互斥显示 processin
   const source = readSource('./App.jsx');
   const actionsStart = source.indexOf('const ACTIONS = [');
   const actionsBody = source.slice(actionsStart, actionsStart + 300);
-  // 源码护栏一：ACTIONS 必须包含 copy/save/pin/ai/copy+pin 五个 id，且与 actionModel 热键映射值完全一致
+  // 源码护栏一：ACTIONS 必须包含 copy/save/pin/edit/copy+pin/ai 六个 id，且与 actionModel 热键映射值完全一致
   // （工具栏动作集合与数字键映射不得漂移）。
   const actionModel = readFileSync(new URL('./actionModel.js', import.meta.url), 'utf8');
-  const expected = ['copy', 'save', 'pin', 'ai', 'copy+pin'];
+  const expected = ['copy', 'save', 'pin', 'edit', 'copy+pin', 'ai'];
   for (const id of expected) {
     assert.ok(actionModel.includes(`'${id}'`), `热键映射必须包含动作 ${id}`);
     assert.ok(actionsBody.includes(`id: '${id}'`), `ACTIONS 必须包含动作 ${id}`);

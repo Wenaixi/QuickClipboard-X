@@ -56,6 +56,7 @@ const ACTIONS = [
   { id: 'copy', shortcut: 'Enter' },
   { id: 'save', shortcut: 'Ctrl+S' },
   { id: 'pin', shortcut: 'Ctrl+P' },
+  { id: 'edit', shortcut: '' },
   { id: 'copy+pin', shortcut: '' },
   { id: 'ai', shortcut: '' },
 ];

@@ -27,7 +27,7 @@ test('helpEntries 返回全部已知快捷键条目', () => {
 
 test('quickAction 键与 actionModel 的数字键映射保持一致', () => {
   const entry = helpEntries(t).find((item) => item.id === 'quickAction');
-  assert.deepEqual(entry.keys, ['1', '2', '3', '4', '5']);
+  assert.deepEqual(entry.keys, ['1', '2', '3', '4', '5', '6']);
 });
 
 test('helpEntries 每条含非空键与翻译文案', () => {
@@ -52,7 +52,7 @@ test('helpEntries 返回 keys 数组拷贝防止共享引用污染', () => {
   quickAction.keys.push('9');
   quickAction.keys[0] = 'mutated';
   const second = helpEntries(t).find((entry) => entry.id === 'quickAction');
-  assert.deepEqual(second.keys, ['1', '2', '3', '4', '5'], '修改一次调用的 keys 不得污染下一次调用');
+  assert.deepEqual(second.keys, ['1', '2', '3', '4', '5', '6'], '修改一次调用的 keys 不得污染下一次调用');
   // 两次调用返回的对象也必须是独立实例（深拷贝到 keys 层）。
   assert.notEqual(helpEntries(t).find((entry) => entry.id === 'cancel'), helpEntries(t).find((entry) => entry.id === 'cancel'), '每次调用必须返回独立条目对象');
 });
