@@ -238,7 +238,7 @@ fn window_selection_from_rect(
 // 动作列表同时用于校验(validate_screenshot_action)与动作集冻结,不得在
 // 校验处再次枚举字面动作。copy+pin 是组合预设(复制后贴图),edit 是
 // 图像编辑器入口(R3),均引擎内联。
-const SCREENSHOT_ACTIONS: [&str; 6] = ["copy", "save", "pin", "ai", "copy+pin", "edit"];
+const SCREENSHOT_ACTIONS: [&str; 7] = ["copy", "save", "pin", "ai", "copy+pin", "edit", "upload"];
 
 // 动作链引擎(executor)与录制动作对应关系见 workflow.rs execute_workflow;
 // 新增动作需同步:常量数组 + workflow.rs 动作分支 + 初始化动作校验。
@@ -518,9 +518,10 @@ mod source_guards {
         let source = source_file("windows/screenshot_window/mod.rs");
         // 动作合法性必须收口到共享动作集常量，不得在校验处再写字面动作列表
         //（否则动作链新增动作时校验与引擎两处漂移）。
-        assert!(source.contains("const SCREENSHOT_ACTIONS: [&str; 6]"), "必须声明共享动作集常量");
+        assert!(source.contains("const SCREENSHOT_ACTIONS: [&str; 7]"), "必须声明共享动作集常量");
         assert!(source.contains("\"copy+pin\""), "动作集必须包含组合预设 copy+pin");
         assert!(source.contains("\"edit\""), "动作集必须包含图像编辑器动作");
+        assert!(source.contains("\"upload\""), "动作集必须包含上传动作");
         let validate = source.find("fn validate_screenshot_action").expect("缺少动作校验函数");
         let rest = &source[validate..];
         let end = rest.find("fn validate_ai_screenshot_action").map(|i| validate + i).unwrap_or(source.len());

@@ -6,6 +6,7 @@ import SettingItem from '../components/SettingItem';
 import Button from '@shared/components/ui/Button';
 import Input from '@shared/components/ui/Input';
 import Toggle from '@shared/components/ui/Toggle';
+import Select from '@shared/components/ui/Select';
 import { showConfirm } from '@shared/utils/dialog';
 import { formatUserMessage, formatUserMessages } from '@shared/utils/userMessages';
 import { toast } from '@shared/store/toastStore';
@@ -288,6 +289,10 @@ function WebdavSection({ settings, onSettingChange }) {
       {/* 子区 1：连接配置 */}
       <SettingItem label={t('settings.webdav.enabled')} description={t('settings.webdav.enabledDesc')}>
         <Toggle checked={Boolean(settings.webdavEnabled)} onChange={checked => update('webdavEnabled', checked)} />
+      </SettingItem>
+
+      <SettingItem label={t('settings.webdav.uploadTarget')} description={t('settings.webdav.uploadTargetDesc')}>
+        <Select value={settings.uploadTargetId || ''} onChange={value => onSettingChange('uploadTargetId', value)} options={[{ value: 'webdav', label: t('settings.webdav.uploadTargetWebdav') }]} className="w-60" />
       </SettingItem>
 
       <SettingItem label={t('settings.webdav.url')}>

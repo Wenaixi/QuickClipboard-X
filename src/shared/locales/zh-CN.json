@@ -251,7 +251,8 @@
       "edit": "编辑",
       "copy+pin": "复制并贴图",
       "ai": "AI 识别",
-      "configureAi": "配置 AI"
+      "configureAi": "配置 AI",
+      "upload": "上传并复制链接"
     },
     "processing": "处理中",
     "toolbarLabel": "截图操作工具栏",
@@ -494,7 +495,10 @@
       "syncCategoriesDesc": "选择需要参与同步的数据，取消勾选的数据不会参与同步",
       "syncClipboard": "剪贴板历史",
       "syncFavorites": "收藏和分组",
-      "syncImages": "图片"
+      "syncImages": "图片",
+      "uploadTarget": "上传目标",
+      "uploadTargetDesc": "选择截图「上传」动作推送产物的目标。当前支持 WebDAV，需要先在设置中保存地址、用户名与密码。",
+      "uploadTargetWebdav": "WebDAV"
     },
     "general": {
       "title": "常规设置",
@@ -996,7 +1000,8 @@
       "afterCapturePin": "贴图",
       "afterCaptureCopyPin": "复制并贴图",
       "afterCaptureAi": "AI 识别",
-      "afterCaptureSave": "另存为"
+      "afterCaptureSave": "另存为",
+      "afterCaptureUpload": "上传并复制链接"
     },
     "sound": {
       "title": "音效设置",

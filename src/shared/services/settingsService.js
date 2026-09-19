@@ -157,6 +157,8 @@ export const defaultSettings = {
   // 对齐（动作集合含 copy/save/pin/ai/copy+pin）。默认仅复制。设置 UI 用
   // MultiSegmentedControl 多选维护，空数组时回退复制（防止静默不动作）。
   screenshotAfterCaptureActions: ['copy'],
+  // 上传目标 id（R5 上传动作消费）：当前仅 webdav，空=未配置。
+  uploadTargetId: '',
   
   // AI 配置
   aiTranslationEnabled: false,

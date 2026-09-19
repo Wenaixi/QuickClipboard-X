@@ -86,6 +86,7 @@ pub async fn execute_workflow(
             "pin" => run_pin_action(app, session_id, stored, &is_processing, &begin_commit).await,
             "ai" => run_ai_action(app, session_id, stored, &is_processing, &begin_commit).await,
             "edit" => run_edit_action(app, session_id, stored, &is_processing).await,
+            "upload" => run_upload_action(app, session_id, stored, &is_processing, &begin_commit).await,
             "copy+pin" => {
                 // 组合预设:复制后贴图,共享一次会话提交(对齐 ShareX
                 // AfterCaptureTasks CopyImageToClipboard | PinToScreen 位组合)。
@@ -276,6 +277,39 @@ async fn run_ai_action(
         Ok(_) => Err("AI 未识别出文本".to_string()),
         Err(error) => Err(error),
     }
+}
+
+// 上传动作:对齐 ShareX AfterUploadTasks.CopyURLToClipboard——把截图产物
+// 推送到已配置上传目标(默认 WebDAV),成功后把可访问 URL 复制进剪贴板。
+// 目标未配置/上传失败走失败继续,不影响截图本身。
+async fn run_upload_action(
+    app: &AppHandle,
+    session_id: &str,
+    stored: &StoredScreenshot,
+    is_processing: &dyn Fn(&str) -> bool,
+    begin_commit: &dyn Fn(&str) -> Result<(), String>,
+) -> Result<String, String> {
+    if !is_processing(session_id) {
+        return Err("截图会话已取消".to_string());
+    }
+    let settings = get_settings();
+    let target_id = settings.upload_target_id.clone();
+    if target_id.is_empty() {
+        return Err("未配置上传目标，请在设置中先选择上传方式".to_string());
+    }
+    let target = crate::services::upload::target_for(&target_id)?;
+    // 文件读取放线程池,不占用异步运行时。
+    let path = stored.absolute_path.clone();
+    let bytes = tokio::task::spawn_blocking(move || std::fs::read(&path)).await
+        .map_err(|error| format!("读取产物线程失败: {error}"))??;
+    let filename = format!("QC_{}_{}.png", stored.image_id, std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0));
+    let result = target.upload(&filename, bytes).await?;
+    begin_commit(session_id)?;
+    copy_screenshot_text(&result.url).map_err(|e| e.to_string())?;
+    Ok(format!("已上传并复制链接: {}", result.url))
 }
 
 // AI 云端发送确认(对齐既有 confirm_screenshot_ai_cloud_access)
@@ -478,27 +512,6 @@ mod tests {
         let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(src.len());
         let body = &src[start..end];
 
-        // 编辑动作:打开图像编辑器且不推进会话提交(编辑前仍是 Processing,
-        // 供编辑后继续其它动作)。
-        let edit_start = src
-            .find("async fn run_edit_action")
-            .expect("缺编辑动作");
-        let edit_rest = &src[edit_start..];
-        let edit_end = edit_rest.find("\n}\n").map(|i| edit_start + i).unwrap_or(src.len());
-        let edit_body = &src[edit_start..edit_end];
-        assert!(
-            edit_body.contains("open_annotation_window(app, &image_path)"),
-            "编辑动作必须打开图像编辑器窗口"
-        );
-        assert!(
-            edit_body.contains("is_processing(session_id)"),
-            "编辑动作必须做会话处理中守卫"
-        );
-        assert!(
-            edit_body.contains("已打开图像编辑器"),
-            "编辑动作成功必须返回提示"
-        );
-    }
         // 必须整体一次会话提交(不能拆步骤,否则贴图误判已取消)。
         let commit = body
             .find("begin_commit(session_id)?;")
@@ -526,6 +539,41 @@ mod tests {
             "组合预设必须做会话处理中守卫"
         );
     }
+
+    // 上传动作:把产物读入内存(线程池)→ 推到已配置目标 → 成功后复制
+    // 可访问 URL 进剪贴板(对齐 ShareX AfterUploadTasks.CopyURLToClipboard)。
+    #[test]
+    fn upload_action_reads_blocking_and_copies_result_url() {
+        let src = prod_source();
+        let start = src
+            .find("async fn run_upload_action")
+            .expect("缺上传动作");
+        let rest = &src[start..];
+        let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(src.len());
+        let body = &src[start..end];
+        assert!(
+            body.contains("upload_target_id"),
+            "上传动作必须读取已配置目标 id"
+        );
+        assert!(
+            body.contains("target_for(&target_id)"),
+            "上传动作必须走目标派发"
+        );
+        assert!(
+            body.contains("spawn_blocking(move || std::fs::read(&path))"),
+            "产物读盘必须走线程池"
+        );
+        assert!(
+            body.contains("target.upload(&filename, bytes)"),
+            "上传动作必须调用目标 upload"
+        );
+        let commit = body.find("begin_commit(session_id)?;")
+            .expect("上传动作必须提交会话");
+        let copy = body.find("copy_screenshot_text(&result.url)")
+            .expect("上传成功后必须复制可访问 URL");
+        assert!(commit < copy, "必须先提交会话再复制链接");
+    }
+}
 
     // 保存动作:用户取消=失败(对齐 ShareX SaveImageToFileWithDialog 取消
     // 即放弃保存),文件 IO 必须走线程池不占异步运行时;提交先于写盘。

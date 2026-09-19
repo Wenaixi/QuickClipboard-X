@@ -46,13 +46,14 @@ function ScreenshotSection({
   const [testingAiConfig, setTestingAiConfig] = useState(false);
 
   // 截图后动作链：与后端 AppSettings.screenshot_after_capture_actions 对齐。
-  // 动作集合（copy/save/pin/ai/copy+pin）由动作链引擎 execute_workflow 消费。
+  // 动作集合（copy/save/pin/ai/copy+pin/upload）由动作链引擎 execute_workflow 消费。
   const afterCaptureOptions = [
     { value: 'copy', label: t('settings.screenshot.afterCaptureCopy') },
     { value: 'pin', label: t('settings.screenshot.afterCapturePin') },
     { value: 'copy+pin', label: t('settings.screenshot.afterCaptureCopyPin') },
     { value: 'ai', label: t('settings.screenshot.afterCaptureAi') },
     { value: 'save', label: t('settings.screenshot.afterCaptureSave') },
+    { value: 'upload', label: t('settings.screenshot.afterCaptureUpload') },
   ];
   const afterCaptureActions = Array.isArray(settings.screenshotAfterCaptureActions) && settings.screenshotAfterCaptureActions.length > 0
     ? settings.screenshotAfterCaptureActions

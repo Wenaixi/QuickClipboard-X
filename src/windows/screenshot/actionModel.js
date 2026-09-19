@@ -5,8 +5,9 @@ const HOTKEY_ACTIONS = {
   '2': 'save',
   '3': 'pin',
   '4': 'edit',
-  '5': 'copy+pin',
-  '6': 'ai',
+  '5': 'upload',
+  '6': 'copy+pin',
+  '7': 'ai',
 };
 
 export function actionForHotkey(key) {

@@ -251,7 +251,8 @@
       "edit": "Edit",
       "copy+pin": "Copy & Pin",
       "ai": "AI Recognition",
-      "configureAi": "Configure AI"
+      "configureAi": "Configure AI",
+      "upload": "Upload & Copy Link"
     },
     "processing": "Processing",
     "toolbarLabel": "Screenshot actions",
@@ -494,7 +495,10 @@
       "syncCategoriesDesc": "Choose which data participates in sync; unchecked data will not sync",
       "syncClipboard": "Clipboard History",
       "syncFavorites": "Favorites and Groups",
-      "syncImages": "Images"
+      "syncImages": "Images",
+      "uploadTarget": "Upload Target",
+      "uploadTargetDesc": "Choose where the screenshot 'upload' action pushes results. WebDAV is supported; save URL, username and password above first.",
+      "uploadTargetWebdav": "WebDAV"
     },
     "general": {
       "title": "General Settings",
@@ -996,7 +1000,8 @@
       "afterCapturePin": "Pin",
       "afterCaptureCopyPin": "Copy & Pin",
       "afterCaptureAi": "AI Recognition",
-      "afterCaptureSave": "Save As"
+      "afterCaptureSave": "Save As",
+      "afterCaptureUpload": "Upload & Copy Link"
     },
     "sound": {
       "title": "Sound",

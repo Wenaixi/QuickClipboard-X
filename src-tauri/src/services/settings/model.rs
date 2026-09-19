@@ -83,6 +83,10 @@ pub struct AppSettings {
     // 由动作链引擎 execute_workflow 消费，动作集与 SCREENSHOT_ACTIONS 对齐
     //（copy/save/pin/ai/copy+pin）；设置 UI 用多选控件维护，初始默认"仅复制"。
     pub screenshot_after_capture_actions: Vec<String>,
+    // 上传目标 id（R5）：上传动作把截图产物推到已配置目标并把可访问
+    // URL 复制进剪贴板。当前仅 webdav（默认空=未配置），后续 provider
+    // 按 services/upload::UploadTarget trait 扩展。
+    pub upload_target_id: String,
 
     // 预览窗口设置
     pub quickpaste_enabled: bool,
@@ -292,6 +296,7 @@ impl Default for AppSettings {
             screenshot_ai_cloud_confirmed: false,
             screenshot_ai_prompt: String::new(),
             screenshot_after_capture_actions: vec!["copy".to_string()],
+            upload_target_id: String::new(),
 
             quickpaste_enabled: true,
             quickpaste_shortcut: "Ctrl+`".to_string(),
