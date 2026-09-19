@@ -47,6 +47,13 @@ test('TabNavigation sidebar 分支必须渲染合并的 filters+pasteFilters(否
   assert.match(code, /\[\.\.\.filters, \.\.\.pasteFilters\]\.map/, 'sidebar 必须合并渲染两类过滤器');
 });
 
+test('TabNavigation 水平导航过滤按钮必须用多选感知的 isFilterSelected(否则多选时高亮全部消失)', () => {
+  const code = strip(tabNav);
+  const activeCount = (code.match(/isActive=\{isFilterSelected\(filter\.id\)\}/g) || []).length;
+  assert.ok(activeCount >= 3, '水平分支三处(展开/收起/溢出)过滤按钮必须全部用多选感知判断');
+  assert.doesNotMatch(code, /isActive=\{contentFilter === filter\.id\}/, '不允许残留全等比较(多选时活动指示失效)');
+});
+
 test('App.jsx 必须接线粘贴状态过滤全链路(否则 TabNavigation 切换的过滤不会生效)', () => {
   const code = strip(app);
   assert.match(code, /pasteFilter=\{pasteFilter\}/, 'TabNavigation 必须收到 pasteFilter');

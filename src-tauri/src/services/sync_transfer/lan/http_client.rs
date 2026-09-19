@@ -15,6 +15,10 @@ const TRANSFER_CONNECT_TIMEOUT_SECS: u64 = 10;
 const IMAGE_REQUEST_MAX_ATTEMPTS: usize = 3;
 const IMAGE_REQUEST_RETRY_DELAYS_MS: [u64; 2] = [300, 800];
 
+// 局域网图片响应体大小上限：与 WebDAV 响应体同语义（64MB），对端同步的
+// 图片素材按此限量接收，防恶意/异常对端注入超大正文拉爆接收内存。
+const MAX_PEER_IMAGE_BODY_BYTES: usize = 64 * 1024 * 1024;
+
 // 直传客户端整体请求超时:覆盖发送请求体(读本地文件流)与接收响应全程。
 // 此前 build_transfer_client 只设 connect_timeout,发送端卡在流式写一半或
 // 读响应挂起时没有兜底,断网/死固件下传输任务永久占住任务与连接。
@@ -211,8 +215,28 @@ pub async fn fetch_peer_image(peer: &super::peer_store::PairedPeer, image_id: &s
         if !response.status().is_success() {
             return Err(format!("读取局域网图片失败: {}", response.status()));
         }
-        match response.bytes().await {
-            Ok(bytes) => return Ok(Some(bytes.to_vec())),
+        // 响应体大小上限：与 WebDAV 响应体同语义（64MB），预检 Content-Length
+        // 并流式限量累积，防恶意/异常对端或中间人注入超大正文把内存拉爆。
+        if let Some(length) = response.content_length() {
+            if length > MAX_PEER_IMAGE_BODY_BYTES as u64 {
+                return Err(format!("局域网图片响应体超过 {} 字节上限", MAX_PEER_IMAGE_BODY_BYTES));
+            }
+        }
+        match response
+            .bytes_stream()
+            .try_fold(Vec::new(), |mut acc, chunk| async move {
+                if acc.len() + chunk.len() > MAX_PEER_IMAGE_BODY_BYTES {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("局域网图片响应体超过 {} 字节上限", MAX_PEER_IMAGE_BODY_BYTES),
+                    ));
+                }
+                acc.extend_from_slice(&chunk);
+                Ok(acc)
+            })
+            .await
+        {
+            Ok(bytes) => return Ok(Some(bytes)),
             Err(e) if should_retry_transport_error(&e) && attempt + 1 < IMAGE_REQUEST_MAX_ATTEMPTS => {
                 wait_before_image_retry(attempt).await;
                 continue;
@@ -557,6 +581,26 @@ mod transfer_timeout_guards {
         assert!(
             body.contains("WEBDAV_REQUEST_TIMEOUT_SECS"),
             "WebDAV 客户端必须设置整体请求超时"
+        );
+    }
+
+    // 局域网拉图必须限量接收:Content-Length 预检 + 流式累积超限拒绝,
+    // 防恶意/异常对端注入超大响应体拉爆接收内存。
+    #[test]
+    fn peer_image_fetch_enforces_response_body_limit() {
+        let src = strip_line_comments(&source_file("src/services/sync_transfer/lan/http_client.rs"));
+        let body = fn_body(&src, "fetch_peer_image");
+        assert!(
+            body.contains("MAX_PEER_IMAGE_BODY_BYTES"),
+            "局域网拉图必须带响应体大小上限"
+        );
+        assert!(
+            body.contains("response.content_length()"),
+            "必须预检 Content-Length"
+        );
+        assert!(
+            body.contains("bytes_stream()"),
+            "必须流式限量累积而非全量 bytes()"
         );
     }
 }

@@ -99,7 +99,7 @@ fn build_pin_images_children() -> Vec<CtxMenuItem> {
         if total_count > MAX_PIN_IMAGES_DISPLAY {
             children.push(separator_item());
             children.push(menu_item(
-                "pin-open-folder",
+                "pin-open-more",
                 &format!("更多... (共{}张)", total_count),
                 Some("ti ti-dots"),
             ));
@@ -289,6 +289,9 @@ fn handle_tray_menu_selection(app: &AppHandle, selected_id: &str) {
         "pin-open-folder" => {
             open_pin_images_folder();
         }
+        "pin-open-more" => {
+            open_pin_images_folder();
+        }
         id if id.starts_with("pin-image-") => {
             if let Some(file_name) = id.strip_prefix("pin-image-") {
                 let images = get_pin_images_list();
@@ -456,6 +459,31 @@ mod display_name_guard {
         assert!(
             body.contains("app.exit(0)"),
             "quit 分支必须以 app.exit(0) 结束,不得只标记不退出"
+        );
+    }
+
+    // 托盘贴图子菜单两个「打开目录」入口必须使用不同 id:同一菜单内重复 id
+    // 会让菜单框架的 id 分发产生歧义(UX 冗余)。
+    #[test]
+    fn pin_submenu_entries_use_distinct_ids() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/windows/tray/menu.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读 menu.rs");
+        assert!(
+            source.contains("\"pin-open-more\""),
+            "「更多...」入口必须用独立 id pin-open-more"
+        );
+        assert!(
+            source.contains("open_pin_images_folder()"),
+            "两个入口都必须路由到打开贴图目录"
+        );
+        // 菜单项与 handler 两侧的 id 必须成对出现(改了菜单忘了 handler 则点击失效)。
+        let menu_count = source.matches("\"pin-open-more\"").count();
+        assert!(
+            menu_count >= 2,
+            "pin-open-more 必须同时出现在菜单项与 handler 分支"
         );
     }
 }

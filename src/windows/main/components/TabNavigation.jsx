@@ -800,7 +800,7 @@ function TabNavigation({
                           id={filter.id}
                           label={filter.label}
                           icon={filter.icon}
-                          isActive={contentFilter === filter.id}
+                          isActive={isFilterSelected(filter.id)}
                           onClick={onFilterChange}
                           stretch={shouldStretchHorizontalFilters}
                           buttonRef={el => {
@@ -817,7 +817,7 @@ function TabNavigation({
                           id={filter.id}
                           label={filter.label}
                           icon={filter.icon}
-                          isActive={contentFilter === filter.id}
+                          isActive={isFilterSelected(filter.id)}
                           onClick={onFilterChange}
                           stretch={shouldStretchHorizontalFilters}
                           buttonRef={el => {
@@ -840,7 +840,7 @@ function TabNavigation({
                               id={filter.id}
                               label={filter.label}
                               icon={filter.icon}
-                              isActive={contentFilter === filter.id}
+                              isActive={isFilterSelected(filter.id)}
                               onClick={onFilterChange}
                               stretch={false}
                               buttonRef={el => {

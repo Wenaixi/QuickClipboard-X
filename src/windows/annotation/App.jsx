@@ -129,6 +129,9 @@ function AnnotationApp() {
   const [redoStack, setRedoStack] = useState([]);
   const generationRef = useRef(0);
   const draftRef = useRef(null);
+  // 显示空间映射：draw() 每次重绘记录当前缩放与居中偏移，保存时用同一
+  // 映射把显示坐标逆算回原图像素（缩放显示时标注不错位）。
+  const displayTransformRef = useRef({ scale: 1, offsetX: 0, offsetY: 0 });
   const [imagePath, setImagePath] = useState('');
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
 
@@ -150,6 +153,7 @@ function AnnotationApp() {
     const scale = Math.min(displayWidth / image.naturalWidth, displayHeight / image.naturalHeight, 1);
     const offsetX = (displayWidth - image.naturalWidth * scale) / 2;
     const offsetY = (displayHeight - image.naturalHeight * scale) / 2;
+    displayTransformRef.current = { scale, offsetX, offsetY };
     ctx.drawImage(image, offsetX, offsetY, image.naturalWidth * scale, image.naturalHeight * scale);
     ctx.save();
     // 标注层绘制于画布坐标（叠加在图像上方）。
@@ -315,6 +319,10 @@ function AnnotationApp() {
     octx.fillStyle = '#ffffff';
     octx.fillRect(0, 0, image.naturalWidth, image.naturalHeight);
     octx.drawImage(image, 0, 0, image.naturalWidth, image.naturalHeight);
+    // 标注坐标记录于显示空间（CSS 像素），缩放显示时须先把当前映射逆算回
+    // 原图像素：平移 offset 在显示空间补偿后 ÷scale 得图像空间坐标。
+    const { scale, offsetX, offsetY } = displayTransformRef.current;
+    octx.setTransform(dpr / scale, 0, 0, dpr / scale, offsetX * (dpr / scale), offsetY * (dpr / scale));
     drawLayersToContext(octx, layers, image.naturalWidth, image.naturalHeight);
     const base64 = out.toDataURL('image/png').split(',')[1];
     try {

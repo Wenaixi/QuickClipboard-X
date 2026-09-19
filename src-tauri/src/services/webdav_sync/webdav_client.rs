@@ -16,6 +16,9 @@ use super::types::{SyncCollection, WebdavConfig};
 
 const WEBDAV_NETWORK_ERROR: &str = "无法连接 WebDAV 服务，请检查地址、网络或服务器状态";
 
+// 响应体大小上限：与加密分片大小同语义（64MB），防恶意/异常服务端返回
+// 超大正文把客户端内存拉爆（get_raw_bytes 全量入内存路径）。
+const MAX_RESPONSE_BODY_BYTES: usize = 64 * 1024 * 1024;
 // 单个网络请求整体超时上限:覆盖 DNS/连接/请求发送/响应接收全程。
 // 此前 Client::new() 无任何超时,断网或死固件下同步任务会永久挂起;
 // 给大文件上传/下载留 10 分钟余量,普通同步请求远用不完。
@@ -135,6 +138,8 @@ impl WebdavClient {
         self.mkcol("groups").await?;
         self.mkcol("files").await?;
         self.mkcol("tombstones").await?;
+        // uploads 目录供上传目标使用（R5 上传产物物理隔离目录），连接测试一并建好。
+        self.mkcol("uploads").await?;
         Ok(())
     }
 
@@ -276,7 +281,24 @@ impl WebdavClient {
         if !resp.status().is_success() {
             return Err(format_webdav_status_error("读取 WebDAV 文件失败", resp.status()));
         }
-        Ok(Some(resp.bytes().await.map_err(map_reqwest_error)?.to_vec()))
+        // 响应体大小上限：预检 Content-Length（超过直接拒），缺失时用
+        // 流式限量累积，超限同样拒绝——防恶意/异常服务端返回超大正文
+        // 把客户端内存拉爆。
+        let limit = MAX_RESPONSE_BODY_BYTES;
+        if let Some(length) = resp.content_length() {
+            if length > limit as u64 {
+                return Err(format!("WebDAV 响应体超过 {} 字节上限", limit));
+            }
+        }
+        let mut collected = Vec::with_capacity(resp.content_length().unwrap_or(0) as usize);
+        let mut stream = resp.bytes_stream();
+        while let Some(chunk) = stream.try_next().await.map_err(map_reqwest_error)? {
+            if collected.len() + chunk.len() > limit {
+                return Err(format!("WebDAV 响应体超过 {} 字节上限", limit));
+            }
+            collected.extend_from_slice(&chunk);
+        }
+        Ok(Some(collected))
     }
 
     /// 原始 PUT（明文，不经加密）：R5 上传目标（WebDAV uploader）复用此
@@ -429,6 +451,31 @@ fn normalize_path(path: &str) -> String {
         .filter(|p| !p.trim().is_empty())
         .collect::<Vec<_>>()
         .join("/")
+}
+
+// 响应体上限保护的行为护栏：get_raw_bytes 必须同时有 Content-Length 预检
+// 与流式限量累积，任一缺失都会让恶意服务端把响应体全量拉进内存。
+#[cfg(test)]
+mod response_body_limit_guards {
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+    #[test]
+    fn get_raw_bytes_enforces_body_size_limit() {
+        let src = strip_line_comments(&source_file("src/services/webdav_sync/webdav_client.rs"));
+        let body = fn_body(&src, "get_raw_bytes");
+        assert!(
+            body.contains("request(Method::GET, path)"),
+            "get_raw_bytes 仍须以 GET 拉取"
+        );
+        assert!(
+            body.contains("resp.content_length()"),
+            "必须预检 Content-Length"
+        );
+        assert!(
+            body.contains("resp.bytes_stream()"),
+            "必须流式限量累积而非全量 bytes()"
+        );
+    }
 }
 
 fn is_webdav_conflict(error: &str) -> bool {

@@ -17,6 +17,12 @@ pub fn store_qr_png_base64(
     if bytes.is_empty() {
         return Err("二维码 PNG 内容为空".to_string());
     }
+    // PNG 魔数校验：通用画布保存入口（save_qr_png_base64 / save_img_png_base64
+    // 都走本函数）必须保证落盘的是真 PNG，拒绝 JPEG/GIF 等以 .png 后缀欺瞒。
+    // 少于 8 字节的输入同样被拒。
+    if !bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
+        return Err("二维码 PNG 魔数校验失败".to_string());
+    }
     let stored = encode_and_store_png_bytes(bytes)
         .map_err(|error| format!("二维码存储失败: {error}"))?;
     let clipboard_id = crate::services::screenshot::actions::copy_screenshot(&stored)
@@ -46,6 +52,9 @@ mod tests {
         assert!(source.contains("emit_screenshot_history_update(app, clipboard_id)"), "历史事件必须用真实记录 id");
         // 空内容必须拒绝（解码空串/零字节防御）。
         assert!(source.contains("bytes.is_empty()"), "空 PNG 必须拒绝");
+        // PNG 魔数校验：通用画布保存必须先验魔数，拒绝非 PNG 字节以 .png 落盘。
+        assert!(source.contains("starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A])"), "必须校验 PNG 魔数");
+        assert!(source.contains("PNG 魔数校验失败"), "非 PNG 必须报错");
     }
 
     #[test]

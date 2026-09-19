@@ -76,6 +76,10 @@ impl WebdavUploadTarget {
         if filename.trim().is_empty() {
             return Err("上传文件名不能为空".to_string());
         }
+        // 上传前确保 uploads/ 目录存在（与同步域「先 ensure 再 PUT」约定一致，
+        // 多数 WebDAV 服务端对不存在父目录的 PUT 返回 409/412/404）。
+        // mkcol 幂等：目录已存在时服务端返回 405 被容忍，无副作用。
+        self.client.mkcol(UPLOAD_DIR).await?;
         // 上传路径固定 uploads/ 前缀：与同步的 index/cloud_files/groups/
         // tombstones 目录物理隔离，任何情况不写这些同步目录。
         let remote = format!("{UPLOAD_DIR}/{}", filename.trim());
@@ -124,6 +128,8 @@ mod tests {
         // 上传路径必须固定 uploads/ 前缀（与同步目录物理隔离）。
         assert!(source.contains("let remote = format!(\"{UPLOAD_DIR}/{}\", filename.trim());"),
             "上传路径必须固定 uploads/ 前缀");
+        assert!(source.contains("self.client.mkcol(UPLOAD_DIR).await?"),
+            "上传前必须先 mkcol 确保 uploads/ 目录存在（首次上传不依赖服务器自动建父目录）");
         assert!(source.contains("put_raw_bytes"), "必须走明文 PUT 原语");
         assert!(source.contains("url: url.clone()"), "可访问 URL 必须回读");
     }
