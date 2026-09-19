@@ -30,9 +30,11 @@ impl Display for UploadResult {
 pub trait UploadTarget: Send + Sync {
     fn id(&self) -> &str;
     fn name(&self) -> &str;
-    fn upload(
-        &self,
-        filename: &str,
+    /// upload 借用的 future 同时捕获 &self 与 &filename，二者必须共享
+    /// 同一生命周期参数，Boxed Future 的 `'a` 才与借用一致（dyn 兼容）。
+    fn upload<'a>(
+        &'a self,
+        filename: &'a str,
         bytes: Vec<u8>,
-    ) -> Pin<Box<dyn Future<Output = Result<UploadResult, String>> + Send + '_>>;
+    ) -> Pin<Box<dyn Future<Output = Result<UploadResult, String>> + Send + 'a>>;
 }

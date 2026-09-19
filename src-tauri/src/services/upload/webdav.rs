@@ -61,11 +61,11 @@ impl UploadTarget for WebdavUploadTarget {
         "WebDAV"
     }
 
-    fn upload(
-        &self,
-        filename: &str,
+    fn upload<'a>(
+        &'a self,
+        filename: &'a str,
         bytes: Vec<u8>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<UploadResult, String>> + Send + '_>>
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<UploadResult, String>> + Send + 'a>>
     {
         Box::pin(self.upload_inner(filename, bytes))
     }
