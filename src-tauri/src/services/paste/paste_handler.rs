@@ -276,10 +276,11 @@ fn build_plain_text_payload(
     raw_formats: &[ClipboardDataItem],
 ) -> Result<Vec<RsClipboardContent>, String> {
     if let Some(raw_text) = find_preferred_text_row(raw_formats) {
-        return Ok(vec![RsClipboardContent::Other(
-            raw_text.format_name.clone(),
-            raw_text.raw_data.clone(),
-        )]);
+        // CF_UNICODETEXT 的 raw_data 是 UTF-16LE 编码字节、CF_TEXT 是 ANSI 字节,
+        // 解码为 UTF-8 字符串推 Text 形态——与捕获侧纯文本识别为 Text 的哈希
+        // 口径一致,预置哈希才能命中自粘贴 fast-path 去重;HTML/RTF 等非纯文本
+        // 格式仍走 Other。
+        return Ok(vec![RsClipboardContent::Text(text_row_to_string(raw_text))]);
     }
 
     if item.content.starts_with("files:") {
@@ -359,10 +360,17 @@ fn build_all_formats_payload(
             continue;
         }
 
-        payload.push(RsClipboardContent::Other(
-            row.format_name.clone(),
-            row.raw_data.clone(),
-        ));
+        // 文本格式行优先进 Text 形态([u8] 按 UTF-16LE 解码成 UTF-8 字符串)
+        // ——与捕获侧纯文本识别为 Text 的哈希口径对齐,预置哈希才能命中
+        // 自粘贴 fast-path;HTML/RTF/HDROP 等非纯文本格式仍走 Other。
+        if matches!(row.format_name.as_str(), "CF_UNICODETEXT" | "CF_TEXT") {
+            payload.push(RsClipboardContent::Text(text_row_to_string(row)));
+        } else {
+            payload.push(RsClipboardContent::Other(
+                row.format_name.clone(),
+                row.raw_data.clone(),
+            ));
+        }
     }
 
     // 多格式粘贴时兜底写入标准文本，确保只能接收纯文本的目标可粘贴
@@ -500,6 +508,25 @@ fn find_preferred_text_row<'a>(
         .or_else(|| find_raw_row(raw_formats, "CF_TEXT"))
 }
 
+// 把剪贴板文本格式行解码成 UTF-8 字符串:CF_UNICODETEXT 的 raw_data 是
+// UTF-16LE 编码字节,CF_TEXT 是 ANSI 字节(系统默认代码页)。解码失败时
+// 退回逐字节转字符的保底(极端非法编码也不阻塞粘贴)。
+fn text_row_to_string(row: &ClipboardDataItem) -> String {
+    if row.format_name == "CF_UNICODETEXT" {
+        let units: Vec<u16> = row
+            .raw_data
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+        let trimmed = units.as_slice();
+        String::from_utf16(trimmed)
+            .or_else(|_| Ok(String::from_utf16_lossy(trimmed)))
+            .unwrap_or_else(|_| String::from_utf8_lossy(&row.raw_data).into_owned())
+    } else {
+        String::from_utf8_lossy(&row.raw_data).into_owned()
+    }
+}
+
 fn find_raw_row<'a>(
     raw_formats: &'a [ClipboardDataItem],
     format_name: &str,
@@ -627,6 +654,49 @@ mod tests {
             resolve.matches("join(\"clipboard_images\")").count(),
             1,
             "resolve 体只允许一处拼路径"
+        );
+    }
+
+    // 纯文本粘贴必须优先进 Text 形态:CF_UNICODETEXT/CF_TEXT 的原始字节与
+    // 捕获侧纯文本识别为 Text 的 UTF-8 文本哈希口径不一致,若继续用 Other
+    // 包装,预置哈希与捕获哈希必然失配,自粘贴 fast-path 失效、重复项落到
+    // find_duplicate_item 兜底把该项刷到首位,pasteToTop=false 设置失效。
+    #[test]
+    fn plain_text_payload_uses_text_variant_for_preferred_text_row() {
+        let src = paste_source();
+        let plain = fn_body(&src, "build_plain_text_payload");
+        assert!(
+            plain.contains("RsClipboardContent::Text("),
+            "纯文本路径必须推 Text 形态"
+        );
+        assert!(
+            plain.contains("text_row_to_string(raw_text)"),
+            "CF_UNICODETEXT 原始字节必须解码后进 Text"
+        );
+        assert_eq!(
+            plain.matches("RsClipboardContent::Other(").count(),
+            0,
+            "纯文本路径不得再用 Other 包装文本格式"
+        );
+
+        let all_formats = fn_body(&src, "build_all_formats_payload");
+        assert!(
+            all_formats.contains("text_row_to_string(row)"),
+            "多格式路径的文本行必须解码进 Text 形态"
+        );
+        assert!(
+            all_formats.contains("\"CF_UNICODETEXT\" | \"CF_TEXT\""),
+            "多格式路径必须按格式名判定文本行"
+        );
+
+        let decoder = fn_body(&src, "text_row_to_string");
+        assert!(
+            decoder.contains("String::from_utf16"),
+            "CF_UNICODETEXT 必须按 UTF-16 解码"
+        );
+        assert!(
+            decoder.contains("String::from_utf8_lossy"),
+            "CF_TEXT(ANSI)必须按字节保底解码"
         );
     }
 

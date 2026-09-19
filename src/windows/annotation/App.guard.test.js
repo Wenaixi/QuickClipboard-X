@@ -24,6 +24,21 @@ test('编辑器保存必须走通用画布命令 save_img_png_base64', () => {
   assert.ok(appSource.includes("octx.fillStyle = '#ffffff'"), '保存必须合成白底');
 });
 
+test('编辑器保存失败必须提示并保持窗口打开,不得无条件关窗', () => {
+  assert.ok(appSource.includes("from '@shared/utils/dialog'"), '保存失败必须走共享错误提示');
+  assert.ok(appSource.includes('await showError('), 'catch 分支必须调用 showError 展示错误');
+  // 关键护栏:未成功保存前禁止关窗——showError 之后必须 return,close() 只能出现在成功路径。
+  const catchPos = appSource.indexOf('保存编辑器结果失败');
+  const showErrorPos = appSource.indexOf('await showError(');
+  assert.ok(catchPos !== -1 && showErrorPos !== -1, 'catch 分支与 showError 都必须存在');
+  const closePos = appSource.indexOf("await getCurrentWindow().close()");
+  assert.ok(closePos !== -1, '成功路径必须关窗');
+  assert.ok(
+    appSource.includes('return;') && catchPos < closePos,
+    '失败分支必须 return 不关窗,close() 只能出现在成功路径',
+  );
+});
+
 test('编辑器必须实接三 model（非仅摆设）', () => {
   // 三 model 导出必须被 App.jsx 真实消费。
   for (const layerExport of ['createLayer', 'addLayer', 'updateLayer', 'removeLayer', 'reorderLayer']) {

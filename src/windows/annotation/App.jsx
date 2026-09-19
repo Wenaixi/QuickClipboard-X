@@ -9,6 +9,7 @@ import { createRoot } from 'react-dom/client';
 import { listen } from '@tauri-apps/api/event';
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { showError } from '@shared/utils/dialog';
 import {
   createLayer,
   addLayer,
@@ -320,7 +321,11 @@ function AnnotationApp() {
       // 落剪贴板历史复用通用画布保存命令（与白板一致）。
       await invoke('save_img_png_base64', { pngBase64: base64 });
     } catch (error) {
+      // 保存失败(落盘/剪贴板/历史写库任一步)必须提示用户并保持窗口打开——
+      // 无条件关窗会让用户误以为保存成功,标注成果静默丢失。
       console.error('保存编辑器结果失败:', error);
+      await showError('保存失败,请重试:' + String(error?.message || error));
+      return;
     }
     await getCurrentWindow().close().catch(() => {});
   };

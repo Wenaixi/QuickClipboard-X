@@ -18,6 +18,10 @@ import {
 const PLACEHOLDER_SRC = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeGxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxyZWN0IHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiBmaWxsPSIjZjBmMGYwIi8+PC9zdmc+';
 const ERROR_SRC = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeGxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxyZWN0IHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiBmaWxsPSIjZmZlYmVlIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiNjNjI4MjgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj7lpb3ml7bplK7mj5DmnKzmiqUgPC90ZXh0Pjwvc3ZnPg==';
 const HTML_SURFACE_BORDER_SIZE = 2;
+// 图片 ID 白名单:与后端 is_valid_image_id 同语义。imageId 直接拼
+// `${dataDir}/clipboard_images/{id}.png`,恶意 `..` 可越出图片目录读写
+// appdata 内任意文件,拼路径前必须校验。
+const IMAGE_ID_WHITELIST = /^[A-Za-z0-9_-]{1,128}$/;
 
 function copyChildNodes(source, target) {
   const fragment = document.createDocumentFragment();
@@ -28,6 +32,9 @@ function copyChildNodes(source, target) {
 }
 
 function resolveImageIdToAsset(imageId) {
+  if (!IMAGE_ID_WHITELIST.test(imageId)) {
+    return Promise.reject(new Error('图片 ID 不合法'));
+  }
   return invoke('get_data_directory').then((dataDir) => {
     const filePath = `${dataDir}/clipboard_images/${imageId}.png`;
     return convertFileSrc(filePath, 'asset');
@@ -248,7 +255,11 @@ const HtmlPreview = forwardRef(function HtmlPreview(
           img.src = PLACEHOLDER_SRC;
           img.classList.add('html-image-pending');
           try {
+            // 白名单校验集中在 resolveImageIdToAsset:不合法直接 reject 走失败分支。
             const filePath = `${dataDir}/clipboard_images/${imageId}.png`;
+            if (!IMAGE_ID_WHITELIST.test(imageId)) {
+              throw new Error('图片 ID 不合法');
+            }
             img.src = convertFileSrc(filePath, 'asset');
           } catch (error) {
             console.error('加载本地图片失败，恢复原始src:', error, 'imageId:', imageId);

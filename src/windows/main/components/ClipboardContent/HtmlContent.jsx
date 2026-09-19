@@ -7,6 +7,10 @@ import { applyHtmlLayout } from '@shared/utils/htmlLayout';
 
 const PLACEHOLDER_SRC = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2YwZjBmMCIvPjwvc3ZnPg==';
 const ERROR_SRC = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2ZmZWJlZSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjEyIiBmaWxsPSIjYzYyODI4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+5Zu+54mH5Yqg6L295aSx6LSlPC90ZXh0Pjwvc3ZnPg==';
+// 图片 ID 白名单:与后端 is_valid_image_id 同语义。data-image-id 直接拼
+// `${dataDir}/clipboard_images/{id}.png` 调 convertFileSrc,恶意 `..`/
+// 绝对路径可越出图片目录读写 appdata 内任意文件,必须拼路径前校验。
+const IMAGE_ID_WHITELIST = /^[A-Za-z0-9_-]{1,128}$/;
 
 // HTML 富文本内容组件
 function HtmlContent({
@@ -46,6 +50,13 @@ function HtmlContent({
       // 优先使用 data-image-id
       if (imageId) {
         const originalSrc = img.src;
+        // 白名单不合法直接回退原 src,不得拼路径调 convertFileSrc。
+        if (!IMAGE_ID_WHITELIST.test(imageId)) {
+          img.classList.add('html-image-pending');
+          img.src = ERROR_SRC;
+          img.classList.remove('html-image-pending');
+          return;
+        }
         img.src = PLACEHOLDER_SRC;
         img.classList.add('html-image-pending');
         invoke('get_data_directory').then(dataDir => {
@@ -60,6 +71,14 @@ function HtmlContent({
         });
       } else if (src && src.startsWith('image-id:')) {
         const legacyImageId = src.substring(9);
+        // 历史 image-id: 前缀同款白名单,不合法直接置失败占位。
+        if (!IMAGE_ID_WHITELIST.test(legacyImageId)) {
+          img.classList.add('html-image-pending');
+          img.src = ERROR_SRC;
+          img.alt = '图片加载失败';
+          img.classList.remove('html-image-pending');
+          return;
+        }
         img.src = PLACEHOLDER_SRC;
         img.classList.add('html-image-pending');
         invoke('get_data_directory').then(dataDir => {

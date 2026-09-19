@@ -27,6 +27,12 @@ static IMG_SRC_SQ_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 use crate::utils::cf_html::normalize_clipboard_html;
 
+// 远程图片下载体上限:与 webdav_sync 加密分块上限同值,超限整体拒绝。
+// 剪贴板 HTML 的内嵌外链图会被自动下载,无上限时恶意响应可无限占用内存。
+const MAX_REMOTE_IMAGE_BYTES: usize = 64 * 1024 * 1024;
+// 解码前像素数上限(48MP,对应 64MB 上限下的合法放大极限),防小文件大像素。
+const MAX_REMOTE_IMAGE_PIXELS: u64 = 48_000_000;
+
 
 // 文件信息结构
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -414,25 +420,52 @@ fn fetch_image_data(src: &str) -> Result<Vec<u8>, String> {
 // 下载网络图片
 fn fetch_remote_image(url: &str) -> Result<Vec<u8>, String> {
     use reqwest::blocking::Client;
+    use reqwest::header::CONTENT_LENGTH;
+    use std::io::Read;
     use std::time::Duration;
-    
+
     let client = Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
         .map_err(|e| format!("创建HTTP客户端失败: {}", e))?;
-    
+
     let response = client.get(url)
         .send()
         .map_err(|e| format!("下载图片失败: {}", e))?;
-    
+
     if !response.status().is_success() {
         return Err(format!("下载图片失败: HTTP {}", response.status()));
     }
-    
-    let bytes = response.bytes()
+
+    // 预检 Content-Length:超过上限直接拒绝,不读 body。
+    // 没有 Content-Length 的 chunked 响应在流式限量时同样受上限约束。
+    if let Some(content_length) = response.headers().get(CONTENT_LENGTH) {
+        if let Ok(len) = content_length.to_str().ok().and_then(|s| s.parse::<u64>()) {
+            if len > MAX_REMOTE_IMAGE_BYTES as u64 {
+                return Err(format!(
+                    "图片体积超过上限 {} MB,拒绝下载",
+                    MAX_REMOTE_IMAGE_BYTES / (1024 * 1024)
+                ));
+            }
+        }
+    }
+
+    // 流式限量读取:take(limit+1),多读到的那个字节就是超限信号——
+    // 比 10s 超时更直接,防 chunked 无 Content-Length 的超大响应。
+    let mut limited = response.take(MAX_REMOTE_IMAGE_BYTES as u64 + 1);
+    let mut bytes = Vec::new();
+    limited
+        .read_to_end(&mut bytes)
         .map_err(|e| format!("读取图片数据失败: {}", e))?;
-    
-    Ok(bytes.to_vec())
+
+    if bytes.len() > MAX_REMOTE_IMAGE_BYTES {
+        return Err(format!(
+            "图片体积超过上限 {} MB,拒绝下载",
+            MAX_REMOTE_IMAGE_BYTES / (1024 * 1024)
+        ));
+    }
+
+    Ok(bytes)
 }
 
 // 解析Data URL
@@ -452,12 +485,25 @@ fn parse_data_url(data_url: &str) -> Result<Vec<u8>, String> {
 fn save_image_as_file(image_data: &[u8]) -> Result<String, String> {
     // 解码图片
     let cursor = Cursor::new(image_data);
-    let img = image::ImageReader::new(cursor)
+    let reader = image::ImageReader::new(cursor)
         .with_guessed_format()
-        .map_err(|e| format!("图片格式识别失败: {}", e))?
+        .map_err(|e| format!("图片格式识别失败: {}", e))?;
+    // 解码前先查像素数:小文件大像素(如 1x1 但声明 1 亿像素的恶意头)会在
+    // decode 时分配海量内存,必须按上限预检再解码。
+    if let Ok(dimensions) = reader.into_dimensions() {
+        let pixel_count = dimensions.0 as u64 * dimensions.1 as u64;
+        if pixel_count > MAX_REMOTE_IMAGE_PIXELS {
+            return Err("图片像素数超过上限,拒绝解码".to_string());
+        }
+    }
+    let img = reader
         .decode()
         .map_err(|e| format!("图片解码失败: {}", e))?;
-    
+    let (width, height) = (img.width() as u64, img.height() as u64);
+    if width.saturating_mul(height) > MAX_REMOTE_IMAGE_PIXELS {
+        return Err("图片像素数超过上限,拒绝保存".to_string());
+    }
+
     // 编码为PNG格式
     let mut png_data = Vec::new();
     {
@@ -615,6 +661,100 @@ mod tests {
         assert!(
             body.contains("HTML_TAG_RE") && body.contains("HTML_ENTITY_RE"),
             "strip_html 应使用共享 HTML_TAG_RE / HTML_ENTITY_RE"
+        );
+    }
+
+    // 远程图片下载必须有体量上限:剪贴板 HTML 内嵌外链图被自动下载,
+    // 无上限时恶意响应可无限占用内存。Content-Length 预检 + 流式限量 +
+    // 上限常量三重守卫缺一不可(防 chunked 无头、防超限响应)。
+    #[test]
+    fn fetch_remote_image_enforces_download_size_limit() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/clipboard/processor.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读 processor.rs");
+        let prod = source
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or(&source);
+        let body: String = prod
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let start = body
+            .find("fn fetch_remote_image")
+            .expect("找不到 fetch_remote_image");
+        let after = &body[start..];
+        let end = after
+            .find("\nfn ")
+            .map(|i| start + i)
+            .unwrap_or(body.len());
+        let fetch_body = &body[start..end];
+        assert!(
+            fetch_body.contains("MAX_REMOTE_IMAGE_BYTES"),
+            "下载体量必须引用上限常量"
+        );
+        assert!(
+            fetch_body.contains("CONTENT_LENGTH"),
+            "必须读取 Content-Length 头做预检"
+        );
+        assert!(
+            fetch_body.contains(".take("),
+            "必须用流式限量截断读取,防 chunked 无头响应"
+        );
+        assert!(
+            !fetch_body.contains("response.bytes()"),
+            "禁止整包一次性读入(无限量)"
+        );
+    }
+
+    // 保存解码前必须做像素数预检:小文件大像素(如声明 1 亿像素的头部)
+    // 会在 image decode 时分配海量内存,必须按上限拒掉再解码。
+    #[test]
+    fn save_image_as_file_checks_pixel_count_before_decode() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/clipboard/processor.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读 processor.rs");
+        let prod = source
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or(&source);
+        let body: String = prod
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = body
+            .find("fn save_image_as_file")
+            .expect("找不到 save_image_as_file");
+        let after = &body[start..];
+        let end = after
+            .find("\nfn ")
+            .map(|i| start + i)
+            .unwrap_or(body.len());
+        let save_body = &body[start..end];
+        assert!(
+            save_body.contains("into_dimensions()"),
+            "解码前必须读取声明尺寸做像素预检"
+        );
+        assert!(
+            save_body.contains("MAX_REMOTE_IMAGE_PIXELS"),
+            "像素预检必须引用上限常量"
+        );
+        let decode_pos = save_body
+            .find(".decode()")
+            .expect("保存路径必须解码图片");
+        let pixels_pos = save_body
+            .find("MAX_REMOTE_IMAGE_PIXELS")
+            .expect("像素预检必须存在");
+        assert!(
+            pixels_pos < decode_pos,
+            "像素预检必须早于 decode,否则小文件大像素仍在解码时放大内存"
         );
     }
 }

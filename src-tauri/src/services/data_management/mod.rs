@@ -113,6 +113,33 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
+// 把目录(含全部子层级)递归写入 zip,条目名保持 `prefix/<相对路径>`。
+// backup_full_zip 与 export_data_zip 共用:图库按分组子目录存储,
+// 扁平遍历会漏掉子目录图片,必须递归。
+fn add_dir_to_zip(
+    base: &Path,
+    dir: &Path,
+    prefix: &str,
+    zip: &mut zip::ZipWriter<fs::File>,
+    options: zip::write::SimpleFileOptions,
+) -> Result<(), String> {
+    for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        let rel = path.strip_prefix(base).map_err(|e| e.to_string())?;
+        if path.is_dir() {
+            add_dir_to_zip(base, &path, prefix, zip, options)?;
+        } else {
+            let zip_path = Path::new(prefix).join(rel);
+            let mut f = fs::File::open(&path).map_err(|e| format!("读取文件失败: {}", e))?;
+            let zip_name = zip_path.to_string_lossy();
+            zip.start_file(zip_name.as_ref(), options).map_err(|e| e.to_string())?;
+            std::io::copy(&mut f, zip).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 fn backup_full_zip(dir: &Path) -> Result<Option<PathBuf>, String> {
     let db = dir.join("quickclipboard.db");
     let images_dir = dir.join("clipboard_images");
@@ -153,59 +180,22 @@ fn backup_full_zip(dir: &Path) -> Result<Option<PathBuf>, String> {
     }
 
     if images_dir.exists() {
-        for entry in fs::read_dir(&images_dir).into_iter().flatten().flatten() {
-            let path = entry.path();
-            if path.is_file() {
-                if let Some(fname) = path.file_name().and_then(|s| s.to_str()) {
-                    let zip_path = format!("clipboard_images/{}", fname);
-                    let mut f = fs::File::open(&path).map_err(|e| e.to_string())?;
-                    zip.start_file(&zip_path, options).map_err(|e| e.to_string())?;
-                    std::io::copy(&mut f, &mut zip).map_err(|e| e.to_string())?;
-                }
-            }
-        }
+        add_dir_to_zip(&images_dir, &images_dir, "clipboard_images", &mut zip, options)?;
     }
 
     if image_library_dir.exists() {
-        for entry in fs::read_dir(&image_library_dir).into_iter().flatten().flatten() {
-            let path = entry.path();
-            if path.is_file() {
-                if let Some(fname) = path.file_name().and_then(|s| s.to_str()) {
-                    let zip_path = format!("image_library/{}", fname);
-                    let mut f = fs::File::open(&path).map_err(|e| e.to_string())?;
-                    zip.start_file(&zip_path, options).map_err(|e| e.to_string())?;
-                    std::io::copy(&mut f, &mut zip).map_err(|e| e.to_string())?;
-                }
-            }
-        }
+        // 图库按分组子目录存储(默认分组/自定义分组),必须递归收全部层级,
+        // 扁平 read_dir 只读顶层会漏掉分组子目录里的全部图片,重置/替换导入
+        // 删除图库后备份无可回滚。
+        add_dir_to_zip(&image_library_dir, &image_library_dir, "image_library", &mut zip, options)?;
     }
 
     if pin_images_dir.exists() {
-        for entry in fs::read_dir(&pin_images_dir).into_iter().flatten().flatten() {
-            let path = entry.path();
-            if path.is_file() {
-                if let Some(fname) = path.file_name().and_then(|s| s.to_str()) {
-                    let zip_path = format!("pin_images/{}", fname);
-                    let mut f = fs::File::open(&path).map_err(|e| e.to_string())?;
-                    zip.start_file(&zip_path, options).map_err(|e| e.to_string())?;
-                    std::io::copy(&mut f, &mut zip).map_err(|e| e.to_string())?;
-                }
-            }
-        }
+        add_dir_to_zip(&pin_images_dir, &pin_images_dir, "pin_images", &mut zip, options)?;
     }
 
     if app_icons_dir.exists() {
-        for entry in fs::read_dir(&app_icons_dir).into_iter().flatten().flatten() {
-            let path = entry.path();
-            if path.is_file() {
-                if let Some(fname) = path.file_name().and_then(|s| s.to_str()) {
-                    let zip_path = format!("app_icons/{}", fname);
-                    let mut f = fs::File::open(&path).map_err(|e| e.to_string())?;
-                    zip.start_file(&zip_path, options).map_err(|e| e.to_string())?;
-                    std::io::copy(&mut f, &mut zip).map_err(|e| e.to_string())?;
-                }
-            }
-        }
+        add_dir_to_zip(&app_icons_dir, &app_icons_dir, "app_icons", &mut zip, options)?;
     }
 
     if let Ok(settings_path) = SettingsStorage::get_settings_path() {
@@ -1307,41 +1297,6 @@ pub fn export_data_zip(target_path: PathBuf) -> Result<PathBuf, String> {
             }
         }
 
-        fn add_dir_to_zip(base: &Path, dir: &Path, prefix: &str, zip: &mut zip::ZipWriter<fs::File>, options: zip::write::SimpleFileOptions) -> Result<(), String> {
-            for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
-                let entry = entry.map_err(|e| e.to_string())?;
-                let path = entry.path();
-                let rel = path.strip_prefix(base).map_err(|e| e.to_string())?;
-                if path.is_dir() {
-                    add_dir_to_zip(base, &path, prefix, zip, options)?;
-                } else {
-                    let zip_path = Path::new(prefix).join(rel);
-                    let mut f = fs::File::open(&path).map_err(|e| format!("读取文件失败: {}", e))?;
-                    let zip_name = zip_path.to_string_lossy();
-                    zip.start_file(zip_name.as_ref(), options).map_err(|e| e.to_string())?;
-                    std::io::copy(&mut f, zip).map_err(|e| e.to_string())?;
-                }
-            }
-            Ok(())
-        }
-
-        if images_dir.exists() {
-            add_dir_to_zip(&images_dir, &images_dir, "clipboard_images", &mut zip, options)?;
-        }
-
-        if image_library_dir.exists() {
-            add_dir_to_zip(&image_library_dir, &image_library_dir, "image_library", &mut zip, options)?;
-        }
-
-        if app_icons_dir.exists() {
-            add_dir_to_zip(&app_icons_dir, &app_icons_dir, "app_icons", &mut zip, options)?;
-        }
-
-        let pin_images_dir = current_dir.join("pin_images");
-        if pin_images_dir.exists() {
-            add_dir_to_zip(&pin_images_dir, &pin_images_dir, "pin_images", &mut zip, options)?;
-        }
-
         if settings_path.exists() {
             let mut f = fs::File::open(&settings_path).map_err(|e| format!("读取settings失败: {}", e))?;
             zip.start_file("settings.json", options).map_err(|e| e.to_string())?;
@@ -1364,7 +1319,7 @@ pub fn export_data_zip(target_path: PathBuf) -> Result<PathBuf, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::safe_zip_entry_name;
+    use super::{add_dir_to_zip, safe_zip_entry_name};
     use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
 
     // 备份缺图库/贴图:backup_full_zip 必须覆盖全部会被 reset/替换导入
@@ -1383,14 +1338,48 @@ mod tests {
                 dir
             );
         }
-        // 每个被清目录都必须出现在 zip 前缀里(format!("xxx/{{}}", fname))
-        for prefix in ["clipboard_images/", "image_library/", "pin_images/", "app_icons/"] {
+        // 备份必须递归收目录(图库按分组子目录存储,扁平遍历漏子目录)。
+        // 各目录统一走 add_dir_to_zip,禁止回归成顶层 read_dir 平铺。
+        let dir_names = [
+            ("images", "clipboard_images"),
+            ("image_library", "image_library"),
+            ("pin_images", "pin_images"),
+            ("app_icons", "app_icons"),
+        ];
+        for (var_suffix, prefix) in dir_names {
             assert!(
-                body.contains(&format!("{prefix}{{}}")),
-                "备份必须写入 {} 前缀的 zip 条目",
-                prefix
+                body.contains(&format!(
+                    "add_dir_to_zip(&{var_suffix}_dir, &{var_suffix}_dir, \"{prefix}\""
+                )),
+                "备份必须用 add_dir_to_zip 递归写入 {prefix}"
             );
         }
+        assert!(
+            body.contains("add_dir_to_zip"),
+            "备份必须递归调用 add_dir_to_zip"
+        );
+        assert!(
+            !body.contains("format!(\"image_library/{}\""),
+            "禁止回归成 image_library 顶层 read_dir 平铺(漏分组子目录)"
+        );
+    }
+
+    // 备份递归遍历的纵深:add_dir_to_zip 必须递归进入子目录,否则图库按
+    // 分组子目录存储时备份仍漏收。断言递归调用存在(与 export 同用模块级函数)。
+    #[test]
+    fn add_dir_to_zip_is_recursive() {
+        let body = fn_body(
+            &strip_line_comments(&source_file("src/services/data_management/mod.rs")),
+            "add_dir_to_zip",
+        );
+        assert!(
+            body.contains("path.is_dir()"),
+            "递归遍历必须识别子目录"
+        );
+        assert!(
+            body.contains("add_dir_to_zip(base, &path, prefix, zip, options)"),
+            "命中子目录必须递归调用自身"
+        );
     }
 
     // 关库早返不重开:export_data_zip close_database 后必须保证

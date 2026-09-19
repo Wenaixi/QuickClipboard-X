@@ -4,6 +4,7 @@
 
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
+import { showError } from '@shared/utils/dialog';
 
 const TOOLS = ['pen', 'line', 'arrow', 'rect', 'ellipse'];
 const COLORS = ['#1f2937', '#ef4444', '#3b82f6', '#22c55e'];
@@ -138,7 +139,11 @@ async function save() {
   try {
     await invoke('save_img_png_base64', { pngBase64: base64 });
   } catch (error) {
+    // 保存失败必须提示并保持窗口打开——无条件关窗让用户误以为保存成功,
+    // 白板绘制成果静默丢失。
     console.error('保存白板失败:', error);
+    await showError('保存失败,请重试:' + String(error?.message || error));
+    return;
   }
   getCurrentWindow().close().catch(() => {});
 }

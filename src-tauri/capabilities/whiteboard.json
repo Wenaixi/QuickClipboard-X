@@ -20,6 +20,7 @@
     "core:window:allow-set-size",
     "core:app:allow-name",
     "core:app:allow-version",
-    "core:window:allow-toggle-maximize"
+    "core:window:allow-toggle-maximize",
+    "dialog:default"
   ]
 }

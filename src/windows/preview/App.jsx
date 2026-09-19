@@ -138,6 +138,12 @@ async function resolveImageUrlFromItem(item) {
 
   const imageId = parseFirstImageId(item?.image_id);
   if (imageId) {
+    // 白名单与后端 is_valid_image_id 同语义:imageId 直接拼
+    // `${dataDir}/clipboard_images/{id}.png`,恶意 `..` 可越出图片目录
+    // 读写 appdata 内任意文件,拼路径前必须校验。
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(imageId)) {
+      return '';
+    }
     const dataDir = await invoke('get_data_directory');
     const normalizedDataDir = String(dataDir).replace(/\\/g, '/');
     const filePath = `${normalizedDataDir}/clipboard_images/${imageId}.png`;
@@ -154,6 +160,9 @@ async function resolveImageUrlFromItem(item) {
 
   if (rawPath.startsWith('image-id:')) {
     const legacyImageId = rawPath.slice('image-id:'.length).trim();
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(legacyImageId)) {
+      return '';
+    }
     const dataDir = await invoke('get_data_directory');
     const normalizedDataDir = String(dataDir).replace(/\\/g, '/');
     const filePath = `${normalizedDataDir}/clipboard_images/${legacyImageId}.png`;

@@ -159,10 +159,10 @@ pub fn set_last_hash_contents(contents: &[RsClipboardContent]) {
     let hashes = contents
         .iter()
         .map(|c| match c {
-            // payload 的 Other 可能是 CF_UNICODETEXT 等编码字节,没法还原主文本;
-            // 但纯文本粘贴时 build_plain_text_payload 优先用 Text 形态,只有带
-            // 其他格式时才 Other。这里 Text/Rtf/Html 直接哈希文本,Files 哈希
-            // 路径,与捕获侧主内容哈希对齐。
+            // Text/Rtf/Html 直接哈希文本(与捕获侧主内容哈希对齐),
+            // Files 哈希路径,Other 走 hash_clipboard_content 回退(带
+            // HTML/RTF 等多格式的 payload 主元素仍是 Text,只有格式无文本
+            // 回收的冷路径会落到 Other)。
             RsClipboardContent::Text(text)
             | RsClipboardContent::Rtf(text)
             | RsClipboardContent::Html(text) => hash_plain_text(text),
