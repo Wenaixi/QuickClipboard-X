@@ -2,9 +2,12 @@ mod actions;
 mod ai_vision;
 mod image_store;
 mod session;
+mod workflow;
 
 #[cfg(target_os = "windows")]
 pub mod capture;
+
+pub use workflow::{execute_workflow, WorkflowActionResult, WorkflowStep};
 
 pub use actions::{choose_screenshot_save_destination, copy_screenshot, copy_screenshot_text, emit_screenshot_history_update, prepare_clipboard_content, save_screenshot, ScreenshotActionError};
 pub use ai_vision::{recognize_image, test_configuration, validate_configuration, AiVisionError, AiVisionResult};
