@@ -97,7 +97,7 @@ pub fn schedule_ttl_destroy(app: AppHandle, label: &str, idle_ms: u64) {
             return;
         }
 
-        if let Some(window) = app.get_webview_window(&label) {
+        if let Some(window) = app.get_webview_window(label.as_str()) {
             let _ = window.hide();
             let _ = window.close();
         }

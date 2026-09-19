@@ -17,12 +17,12 @@ pub fn screen_color_at(x: i32, y: i32) -> Option<u32> {
         let _ = ReleaseDC(None, hdc);
     }
     // GetPixel 返回 COLORREF（0x00BBGGRR）：失 败/越界时返回 CLR_INVALID (0xFFFFFFFF)。
-    if packed == u32::MAX {
+    if packed.0 == u32::MAX {
         return None;
     }
-    let blue = (packed >> 16) & 0xFF;
-    let green = (packed >> 8) & 0xFF;
-    let red = packed & 0xFF;
+    let blue = (packed.0 >> 16) & 0xFF;
+    let green = (packed.0 >> 8) & 0xFF;
+    let red = packed.0 & 0xFF;
     Some((red << 16) | (green << 8) | blue)
 }
 

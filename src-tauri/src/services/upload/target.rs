@@ -6,7 +6,7 @@
 // trait 扩展。护栏：上传路径固定 uploads/ 前缀，绝不触碰同步 index/
 // tombstones/ 目录（同步与上传两个域的命名空间物理隔离）。
 
-use std::fmt::Display;
+use std::{fmt::Display, future::Future, pin::Pin};
 
 /// 一次上传的结果（对齐 ShareX ISE.URL / DeletionURL / ThumbnailURL）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,9 +23,16 @@ impl Display for UploadResult {
 }
 
 /// 上传目标：实现方给出稳定的 id/name，upload 把本地文件字节推送到
-/// 目标并回读可访问 URL。
+/// 目标并回读可访问 URL。upload 返回 Boxed Future 而非 async fn——
+/// async fn 在 trait 里默认不可 dyn 兼容（无法建 vtable），而派发
+/// target_for 恰好要按 id 返回 Box<dyn UploadTarget>，box 化未来后
+/// trait 可 dyn 化，调用面不变（调用方照常 .await）。
 pub trait UploadTarget: Send + Sync {
     fn id(&self) -> &str;
     fn name(&self) -> &str;
-    async fn upload(&self, filename: &str, bytes: Vec<u8>) -> Result<UploadResult, String>;
+    fn upload(
+        &self,
+        filename: &str,
+        bytes: Vec<u8>,
+    ) -> Pin<Box<dyn Future<Output = Result<UploadResult, String>> + Send + '_>>;
 }

@@ -1,8 +1,8 @@
-mod actions;
+pub(crate) mod actions;
 mod ai_vision;
 mod image_store;
 mod session;
-mod workflow;
+pub(crate) mod workflow;
 
 #[cfg(target_os = "windows")]
 pub mod capture;

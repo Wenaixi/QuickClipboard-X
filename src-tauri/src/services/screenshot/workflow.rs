@@ -87,33 +87,7 @@ pub async fn execute_workflow(
             "ai" => run_ai_action(app, session_id, stored, &is_processing, &begin_commit).await,
             "edit" => run_edit_action(app, session_id, stored, &is_processing).await,
             "upload" => run_upload_action(app, session_id, stored, &is_processing, &begin_commit).await,
-            "copy+pin" => {
-                // 组合预设:复制后贴图,共享一次会话提交(对齐 ShareX
-                // AfterCaptureTasks CopyImageToClipboard | PinToScreen 位组合)。
-                // 不能拆成 copy/pin 两个独立步骤:copy 步骤会把会话推进
-                // Committing,pin 步骤的 Processing 守卫会误判"已取消"直接
-                // 失败;组合整体做一次守卫+一次提交,底层复用既有动作函数。
-                if !is_processing(session_id) {
-                    return Err("截图会话已取消".to_string());
-                }
-                begin_commit(session_id)?;
-                let clipboard_id = copy_screenshot(stored).map_err(|e| e.to_string())?;
-                emit_screenshot_history_update(app, clipboard_id).map_err(|e| e.to_string())?;
-                let stored_for_pin = stored.clone();
-                let pin_path = match tokio::task::spawn_blocking(move || prepare_pin_path(&stored_for_pin)).await {
-                    Ok(Ok(pin_path)) => pin_path,
-                    Ok(Err(error)) => return Err(error.to_string()),
-                    Err(error) => return Err(format!("贴图文件准备线程失败: {error}")),
-                };
-                crate::windows::pin_image_window::pin_image_from_file(
-                    app.clone(),
-                    pin_path.to_string_lossy().to_string(),
-                    None, None, None, None, None, None, None, None, None, None, None,
-                )
-                .await
-                .map_err(|e| format!("贴图失败: {e}"))?;
-                Ok("已复制并贴图".to_string())
-            }
+            "copy+pin" => run_copy_pin_action(app, session_id, stored, &is_processing, &begin_commit).await,
             other => Err(format!("不支持的截图动作: {other}")),
         };
 
@@ -124,6 +98,40 @@ pub async fn execute_workflow(
     }
 
     result
+}
+
+// 复制+贴图组合动作：对齐 ShareX AfterCaptureTasks
+// CopyImageToClipboard | PinToScreen 位组合。不能拆成 copy/pin 两个
+// 独立步骤：copy 步骤会把会话推进 Committing，pin 步骤的 Processing
+// 守卫会误判"已取消"直接失败；组合整体做一次守卫+一次提交，底层复用
+// 既有动作函数。
+async fn run_copy_pin_action(
+    app: &AppHandle,
+    session_id: &str,
+    stored: &StoredScreenshot,
+    is_processing: &dyn Fn(&str) -> bool,
+    begin_commit: &dyn Fn(&str) -> Result<(), String>,
+) -> Result<String, String> {
+    if !is_processing(session_id) {
+        return Err("截图会话已取消".to_string());
+    }
+    begin_commit(session_id)?;
+    let clipboard_id = copy_screenshot(stored).map_err(|e| e.to_string())?;
+    emit_screenshot_history_update(app, clipboard_id).map_err(|e| e.to_string())?;
+    let stored_for_pin = stored.clone();
+    let pin_path = match tokio::task::spawn_blocking(move || prepare_pin_path(&stored_for_pin)).await {
+        Ok(Ok(pin_path)) => pin_path,
+        Ok(Err(error)) => return Err(error.to_string()),
+        Err(error) => return Err(format!("贴图文件准备线程失败: {error}")),
+    };
+    crate::windows::pin_image_window::pin_image_from_file(
+        app.clone(),
+        pin_path.to_string_lossy().to_string(),
+        None, None, None, None, None, None, None, None, None, None, None,
+    )
+    .await
+    .map_err(|e| format!("贴图失败: {e}"))?;
+    Ok("已复制并贴图".to_string())
 }
 
 // 复制动作:对齐 ShareX CopyImageToClipboard——必须先 begin_commit 锁定
@@ -307,8 +315,9 @@ async fn run_upload_action(
         .map(|d| d.as_secs())
         .unwrap_or(0));
     let result = target.upload(&filename, bytes).await?;
+    let url = result.url.clone();
     begin_commit(session_id)?;
-    copy_screenshot_text(&result.url).map_err(|e| e.to_string())?;
+    copy_screenshot_text(&url).map_err(|e| e.to_string())?;
     Ok(format!("已上传并复制链接: {}", result.url))
 }
 
@@ -569,7 +578,7 @@ mod tests {
         );
         let commit = body.find("begin_commit(session_id)?;")
             .expect("上传动作必须提交会话");
-        let copy = body.find("copy_screenshot_text(&result.url)")
+        let copy = body.find("copy_screenshot_text(&url)")
             .expect("上传成功后必须复制可访问 URL");
         assert!(commit < copy, "必须先提交会话再复制链接");
     }

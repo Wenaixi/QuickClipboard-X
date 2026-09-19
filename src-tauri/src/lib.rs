@@ -312,7 +312,6 @@ pub fn run() {
                 commands::screenshot::save_img_png_base64,
                 #[cfg(target_os = "windows")]
                 commands::screenshot::open_whiteboard,
-                windows::annotation::open_annotation_window,
                 windows::annotation::annotation_finished,
                 windows::annotation::annotation_cancelled,
                 commands::copy_text_to_clipboard,

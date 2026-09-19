@@ -9,7 +9,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::services::screenshot::capture::{capture_monitor, ensure_com_initialized, get_monitor_handle, CaptureRect, CapturedFrame};
 
-use super::gif_writer::{encode_rgba_frames, GifFrameRate};
+mod gif_writer;
+pub use gif_writer::{encode_rgba_frames, GifFrameRate};
 
 pub mod storage;
 pub use storage::{store_recording_to_history, RecordingResult};

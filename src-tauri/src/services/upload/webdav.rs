@@ -61,7 +61,18 @@ impl UploadTarget for WebdavUploadTarget {
         "WebDAV"
     }
 
-    async fn upload(&self, filename: &str, bytes: Vec<u8>) -> Result<UploadResult, String> {
+    fn upload(
+        &self,
+        filename: &str,
+        bytes: Vec<u8>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<UploadResult, String>> + Send + '_>>
+    {
+        Box::pin(self.upload_inner(filename, bytes))
+    }
+}
+
+impl WebdavUploadTarget {
+    async fn upload_inner(&self, filename: &str, bytes: Vec<u8>) -> Result<UploadResult, String> {
         if filename.trim().is_empty() {
             return Err("上传文件名不能为空".to_string());
         }

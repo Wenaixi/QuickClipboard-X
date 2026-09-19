@@ -8,6 +8,8 @@
 use std::io::{BufReader, Read};
 use std::path::Path;
 
+use sha2::Digest;
+
 /// 计算文件 SHA-256 十六进制小写摘要。
 pub fn file_sha256(path: &Path) -> Result<String, String> {
     let file = std::fs::File::open(path).map_err(|error| format!("打开文件失败: {error}"))?;
@@ -19,9 +21,9 @@ pub fn file_sha256(path: &Path) -> Result<String, String> {
         if read == 0 {
             break;
         }
-        sha2::Digest::update(&mut hasher, &buffer[..read]);
+        hasher.update(&buffer[..read]);
     }
-    Ok(format!("{:x}", sha2::Digest::finalize(hasher)))
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 #[cfg(test)]
