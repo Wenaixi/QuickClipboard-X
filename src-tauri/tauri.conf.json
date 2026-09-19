@@ -47,6 +47,23 @@
         "shadow": false,
         "dragDropEnabled": false,
         "visibleOnAllWorkspaces": true
+      },
+      {
+        "label": "annotation",
+        "title": "图像编辑器",
+        "url": "windows/annotation/index.html",
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "resizable": true,
+        "minWidth": 480,
+        "minHeight": 320,
+        "focus": true,
+        "shadow": false,
+        "dragDropEnabled": false,
+        "visibleOnAllWorkspaces": true
       }
     ],
     "security": {
@@ -58,6 +75,7 @@
         "community",
         "text-editor",
         "screenshot",
+        "annotation",
         "input-dialog",
         "context-menu",
         "preview-window",
