@@ -71,8 +71,8 @@ pub async fn execute_workflow(
     session_id: &str,
     stored: &StoredScreenshot,
     steps: &[WorkflowStep],
-    is_processing: impl Fn(&str) -> bool,
-    begin_commit: impl Fn(&str) -> Result<(), String>,
+    is_processing: impl Fn(&str) -> bool + Sync,
+    begin_commit: impl Fn(&str) -> Result<(), String> + Sync,
 ) -> WorkflowActionResult {
     let mut result = WorkflowActionResult {
         succeeded: Vec::new(),

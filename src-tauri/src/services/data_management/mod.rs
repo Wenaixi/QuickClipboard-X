@@ -1368,10 +1368,8 @@ mod tests {
     // 分组子目录存储时备份仍漏收。断言递归调用存在(与 export 同用模块级函数)。
     #[test]
     fn add_dir_to_zip_is_recursive() {
-        let body = fn_body(
-            &strip_line_comments(&source_file("src/services/data_management/mod.rs")),
-            "add_dir_to_zip",
-        );
+        let src = strip_line_comments(&source_file("src/services/data_management/mod.rs"));
+        let body = fn_body(&src, "add_dir_to_zip");
         assert!(
             body.contains("path.is_dir()"),
             "递归遍历必须识别子目录"

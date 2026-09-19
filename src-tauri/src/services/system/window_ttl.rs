@@ -83,7 +83,7 @@ pub fn schedule_ttl_destroy(app: AppHandle, label: &str, idle_ms: u64) {
 
         let (label, version) = {
             let map = TTL_WINDOWS.lock().unwrap_or_else(|p| p.into_inner());
-            match map.get(&label) {
+            match map.get(label.as_str()) {
                 Some(entry) => {
                     let v = entry.version.load(Ordering::SeqCst);
                     (entry.label.clone(), v)

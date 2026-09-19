@@ -80,7 +80,9 @@ mod tests {
 
     #[test]
     fn mismatched_frame_sizes_rejected() {
-        let frames = [(10, 10, solid_frame(10, 10, 255).as_slice()), (11, 10, solid_frame(11, 10, 255).as_slice())];
+        let first = solid_frame(10, 10, 255);
+        let second = solid_frame(11, 10, 255);
+        let frames = [(10, 10, first.as_slice()), (11, 10, second.as_slice())];
         assert!(encode_rgba_frames(&frames, GifFrameRate::new(10).unwrap()).is_err());
     }
 

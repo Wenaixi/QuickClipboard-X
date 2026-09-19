@@ -489,12 +489,18 @@ fn save_image_as_file(image_data: &[u8]) -> Result<String, String> {
         .with_guessed_format()
         .map_err(|e| format!("图片格式识别失败: {}", e))?;
     // 解码前先查像素数:小文件大像素(如 1x1 但声明 1 亿像素的恶意头)会在
-    // decode 时分配海量内存,必须按上限预检再解码。
-    if let Ok(dimensions) = reader.clone().into_dimensions() {
-        let pixel_count = dimensions.0 as u64 * dimensions.1 as u64;
-        if pixel_count > MAX_REMOTE_IMAGE_PIXELS {
-            return Err("图片像素数超过上限,拒绝解码".to_string());
-        }
+    // decode 时分配海量内存,必须按上限预检再解码。ImageReader 是 Cursor
+    // 写回(不可 Seek 重建),克隆一读先判像素、原 reader 留待 decode。
+    let mime_checked = reader
+        .clone()
+        .into_dimensions()
+        .map(|dimensions| {
+            let pixel_count = dimensions.0 as u64 * dimensions.1 as u64;
+            pixel_count > MAX_REMOTE_IMAGE_PIXELS
+        })
+        .unwrap_or(false);
+    if mime_checked {
+        return Err("图片像素数超过上限,拒绝解码".to_string());
     }
     let img = reader
         .decode()

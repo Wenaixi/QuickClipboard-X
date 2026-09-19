@@ -521,7 +521,7 @@ fn text_row_to_string(row: &ClipboardDataItem) -> String {
         let trimmed = units.as_slice();
         String::from_utf16(trimmed)
             .or_else(|_| Ok(String::from_utf16_lossy(trimmed)))
-            .unwrap_or_else(|_| String::from_utf8_lossy(&row.raw_data).into_owned())
+            .unwrap_or_else(|_: std::str::Utf16Error| String::from_utf8_lossy(&row.raw_data).into_owned())
     } else {
         String::from_utf8_lossy(&row.raw_data).into_owned()
     }
