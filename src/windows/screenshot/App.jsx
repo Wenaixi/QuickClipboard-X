@@ -30,6 +30,7 @@ import { fullScreenSelection } from './fullScreenModel.js';
 import { completeShortcutForEvent } from './completeShortcutModel.js';
 import { idleHint } from './idleModel.js';
 import { includeInvite } from './inviteModel.js';
+import { shouldClosePolygon, polygonPhysicalVertices, polygonBounds, pointInPolygon } from './polygonModel.js';
 import {
   createRafWriter,
   hitSelectionEdge,
@@ -202,6 +203,19 @@ function applySelectionStyle(element, selection) {
   element.style.setProperty('--selection-bottom', `${selection.bottom}px`);
   element.style.setProperty('--selection-width', `${selection.width}px`);
   element.style.setProperty('--selection-height', `${selection.height}px`);
+  // 多边形或手绘模式：选区带路径覆盖（data-selection-polygon 非空时按路径
+  // 渲染形状遮罩——由 polygonBounds 推导的包围盒已写入上面变量，路径覆盖
+  // 由 CSS 使用 --selection-polygon 变量按顶点绘制）。仅矩形选区无路径。
+  if (Array.isArray(selection.polygonPath) && selection.polygonPath.length >= 3) {
+    element.dataset.selectionShape = 'polygon';
+    const points = selection.polygonPath
+      .map((point) => `${Math.round(point.left)},${Math.round(point.top)}`)
+      .join(' ');
+    element.style.setProperty('--selection-polygon', `polygon(${points})`);
+  } else {
+    element.dataset.selectionShape = 'rect';
+    element.style.removeProperty('--selection-polygon');
+  }
 }
 
 function magnifierColorLabel(color, includeFormat) {
@@ -215,6 +229,11 @@ function actionLabel(action, t) {
 function actionIsEnabled(action, bootstrap) {
   return action !== 'ai' || (bootstrap.screenshotAiEnabled !== false && bootstrap.screenshotAiConfigured === true);
 }
+
+// 截图模式：矩形(默认)/多边形(点击锚点)/手绘(自由路径)。模式仅决定
+// pointerdown 起始形态与完成路径转裁剪，不改变既有选区交互(移动/调整/
+// 拖动)语义。用于模式切换按钮与模式提示。
+const SCREENSHOT_MODES = ['rect', 'polygon', 'freehand'];
 
 function isPrimaryPointer(event) {
   return event.button === 0 || (event.pointerType === 'touch' && event.isPrimary);
@@ -250,6 +269,12 @@ function App() {
   const [busyAction, setBusyAction] = useState('');
   const [actionError, setActionError] = useState('');
   const initialActionRef = useRef('');
+  // 截图模式：rect 默认 / polygon 多边形锚点 / freehand 手绘路径。
+  // 切换不重置已有选区；多边形锚点随点击追加，完成走 polygonPhysicalVertices。
+  const [captureMode, setCaptureMode] = useState('rect');
+  // 多边形/手绘锚点路径（逻辑坐标），完成时转物理顶点送后端包围盒捕获。
+  const polygonPathRef = useRef([]);
+  const [polygonPath, setPolygonPath] = useState([]);
 
   const toolbarStyle = useMemo(() => {
     if (!selection) return undefined;
@@ -442,6 +467,28 @@ function App() {
     const root = rootRef.current;
     if (!root) return;
     const start = pointFromPointerEvent(event, root);
+    // 多边形模式：点击追加锚点（靠近首锚点或已 ≥3 且双击闭合）；闭合后
+    // 按锚点包围盒建立选区，形状遮罩由 polygonPath 驱动。
+    if (captureMode === 'polygon') {
+      const points = polygonPathRef.current;
+      if (points.length >= 3 && shouldClosePolygon(start, points)) {
+        finishPolygonSelection(start);
+        return;
+      }
+      const next = [...points, start];
+      polygonPathRef.current = next;
+      setPolygonPath(next);
+      if (next.length >= 3) {
+        const bounds = polygonBounds(next);
+        if (bounds) {
+          const shape = { ...bounds, polygonPath: next.map((point) => ({ left: point.x, top: point.y })) };
+          selectionRef.current = shape;
+          setSelection(shape);
+          applySelectionStyle(root, shape);
+        }
+      }
+      return;
+    }
     if (selectionRef.current) {
       const edge = hitSelectionEdge(start, selectionRef.current, RESIZE_TOLERANCE);
       if (edge) {
@@ -463,7 +510,7 @@ function App() {
     }
     gestureIdRef.current += 1;
     selectionHistoryRef.current = [];
-    draftRef.current = { start, end: start };
+    draftRef.current = { start, end: start, path: captureMode === 'freehand' ? [{ x: start.x, y: start.y }] : [] };
     pointerIdRef.current = event.pointerId;
     root.setPointerCapture?.(event.pointerId);
     setSelecting(true);
@@ -506,6 +553,14 @@ function App() {
     }
     if (!root || event.pointerId !== pointerIdRef.current) return;
     draft.end = pointFromPointerEvent(event, root);
+    // 手绘模式：拖动期间按点距阈值追加路径点（≥2px 防密集冗余），
+    // 完成时 polygonBounds 取包围盒。
+    if (captureMode === 'freehand') {
+      const last = draft.path[draft.path.length - 1];
+      if (!last || Math.hypot(draft.end.x - last.x, draft.end.y - last.y) >= 2) {
+        draft.path.push({ x: draft.end.x, y: draft.end.y });
+      }
+    }
     setMagnifierPoint(draft.end);
     const next = selectionFromDraft(draft, event, bootstrap.bounds);
     setLiveSelection(next);
@@ -530,6 +585,44 @@ function App() {
     if (!hitSelectionInterior(point, selectionRef.current, 0)) return;
     event.preventDefault();
     void completeScreenshot('copy');
+  };
+
+  // 多边形锚点路径闭合：按包围盒建立选区（形状遮罩由 polygonPath 驱动），
+  // 完成动作仍走统一 completeScreenshot（把物理顶点转后端包围盒捕获）。
+  const finishPolygonSelection = (start) => {
+    const points = polygonPathRef.current;
+    const bounds = polygonBounds(points);
+    if (!bounds) {
+      resetPolygonPath();
+      return;
+    }
+    const shape = { ...bounds, polygonPath: points.map((point) => ({ left: point.x, top: point.y })) };
+    polygonPathRef.current = [];
+    setPolygonPath([]);
+    selectionRef.current = shape;
+    setSelection(shape);
+    if (rootRef.current) applySelectionStyle(rootRef.current, shape);
+    setSelecting(false);
+    setMoving(false);
+    setResizing(false);
+    // 闭合后立即触发完成（与矩形拖动松手后走 initialAction 同路径）：
+    // 无显式动作时进入自动动作链（截图后动作设置）。
+    void completeScreenshot(initialActionRef.current || '');
+    initialActionRef.current = '';
+  };
+
+  // 复位多边形/手绘锚点路径。
+  const resetPolygonPath = () => {
+    polygonPathRef.current = [];
+    setPolygonPath([]);
+  };
+
+  // 模式切换按钮渲染（rect/polygon/freehand）：切换不重置已有选区，
+  // 正在进行的手绘拖拽/多边形锚点由 handlePointerDown 守卫自然接管。
+  const handleModeSwitch = (mode) => {
+    if (!SCREENSHOT_MODES.includes(mode)) return;
+    setCaptureMode(mode);
+    resetPolygonPath();
   };
 
   const handlePointerUp = async (event) => {
@@ -586,6 +679,10 @@ function App() {
 
     const square = event.shiftKey && !clicked ? squareSelection(draft.start, end, bootstrap.bounds) : null;
     let finalSelection = square ?? selectionForPointerGesture(draft.start, end, bootstrap.bounds);
+    // 手绘模式：拖动路径转轴对齐包围盒（形状遮罩由自由路径驱动）。
+    if (!clicked && captureMode === 'freehand' && draft.path && draft.path.length >= 3) {
+      finalSelection = { ...polygonBounds(draft.path), polygonPath: draft.path.map((point) => ({ left: point.x, top: point.y })) };
+    }
     if (!square && clicked && bootstrap.sessionId && bootstrap.screenshotElementDetection !== 'none') {
       try {
         const physicalSelection = await invoke(FIND_WINDOW_COMMAND, {
@@ -668,6 +765,14 @@ function App() {
       if (hotkeyAction && !event.ctrlKey && !event.metaKey && !event.altKey) { event.preventDefault(); void completeScreenshot(hotkeyAction); return; }
       const completeAction = completeShortcutForEvent(event);
       if (completeAction) { event.preventDefault(); void completeScreenshot(completeAction); }
+      // Tab 切换截图模式：rect → polygon → freehand 循环（ShareX 公开行为
+      // 工具切换键位参考）。模式切换不打断已有选区/拖拽，仅影响下次起始。
+      if (event.key === 'Tab') {
+        event.preventDefault();
+        const currentIndex = SCREENSHOT_MODES.indexOf(captureMode);
+        handleModeSwitch(SCREENSHOT_MODES[(currentIndex + 1) % SCREENSHOT_MODES.length]);
+        return;
+      }
     };
     const handleBlur = () => { if (busyAction) return; if (draftRef.current || selectionRef.current) void cancelScreenshot(); };
     window.addEventListener('keydown', handleKeyDown);
@@ -676,7 +781,7 @@ function App() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('blur', handleBlur);
     };
-  }, [bootstrap.sessionId, bootstrap.bounds, busyAction, showHelp]);
+  }, [bootstrap.sessionId, bootstrap.bounds, busyAction, showHelp, captureMode]);
 
   const magnifierLayout = useMemo(() => (
     magnifierPoint ? magnifierCanvasStyle(magnifierPoint, bootstrap.bounds, magnifierScale) : null
@@ -689,6 +794,7 @@ function App() {
       <div className="screenshot-mask screenshot-mask-right" aria-hidden="true" />
       <div className="screenshot-mask screenshot-mask-bottom" aria-hidden="true" />
       <div className="screenshot-selection screenshot-selection-line" aria-hidden="true" style={selectionLineStyle()}>{(liveSelection || selection) && <span className={selectionSizeLabelClass(liveSelection || selection, bootstrap.bounds)} style={selectionSizeLabelStyle(liveSelection || selection, bootstrap.bounds)}>{selectionSizeLabelText(liveSelection || selection, bootstrap)}</span>}</div>
+      {polygonPath.length > 0 && !selection && <svg className="screenshot-polygon-preview" data-screenshot-polygon="true" aria-hidden="true" width={bootstrap.bounds.width} height={bootstrap.bounds.height}><polyline fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="4 4" points={polygonPath.map((point) => `${point.x},${point.y}`).join(' ')} /></svg>}
       {selection && <div className="screenshot-toolbar" style={toolbarStyle} role="toolbar" aria-label={t('screenshot.toolbarLabel')} data-screenshot-control onPointerDown={(event) => event.stopPropagation()}>{ACTIONS.map((action) => { const label = actionLabel(action.id, t); return <button key={action.id} type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction) || !actionIsEnabled(action.id, bootstrap)} onClick={() => void completeScreenshot(action.id)} title={t('screenshot.shortcutHint', { label, shortcut: [action.shortcut, hotkeyForAction(action.id)].filter(Boolean).join(' / ') })}>{busyAction === action.id ? t('screenshot.processing') : label}</button>; })}{!bootstrap.screenshotAiConfigured && <button type="button" className="screenshot-action" data-screenshot-control disabled={Boolean(busyAction)} onClick={() => void openAiSettings()}>{t('screenshot.actions.configureAi')}</button>}</div>}
       {bootstrap.screenshotMagnifierEnabled && bootstrap.magnifierBackground && magnifierPoint && (draftRef.current || moveRef.current || resizeRef.current) && (
         <>
@@ -704,7 +810,11 @@ function App() {
       )}
       {selection && <ThirdsGrid bounds={bootstrap.bounds} />}
       {selection && <Ruler bounds={bootstrap.bounds} />}
-      {selection && <SelectionHandles selection={selection} />}
+      {selection && !selection.polygonPath && <SelectionHandles selection={selection} />}
+      {/* 模式切换按钮（rect/polygon/freehand）：工具栏旁常驻，Tab 循环切换。 */}
+      <div className="screenshot-mode-switch" data-screenshot-control onPointerDown={(event) => event.stopPropagation()} role="group" aria-label={t('screenshot.modeSwitchLabel')}>
+        {SCREENSHOT_MODES.map((mode) => <button key={mode} type="button" className={`screenshot-mode-button${captureMode === mode ? ' screenshot-mode-button-active' : ''}`} data-screenshot-control disabled={Boolean(busyAction)} onClick={() => handleModeSwitch(mode)}>{t(`screenshot.mode.${mode}`)}</button>)}
+      </div>
       {bootstrap.screenshotHintsEnabled && !selecting && !selection && !showHelp && <div className="screenshot-idle-hint" aria-live="polite" data-screenshot-idle="true">{idleHint(t)}</div>}
       {selection && !selecting && !moving && !resizing && !busyAction && !showHelp && <div className="screenshot-invite" data-screenshot-invite="true">{includeInvite(t)}</div>}
       {bootstrap.screenshotHintsEnabled && modeHint(modeForState({ selecting, moving, resizing }), t) && <div className="screenshot-mode-hint" aria-hidden="true" data-screenshot-mode="true">{modeHint(modeForState({ selecting, moving, resizing }), t)}</div>}

@@ -16,10 +16,39 @@ test('截图浮窗中英文语言包完整提供动作和状态文案', () => {
     const messages = JSON.parse(readFileSync(new URL(`../../shared/locales/${locale}.json`, import.meta.url)));
     const screenshot = messages.screenshot;
     assert.deepEqual(Object.keys(screenshot.actions).sort(), ['ai', 'configureAi', 'copy', 'copy+pin', 'pin', 'save']);
-    for (const key of ['processing', 'selectionLabel', 'cancelLabel', 'cancelFailed', 'sessionNotReady', 'actionFailed', 'openAiSettingsFailed', 'shortcutHint']) {
+    for (const key of ['processing', 'selectionLabel', 'cancelLabel', 'cancelFailed', 'sessionNotReady', 'actionFailed', 'openAiSettingsFailed', 'shortcutHint', 'modeSwitchLabel']) {
       assert.equal(typeof screenshot[key], 'string', `${locale} 缺少 screenshot.${key}`);
     }
+    // 模式切换按钮的三模式文案必须双语完整（rect/polygon/freehand）。
+    assert.equal(typeof screenshot.mode.rect, 'string', `${locale} 缺少 screenshot.mode.rect`);
+    assert.equal(typeof screenshot.mode.polygon, 'string', `${locale} 缺少 screenshot.mode.polygon`);
+    assert.equal(typeof screenshot.mode.freehand, 'string', `${locale} 缺少 screenshot.mode.freehand`);
   }
+});
+
+test('截图模式切换护栏：SCREENSHOT_MODES 常量与 Tab 切换、模式按钮渲染', () => {
+  const source = readSource('./App.jsx');
+  // 模式枚举必须收口到单一常量（三个模式），Tab 循环切换。
+  assert.ok(source.includes("const SCREENSHOT_MODES = ['rect', 'polygon', 'freehand'];"), '必须声明模式枚举常量');
+  const hotkeyIdx = source.indexOf("if (event.key === 'Tab') {");
+  assert.ok(hotkeyIdx >= 0, 'Tab 必须触发模式切换');
+  const modeButtonIdx = source.indexOf('screenshot-mode-button');
+  assert.ok(modeButtonIdx >= 0, '必须渲染模式切换按钮');
+  // Tab 切换必须用模式枚举下标循环（rect → polygon → freehand → rect）。
+  const switchBlock = source.slice(hotkeyIdx, hotkeyIdx + 260);
+  assert.ok(switchBlock.includes('SCREENSHOT_MODES[(currentIndex + 1) % SCREENSHOT_MODES.length]'), 'Tab 必须按下标循环切换');
+});
+
+test('多边形模式按键锚点与闭合路径接线完整', () => {
+  const source = readSource('./App.jsx');
+  // 多边形模式：点击追加锚点 + 靠近首锚点闭合 + 包围盒选区 + 完成走统一入口。
+  assert.ok(source.includes("if (captureMode === 'polygon') {"), '指针按下必须处理多边形模式');
+  assert.ok(source.includes('shouldClosePolygon(start, points)'), '闭合判定必须用容差模型');
+  assert.ok(source.includes('polygonBounds(next)'), '锚点闭合必须转包围盒');
+  assert.ok(source.includes('finishPolygonSelection(start)'), '必须提供多边形闭合函数');
+  // 手绘模式：拖动路径转包围盒选区。
+  assert.ok(source.includes("captureMode === 'freehand' && draft.path"), '手绘模式必须处理路径');
+  assert.ok(source.includes('polygonPathRef.current'), '必须维护多边形锚点路径引用');
 });
 
 test('normalizeBootstrap 使用显式显示器物理尺寸与逻辑尺寸', () => {
