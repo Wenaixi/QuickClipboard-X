@@ -85,6 +85,33 @@ pub async fn execute_workflow(
             "save" => run_save_action(app, session_id, stored, &is_processing, &begin_commit).await,
             "pin" => run_pin_action(app, session_id, stored, &is_processing, &begin_commit).await,
             "ai" => run_ai_action(app, session_id, stored, &is_processing, &begin_commit).await,
+            "copy+pin" => {
+                // 组合预设:复制后贴图,共享一次会话提交(对齐 ShareX
+                // AfterCaptureTasks CopyImageToClipboard | PinToScreen 位组合)。
+                // 不能拆成 copy/pin 两个独立步骤:copy 步骤会把会话推进
+                // Committing,pin 步骤的 Processing 守卫会误判"已取消"直接
+                // 失败;组合整体做一次守卫+一次提交,底层复用既有动作函数。
+                if !is_processing(session_id) {
+                    return Err("截图会话已取消".to_string());
+                }
+                begin_commit(session_id)?;
+                let clipboard_id = copy_screenshot(stored).map_err(|e| e.to_string())?;
+                emit_screenshot_history_update(app, clipboard_id).map_err(|e| e.to_string())?;
+                let stored_for_pin = stored.clone();
+                let pin_path = match tokio::task::spawn_blocking(move || prepare_pin_path(&stored_for_pin)).await {
+                    Ok(Ok(pin_path)) => pin_path,
+                    Ok(Err(error)) => return Err(error.to_string()),
+                    Err(error) => return Err(format!("贴图文件准备线程失败: {error}")),
+                };
+                crate::windows::pin_image_window::pin_image_from_file(
+                    app.clone(),
+                    pin_path.to_string_lossy().to_string(),
+                    None, None, None, None, None, None, None, None, None, None, None,
+                )
+                .await
+                .map_err(|e| format!("贴图失败: {e}"))?;
+                Ok("已复制并贴图".to_string())
+            }
             other => Err(format!("不支持的截图动作: {other}")),
         };
 
@@ -417,6 +444,46 @@ mod tests {
         assert!(
             config < confirm && confirm < request,
             "必须先校验配置、确认云端发送，再发起 AI 请求"
+        );
+    }
+
+    // 组合预设 copy+pin:复制后立即贴图,共享一次会话提交,先复制再贴图;
+    // 若拆成独立步骤,复制步骤推进 Committing 后贴图步骤的 Processing 守卫
+    // 会误判"已取消"直接失败(状态机不允许 Committing 再 Processing)。
+    #[test]
+    fn copy_pin_combo_shares_single_commit_and_runs_copy_before_pin() {
+        let src = prod_source();
+        let start = src
+            .find("\"copy+pin\" => {")
+            .expect("缺 copy+pin 组合预设");
+        let rest = &src[start..];
+        let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(src.len());
+        let body = &src[start..end];
+        // 必须整体一次会话提交(不能拆步骤,否则贴图误判已取消)。
+        let commit = body
+            .find("begin_commit(session_id)?;")
+            .expect("组合预设必须整体提交一次");
+        let copy_call = body
+            .find("copy_screenshot(stored)")
+            .expect("组合预设必须先执行复制");
+        let pin_call = body
+            .find("pin_image_from_file(")
+            .expect("组合预设必须随后执行贴图");
+        assert!(
+            commit < copy_call && copy_call < pin_call,
+            "必须先整体提交,再复制,最后贴图"
+        );
+        assert!(
+            body.contains("prepare_pin_path(&stored_for_pin)"),
+            "贴图必须先 prepare 持久化文件"
+        );
+        assert!(
+            body.contains("已复制并贴图"),
+            "组合成功必须合并两动作摘要"
+        );
+        assert!(
+            body.contains("is_processing(session_id)"),
+            "组合预设必须做会话处理中守卫"
         );
     }
 

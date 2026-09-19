@@ -248,6 +248,7 @@
       "copy": "复制",
       "save": "另存为",
       "pin": "贴图",
+      "copy+pin": "复制并贴图",
       "ai": "AI 识别",
       "configureAi": "配置 AI"
     },
