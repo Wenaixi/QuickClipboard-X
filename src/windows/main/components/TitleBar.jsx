@@ -449,6 +449,11 @@ const TitleBar = forwardRef(
           label: t("tools.moreMenu.colorPicker", "取色器"),
           icon: "ti ti-color-picker",
         }),
+        createMenuItem({
+          id: "menu-open-qr-generator",
+          label: t("tools.moreMenu.qrGenerator", "二维码生成"),
+          icon: "ti ti-qrcode",
+        }),
       ];
       const fileHubItem = createMenuItem({
         id: "menu-file-hub-group",
@@ -611,6 +616,36 @@ const TitleBar = forwardRef(
             console.error("打开取色器失败:", error);
           }
           break;
+        case "menu-open-qr-generator": {
+          try {
+            // 二维码生成：输入内容 → qrcode 库生成 PNG → 落剪贴板历史。
+            const { showConfirm } = await import("@shared/utils/dialog");
+            const text = window.prompt(
+              t("tools.qrPrompt", "输入要生成二维码的文本或链接"),
+              "",
+            );
+            if (!text || !text.trim()) {
+              break;
+            }
+            const { saveQrPngBase64 } = await import(
+              "@shared/api/tools"
+            );
+            const QRCode = (await import("qrcode")).default;
+            const dataUrl = await QRCode.toDataURL(text.trim(), {
+              margin: 2,
+              width: 512,
+            });
+            const base64 = String(dataUrl).split(",")[1];
+            await saveQrPngBase64(base64);
+            await showConfirm(
+              t("tools.qrGenerated", "二维码已生成并复制到剪贴板"),
+              t("tools.qrGeneratedTitle", "二维码"),
+            );
+          } catch (error) {
+            console.error("生成二维码失败:", error);
+          }
+          break;
+        }
         case "menu-clear-clipboard-history":
           try {
             const { showConfirm } = await import("@shared/utils/dialog");

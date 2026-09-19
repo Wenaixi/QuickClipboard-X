@@ -1259,8 +1259,12 @@
       "globalPaste": "全局粘贴",
       "settings": "设置",
       "tools": "工具",
-      "colorPicker": "取色器"
-    }
+      "colorPicker": "取色器",
+      "qrGenerator": "二维码生成"
+    },
+    "qrPrompt": "输入要生成二维码的文本或链接",
+    "qrGenerated": "二维码已生成并复制到剪贴板",
+    "qrGeneratedTitle": "二维码"
   },
   "floatingToolbar": {
     "scrollToTop": "返回顶部",

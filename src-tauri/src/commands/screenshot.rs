@@ -233,3 +233,12 @@ pub fn color_picker_ready() {
 pub fn color_picker_pick_at() -> Result<(), String> {
     crate::windows::color_picker_window::color_picker_pick_at()
 }
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+pub fn save_qr_png_base64(
+    app: AppHandle,
+    png_base64: String,
+) -> Result<(), String> {
+    crate::services::tools::store_qr_png_base64(&app, &png_base64).map(|_| ())
+}

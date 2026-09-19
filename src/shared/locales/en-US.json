@@ -1258,8 +1258,12 @@
       "globalPaste": "Global Paste",
       "settings": "Settings",
       "tools": "Tools",
-      "colorPicker": "Color Picker"
-    }
+      "colorPicker": "Color Picker",
+      "qrGenerator": "QR Code Generator"
+    },
+    "qrPrompt": "Enter text or link to generate a QR code",
+    "qrGenerated": "QR code generated and copied to clipboard",
+    "qrGeneratedTitle": "QR Code"
   },
   "floatingToolbar": {
     "scrollToTop": "Scroll to Top",
