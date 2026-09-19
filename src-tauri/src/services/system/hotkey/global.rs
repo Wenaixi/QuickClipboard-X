@@ -460,6 +460,30 @@ pub fn register_screenshot_quick_ocr_hotkey(shortcut_str: &str) -> Result<(), St
 }
 
 #[cfg(target_os = "windows")]
+pub fn register_recording_hotkey(shortcut_str: &str) -> Result<(), String> {
+    register_shortcut("recording", shortcut_str, |app| {
+        let app = app.clone();
+        std::thread::spawn(move || {
+            if !matches!(ensure_normal_mode_for_hotkey(&app, "屏幕录制"), Ok(true)) {
+                return;
+            }
+            if is_foreground_globally_disabled() {
+                return;
+            }
+            // 开始/停止切换语义（对齐 ShareX 录制热键）：再次触发即停止。
+            let result = if crate::services::recording::current_session().is_some() {
+                crate::commands::screenshot::stop_screen_recording(app)
+            } else {
+                crate::commands::screenshot::start_screen_recording(app)
+            };
+            if let Err(error) = result {
+                eprintln!("屏幕录制热键处理失败: {}", error);
+            }
+        });
+    })
+}
+
+#[cfg(target_os = "windows")]
 fn register_screenshot_shortcut(
     id: &str,
     shortcut_str: &str,
@@ -963,6 +987,12 @@ fn reload_from_settings_inner() -> Result<(), String> {
             if settings.screenshot_enabled && !settings.screenshot_quick_ocr_shortcut.is_empty() {
                 if let Err(e) = register_screenshot_quick_ocr_hotkey(&settings.screenshot_quick_ocr_shortcut) {
                     eprintln!("注册快速 OCR 截图快捷键失败: {}", e);
+                }
+            }
+
+            if !settings.recording_shortcut.is_empty() {
+                if let Err(e) = register_recording_hotkey(&settings.recording_shortcut) {
+                    eprintln!("注册屏幕录制快捷键失败: {}", e);
                 }
             }
         }

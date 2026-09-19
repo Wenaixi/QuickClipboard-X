@@ -67,6 +67,9 @@ pub struct AppSettings {
     pub screenshot_quick_save_shortcut: String,
     pub screenshot_quick_pin_shortcut: String,
     pub screenshot_quick_ocr_shortcut: String,
+    // 屏幕录制热键：R4 录制命令面入口，触发「开始/停止」切换（对齐
+    // ShareX 的录制热键语义——同键再按即停止）。
+    pub recording_shortcut: String,
     pub screenshot_element_detection: String,
     pub screenshot_magnifier_enabled: bool,
     pub screenshot_hints_enabled: bool,
@@ -278,6 +281,7 @@ impl Default for AppSettings {
             screenshot_quick_save_shortcut: String::new(),
             screenshot_quick_pin_shortcut: String::new(),
             screenshot_quick_ocr_shortcut: String::new(),
+            recording_shortcut: "Ctrl+Shift+R".to_string(),
             screenshot_element_detection: "all".to_string(),
             screenshot_magnifier_enabled: true,
             screenshot_hints_enabled: true,

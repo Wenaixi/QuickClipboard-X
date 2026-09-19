@@ -141,6 +141,9 @@ export const defaultSettings = {
   screenshotQuickSaveShortcut: '',
   screenshotQuickPinShortcut: '',
   screenshotQuickOcrShortcut: '',
+  // 屏幕录制热键（R4 录制命令面入口）：与 Rust model.rs recording_shortcut
+  // 默认值对齐(Ctrl+Shift+R)，同键再按即停止录制。
+  recordingShortcut: 'Ctrl+Shift+R',
   screenshotElementDetection: 'all',
   screenshotMagnifierEnabled: true,
   screenshotHintsEnabled: true,
