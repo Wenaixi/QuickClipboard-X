@@ -292,6 +292,9 @@ pub fn run() {
                 commands::screenshot::find_screenshot_window_at_point,
                 #[cfg(target_os = "windows")]
                 commands::screenshot::complete_screenshot,
+                windows::annotation::open_annotation_window,
+                windows::annotation::annotation_finished,
+                windows::annotation::annotation_cancelled,
                 commands::copy_text_to_clipboard,
                 commands::prompt_disable_win_v_hotkey_if_needed,
                 commands::prompt_enable_win_v_hotkey,

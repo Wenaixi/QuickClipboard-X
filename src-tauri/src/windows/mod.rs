@@ -11,5 +11,6 @@ pub mod preview_window;
 pub mod transfer_shelf;
 pub mod receive_box;
 pub mod drop_proxy;
+pub mod annotation;
 #[cfg(target_os = "windows")]
 pub mod screenshot_window;
