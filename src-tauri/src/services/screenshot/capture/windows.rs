@@ -56,6 +56,24 @@ impl CaptureRect {
         }
         Ok(())
     }
+
+    /// 任意多边形选区的轴对齐包围盒裁剪：多边形路径（物理像素顶点）的
+    /// 最小外接矩形即捕获区域。R2 多边形截图完成后前端把路径顶点转物理
+    /// 像素送后端，后端统一按包围盒走既有 WGC 捕获；多边形形状裁剪由
+    /// 前端绘制遮罩达成（后端捕获面保持矩形，不新增 mask 通道）。
+    pub fn from_polygon_bounds(points: &[(u32, u32)]) -> Option<Self> {
+        if points.is_empty() {
+            return None;
+        }
+        let left = points.iter().map(|(x, _)| *x).min()?;
+        let top = points.iter().map(|(_, y)| *y).min()?;
+        let right = points.iter().map(|(x, _)| *x).max()?;
+        let bottom = points.iter().map(|(_, y)| *y).max()?;
+        if right <= left || bottom <= top {
+            return None;
+        }
+        Some(CaptureRect { left, top, width: right - left, height: bottom - top })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -421,6 +439,24 @@ mod tests {
         let rect = CaptureRect { left: u32::MAX, top: u32::MAX, width: 4, height: 8 };
         assert_eq!(rect.right(), u32::MAX);
         assert_eq!(rect.bottom(), u32::MAX);
+    }
+
+    #[test]
+    fn polygon_bounds_produce_axis_aligned_capture_rect() {
+        // 多边形包围盒必须给出覆盖全部顶点的轴对齐矩形：left/top 取最小，
+        // 宽高由最大-最小求得（R2 多边形截图后端捕获面）。
+        let rect = CaptureRect::from_polygon_bounds(&[
+            (120, 80),
+            (200, 300),
+            (60, 240),
+            (160, 50),
+        ])
+        .expect("多边形必须产生包围盒");
+        assert_eq!(rect, CaptureRect { left: 60, top: 50, width: 140, height: 250 });
+        // 单点/退化多边形（无面积）必须返回 None，避免 0 尺寸捕获。
+        assert!(CaptureRect::from_polygon_bounds(&[(100, 100)]).is_none());
+        assert!(CaptureRect::from_polygon_bounds(&[(10, 10), (10, 10)]).is_none());
+        assert!(CaptureRect::from_polygon_bounds(&[]).is_none());
     }
 
     #[test]
