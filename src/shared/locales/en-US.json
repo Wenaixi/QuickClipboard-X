@@ -1261,7 +1261,8 @@
       "colorPicker": "Color Picker",
       "qrGenerator": "QR Code Generator",
       "fileHash": "File Hash",
-      "ruler": "Screen Ruler"
+      "ruler": "Screen Ruler",
+      "whiteboard": "Whiteboard"
     },
     "qrPrompt": "Enter text or link to generate a QR code",
     "qrGenerated": "QR code generated and copied to clipboard",

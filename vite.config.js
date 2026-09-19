@@ -101,6 +101,10 @@ export default defineConfig({
         if (existsSync(rulerPath)) {
           inputs.ruler = rulerPath
         }
+        const whiteboardPath = resolve(__dirname, 'src/windows/whiteboard/index.html')
+        if (existsSync(whiteboardPath)) {
+          inputs.whiteboard = whiteboardPath
+        }
         return inputs
       })(),
 

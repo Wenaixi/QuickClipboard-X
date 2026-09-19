@@ -1262,7 +1262,8 @@
       "colorPicker": "取色器",
       "qrGenerator": "二维码生成",
       "fileHash": "文件哈希",
-      "ruler": "屏幕标尺"
+      "ruler": "屏幕标尺",
+      "whiteboard": "白板"
     },
     "qrPrompt": "输入要生成二维码的文本或链接",
     "qrGenerated": "二维码已生成并复制到剪贴板",

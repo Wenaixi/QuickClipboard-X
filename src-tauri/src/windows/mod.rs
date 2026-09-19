@@ -13,6 +13,7 @@ pub mod receive_box;
 pub mod drop_proxy;
 pub mod annotation;
 pub mod ruler_window;
+pub mod whiteboard_window;
 #[cfg(target_os = "windows")]
 pub mod color_picker_window;
 #[cfg(target_os = "windows")]

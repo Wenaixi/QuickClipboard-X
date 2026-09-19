@@ -243,6 +243,18 @@ pub fn save_qr_png_base64(
     crate::services::tools::store_qr_png_base64(&app, &png_base64).map(|_| ())
 }
 
+// 通用 PNG base64 落剪贴板历史：白板/画布等任一 canvas 把绘制结果以
+// PNG base64 交此命令，走与二维码同一存储链路（解码→内容寻址落盘→
+// 复制进剪贴板→历史事件）。前端保存画布统一复用，不各自新造。
+#[cfg(target_os = "windows")]
+#[tauri::command]
+pub fn save_img_png_base64(
+    app: AppHandle,
+    png_base64: String,
+) -> Result<(), String> {
+    crate::services::tools::store_qr_png_base64(&app, &png_base64).map(|_| ())
+}
+
 /// 计算文件 SHA-256（线程池内执行，避免阻塞 UI）。
 #[cfg(target_os = "windows")]
 #[tauri::command]
@@ -258,4 +270,10 @@ pub async fn hash_file_sha256(file_path: String) -> Result<String, String> {
 #[tauri::command]
 pub fn open_ruler() -> Result<(), String> {
     crate::windows::ruler_window::open_ruler()
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+pub fn open_whiteboard() -> Result<(), String> {
+    crate::windows::whiteboard_window::open_whiteboard()
 }

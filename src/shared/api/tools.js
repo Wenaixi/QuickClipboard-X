@@ -19,3 +19,11 @@ export async function hashFileSha256(filePath) {
 export async function openRuler() {
   return await invoke('open_ruler');
 }
+
+export async function openWhiteboard() {
+  return await invoke('open_whiteboard');
+}
+
+export async function saveImgPngBase64(pngBase64) {
+  return await invoke('save_img_png_base64', { pngBase64 });
+}

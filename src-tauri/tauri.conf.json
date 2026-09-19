@@ -99,6 +99,22 @@
         "shadow": false,
         "dragDropEnabled": false,
         "visibleOnAllWorkspaces": true
+      },
+      {
+        "label": "whiteboard",
+        "title": "白板",
+        "url": "windows/whiteboard/index.html",
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "resizable": false,
+        "fullscreen": true,
+        "focus": true,
+        "shadow": false,
+        "dragDropEnabled": false,
+        "visibleOnAllWorkspaces": true
       }
     ],
     "security": {
@@ -118,7 +134,8 @@
         "transfer-shelf",
         "receive-box",
         "updater",
-        "ruler"
+        "ruler",
+        "whiteboard"
       ],
       "assetProtocol": {
         "enable": true,

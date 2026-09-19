@@ -464,6 +464,11 @@ const TitleBar = forwardRef(
           label: t("tools.moreMenu.ruler", "屏幕标尺"),
           icon: "ti ti-ruler",
         }),
+        createMenuItem({
+          id: "menu-open-whiteboard",
+          label: t("tools.moreMenu.whiteboard", "白板"),
+          icon: "ti ti-brush",
+        }),
       ];
       const fileHubItem = createMenuItem({
         id: "menu-file-hub-group",
@@ -687,6 +692,15 @@ const TitleBar = forwardRef(
             await openRuler();
           } catch (error) {
             console.error("打开屏幕标尺失败:", error);
+          }
+          break;
+        }
+        case "menu-open-whiteboard": {
+          try {
+            const { openWhiteboard } = await import("@shared/api/tools");
+            await openWhiteboard();
+          } catch (error) {
+            console.error("打开白板失败:", error);
           }
           break;
         }
