@@ -731,6 +731,18 @@ mod source_guards {
     }
 
     #[test]
+    fn copy_pin_and_edit_actions_also_retain_the_session_png() {
+        let source = source_file("windows/screenshot_window/mod.rs");
+        let finish_start = source.rfind("let finish_result = {").expect("缺少完成清理动作分支");
+        let finish_end = source[finish_start..].find("cleanup_plan(plan, app)").map(|offset| finish_start + offset).expect("缺少完成清理调用");
+        let body = &source[finish_start..finish_end];
+        // 复制并贴图（数字键 6/工具栏）与编辑（数字键 4/工具栏）完成后同样保留
+        // 会话 PNG：前者已被历史库条目引用，后者编辑器仍在异步加载该源图。
+        assert!(body.contains("action == \"copy+pin\""), "复制并贴图动作必须保留历史图片");
+        assert!(body.contains("action == \"edit\""), "编辑动作必须保留会话 PNG 供编辑器加载");
+    }
+
+    #[test]
     fn screenshot_capability_has_no_private_or_global_filesystem_scope() {
         let source = source_file("../capabilities/screenshot.json");
         assert!(!source.contains("screenshot-suite:default"));
@@ -1298,14 +1310,14 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
     let finish_result = {
         let mut state = STATE.lock();
         let revision = MainWindowVisibilityRevision(state.visibility_revision);
-        let retain = action == "copy" || action.is_empty();
+        let retain = action == "copy" || action == "copy+pin" || action == "edit" || action.is_empty();
         if retain {
-            // Image history points at the content-addressed PNG, so copy (and the
-            // auto chain with copy) intentionally retains the session file.
+            // 历史记录指向内容寻址 PNG：复制、复制并贴图、编辑（编辑器异步加载该
+            // 源图）以及含复制兜底的自动动作链都保留会话临时文件。
             state.sessions.finish_and_retain_file(session_id, revision, &stored.absolute_path)
         } else {
-            // Save, pin, and AI text all create/use another durable result; the
-            // temporary capture must be deleted during cleanup.
+            // 保存、贴图、AI 文本、上传等动作会另建持久结果，
+            // 会话临时截图在清理时删除。
             state.sessions.finish(session_id, revision)
         }
     };

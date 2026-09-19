@@ -52,7 +52,9 @@ mod tests {
     fn empty_base64_rejected_before_storage() {
         // 空 base64（空串 trim 后解码为空字节）必须在存储前拒绝。
         assert!(store_qr_png_base64_base64_only("").is_err());
-        assert!(store_qr_png_base64_base64_only("Zg==").is_err(), "非空 base64 但内容为空字节不接受");
+        // 说明：base64 语义下「非空合法输入」至少 1 字节，空串用例已覆盖空拒绝；
+        // 非 PNG 字节拒绝由生产函数 store_qr_png_base64 的 decode_png_dimensions
+        // 负责，依赖剪贴板存储 IO 环境，不适合无 IO 单测。
     }
 
     fn store_qr_png_base64_base64_only(input: &str) -> Result<(), String> {

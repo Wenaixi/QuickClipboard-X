@@ -10,7 +10,6 @@ use crate::services::webdav_sync::webdav_client::WebdavClient;
 /// WebDAV 上传目标：持一份复用同步配置的客户端（明文产物，不加同步加密）。
 pub struct WebdavUploadTarget {
     client: WebdavClient,
-    root_path: String,
 }
 
 impl WebdavUploadTarget {
@@ -38,20 +37,16 @@ impl WebdavUploadTarget {
             url,
             username,
             password,
-            root_path: root_path.clone(),
+            root_path,
         })?;
-        Ok(Self { client, root_path })
+        Ok(Self { client })
     }
 
     /// 上传文件名 → 服务端完整 URL（对齐 ShareX HostConfiguration 的
-    /// 可访问地址回读语义：base_url + root + uploads/ + filename）。
+    /// 可访问地址回读语义：base_url + uploads/ + filename）。
+    /// base_url 已含配置 root_path（WebdavClient::new 拼好），此处不再拼 root。
     fn remote_url(&self, filename: &str) -> String {
-        let base = self.client.base_url();
-        if self.root_path.is_empty() {
-            format!("{base}/uploads/{filename}")
-        } else {
-            format!("{base}/{}/uploads/{filename}", self.root_path)
-        }
+        format!("{}/uploads/{filename}", self.client.base_url())
     }
 }
 
@@ -118,5 +113,24 @@ mod tests {
             "上传路径必须固定 uploads/ 前缀");
         assert!(source.contains("put_raw_bytes"), "必须走明文 PUT 原语");
         assert!(source.contains("url: url.clone()"), "可访问 URL 必须回读");
+    }
+
+    #[test]
+    fn remote_url_keeps_exactly_one_root_segment() {
+        // 默认 root_path（空配置回退 quickclipboard）下，回读 URL 必须恰含一个
+        // root 段——base_url 已把 root 拼进（WebdavClient::new），remote_url 再拼
+        // root 会出现 quickclipboard/quickclipboard 重复段（复制出的链接 404）。
+        let target = WebdavUploadTarget {
+            client: WebdavClient::new(crate::services::webdav_sync::types::WebdavConfig {
+                url: "https://dav.example.com".to_string(),
+                username: "u".to_string(),
+                password: "p".to_string(),
+                root_path: "quickclipboard".to_string(),
+            })
+            .expect("构造 WebDAV 客户端失败"),
+        };
+        let url = target.remote_url("QC_1.png");
+        // 完整 URL 精确锁死：base_url 已含 root，root 段只出现一次（重复即 404）。
+        assert_eq!(url, "https://dav.example.com/quickclipboard/uploads/QC_1.png");
     }
 }
