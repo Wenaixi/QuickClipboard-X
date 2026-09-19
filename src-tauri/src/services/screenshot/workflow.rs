@@ -14,7 +14,7 @@
 
 use tauri::AppHandle;
 
-use super::actions::{copy_screenshot, copy_screenshot_text, emit_screenshot_history_update, save_screenshot, ScreenshotActionError};
+use super::actions::{copy_screenshot, copy_screenshot_text, emit_screenshot_history_update, save_screenshot};
 use super::ai_vision::recognize_image;
 use super::image_store::prepare_pin_path;
 use super::StoredScreenshot;
@@ -418,5 +418,37 @@ mod tests {
             config < confirm && confirm < request,
             "必须先校验配置、确认云端发送，再发起 AI 请求"
         );
+    }
+
+    // 保存动作:用户取消=失败(对齐 ShareX SaveImageToFileWithDialog 取消
+    // 即放弃保存),文件 IO 必须走线程池不占异步运行时;提交先于写盘。
+    #[test]
+    fn save_action_moves_file_io_to_blocking_and_treats_cancel_as_failure() {
+        let src = prod_source();
+        let start = src
+            .find("async fn run_save_action")
+            .expect("缺 run_save_action");
+        let rest = &src[start..];
+        let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(src.len());
+        let body = &src[start..end];
+        let dialog = body
+            .find("choose_screenshot_save_destination(stored, app)")
+            .expect("保存动作缺少保存对话框");
+        let cancel = body
+            .find("Ok(None) => return Err(\"已取消保存截图\".to_string())")
+            .expect("保存取消必须视为失败");
+        assert!(dialog < cancel, "必须先弹出保存对话框再判定取消");
+        assert!(
+            body.contains("spawn_blocking(move || save_screenshot(&stored, &destination))"),
+            "文件 IO 必须走线程池"
+        );
+        assert!(body.contains("保存截图线程失败"), "线程失败必须报错");
+        let commit = body
+            .find("begin_commit(session_id)?;")
+            .expect("缺少会话提交");
+        let save = body
+            .find("save_screenshot(&stored, &destination)")
+            .expect("缺少文件保存");
+        assert!(commit < save, "必须先提交会话再写盘");
     }
 }

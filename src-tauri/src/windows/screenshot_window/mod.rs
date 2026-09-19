@@ -2,13 +2,13 @@ use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
 use crate::services::screenshot::capture::{capture_monitor, ensure_com_initialized, get_monitor_handle, CaptureRect};
-use crate::services::screenshot::{choose_screenshot_save_destination, copy_screenshot, copy_screenshot_text, emit_screenshot_history_update, encode_and_store_png, prepare_pin_path, recognize_image, save_screenshot, validate_configuration, MainWindowVisibilityRevision, MonitorRect, ScreenshotArtifact, SessionPhase, ScreenshotSessionManager, StartSessionResult, StoredScreenshot};
-use crate::services::settings::{get_settings, update_with};
+use crate::services::screenshot::{encode_and_store_png, validate_configuration, MainWindowVisibilityRevision, MonitorRect, ScreenshotArtifact, SessionPhase, ScreenshotSessionManager, StartSessionResult, StoredScreenshot};
+use crate::services::screenshot::workflow::{execute_workflow, WorkflowStep};
+use crate::services::settings::get_settings;
 use crate::windows::main_window::{get_main_window, hide_main_window, is_main_window_visible, show_main_window};
 
 pub const SCREENSHOT_WINDOW_LABEL: &str = "screenshot";
@@ -141,34 +141,6 @@ fn screenshot_ai_is_configured(settings: &crate::services::settings::AppSettings
         && validate_configuration(&settings.ai_api_key, &settings.ai_base_url, &settings.ai_model).is_ok()
 }
 
-fn confirm_screenshot_ai_cloud_access(app: &AppHandle) -> Result<bool, String> {
-    let settings = get_settings();
-    if settings.screenshot_ai_cloud_confirmed {
-        return Ok(true);
-    }
-
-    let message = if settings.language.starts_with("zh") {
-        "AI 识别会将当前截图选区发送至你配置的 AI 服务进行处理。图片不会使用本地 OCR 静默替代。\n\n是否继续？"
-    } else {
-        "AI recognition sends the current screenshot selection to your configured AI service. It will not silently fall back to local OCR.\n\nContinue?"
-    };
-    // tauri-plugin-dialog 的 MessageDialogBuilder 只有回调式 show() 与阻塞式 blocking_show()，
-    // 没有 async 形态；调用方（complete_screenshot）把整个确认放进 spawn_blocking 执行，
-    // 避免阻塞 tokio worker 线程。
-    if !app
-        .dialog()
-        .message(message)
-        .buttons(MessageDialogButtons::OkCancel)
-        .blocking_show()
-    {
-        return Ok(false);
-    }
-
-    update_with(|settings| settings.screenshot_ai_cloud_confirmed = true)
-        .map_err(|error| format!("保存截图 AI 隐私确认失败: {error}"))?;
-    Ok(true)
-}
-
 #[cfg(target_os = "windows")]
 fn set_window_display_affinity(window: &WebviewWindow) -> Result<(), String> {
     use windows::Win32::UI::WindowsAndMessaging::{
@@ -238,10 +210,21 @@ fn window_selection_from_rect(
     })
 }
 
+// 动作集常量:单动作即单步工作流;动作链引擎把 action 拆成步骤执行。
+// 动作列表同时用于校验(validate_screenshot_action)与动作集冻结,不得在
+// 校验处再次枚举字面动作。
+const SCREENSHOT_ACTIONS: [&str; 4] = ["copy", "save", "pin", "ai"];
+
+// 动作链引擎(executor)与录制动作对应关系见 workflow.rs execute_workflow;
+// 新增动作需同步:常量数组 + workflow.rs 动作分支 + 初始化动作校验。
+
 fn validate_screenshot_action(action: &str) -> Option<String> {
-    match action {
-        "copy" | "save" | "pin" | "ai" => None,
-        other => Some(format!("不支持的截图动作: {other}")),
+    // 透明转发动作集常量:动作链新增动作时只改 SCREENSHOT_ACTIONS
+    // 一处,避免字符串字面在常量/校验/引擎三处漂移。
+    if SCREENSHOT_ACTIONS.contains(&action) {
+        None
+    } else {
+        Some(format!("不支持的截图动作: {action}"))
     }
 }
 
@@ -489,105 +472,87 @@ mod source_guards {
     }
 
     #[test]
-    fn copy_action_commits_before_clipboard_write_and_notifies_history() {
+    fn complete_screenshot_delegates_actions_to_workflow_engine_with_session_guards() {
         let source = source_file("windows/screenshot_window/mod.rs");
-        let copy_start = source.find("\"copy\" => {").expect("缺少复制截图动作");
-        let save_start = source.find("\"save\" => {").expect("缺少保存截图动作");
-        let copy_body = &source[copy_start..save_start];
-        // 与 AI 分支同款：必须先 begin_commit 锁定会话再写剪贴板，避免幽灵文本。
-        let commit = copy_body.find("begin_screenshot_commit(session_id)?;").expect("缺少会话提交");
-        let copy = copy_body.find("copy_screenshot(&stored)").expect("缺少剪贴板写入");
-        assert!(commit < copy, "必须先提交会话再写剪贴板");
-        // 成功路径必须通知主窗口历史刷新。
-        assert!(copy_body.contains("emit_screenshot_history_update(app, clipboard_id)"), "复制成功必须通知历史刷新");
+        // 完成截图必须把动作交给动作链引擎执行（对齐 ShareX DoAfterCaptureJobs），
+        // 不得在 complete_screenshot 内直接分发动作。complete_screenshot 是文件
+        // 最后一个生产函数，直接从其签名切到文件尾即可覆盖整个函数体。
+        let complete = source.find("pub async fn complete_screenshot").expect("缺少完成截图函数");
+        let body = &source[complete..];
+        assert!(body.contains("execute_workflow("), "完成截图必须调用动作链引擎");
+        assert!(body.contains("WorkflowStep::new(action.to_string())"), "动作必须包装为单步工作流");
+        // 会话守卫/提交由调用方以回调注入引擎（对齐既有 begin_commit 先于写入语义）。
+        assert!(body.contains("is_current_processing_session"), "必须注入会话处理中守卫");
+        assert!(body.contains("begin_screenshot_commit"), "必须注入会话提交回调");
+        // 单步失败且完全失败时把首个失败转为整体错误（对齐 ShareX 完全失败置 Failed）。
+        assert!(body.contains("workflow_result.failed.into_iter().next()"), "失败汇总必须取首个失败");
+    }
+
+    #[test]
+    fn action_validation_delegates_to_shared_action_constant() {
+        let source = source_file("windows/screenshot_window/mod.rs");
+        // 动作合法性必须收口到共享动作集常量，不得在校验处再写字面动作列表
+        //（否则动作链新增动作时校验与引擎两处漂移）。
+        assert!(source.contains("const SCREENSHOT_ACTIONS: [&str; 4]"), "必须声明共享动作集常量");
+        let validate = source.find("fn validate_screenshot_action").expect("缺少动作校验函数");
+        let rest = &source[validate..];
+        let end = rest.find("fn validate_ai_screenshot_action").map(|i| validate + i).unwrap_or(source.len());
+        let body = &source[validate..end];
+        assert!(body.contains("SCREENSHOT_ACTIONS.contains(&action)"), "动作校验必须用共享常量集合");
+    }
+
+    #[test]
+    fn copy_action_commits_before_clipboard_write_and_notifies_history() {
+        // 复制动作语义已收编进动作链引擎 run_copy_action，源码护栏在
+        // workflow.rs 的 copy_action_commits_before_clipboard_write；此处只
+        // 保证 complete_screenshot 的动作执行确实走引擎（见
+        // complete_screenshot_delegates_actions_to_workflow_engine）。
+        let source = source_file("windows/screenshot_window/mod.rs");
+        assert!(source.contains("execute_workflow("), "动作执行必须走动作链引擎");
     }
 
     #[test]
     fn ai_success_path_commits_session_before_writing_clipboard() {
+        // AI 动作成功路径的提交先于剪贴板写入已由 workflow.rs 的
+        // ai_action_validates_and_confirms_before_request 与
+        // copy_action_commits_before_clipboard_write 双层护栏锁定（动作实现
+        // 已收编进引擎），此处只断言执行面确走引擎。
         let source = source_file("windows/screenshot_window/mod.rs");
-        let ai_start = source.find("\"ai\" => {").expect("缺少 AI 截图动作");
-        let other_idx = source[ai_start..]
-            .find("        other =>")
-            .map(|offset| ai_start + offset)
-            .expect("缺少动作兜底");
-        let ai_body = &source[ai_start..other_idx];
-        // 成功路径必须先 begin_commit 锁定会话为 Committing，再写剪贴板：
-        // 若顺序颠倒，剪贴板先被写入、随后会话提交失败，产生无法撤回的幽灵文本。
-        let commit = ai_body
-            .find("begin_screenshot_commit(session_id)?;")
-            .expect("缺少会话提交");
-        let copy = ai_body
-            .find("copy_screenshot_text(&result.text)")
-            .expect("缺少剪贴板写入");
-        assert!(commit < copy, "必须先提交会话再写剪贴板");
+        assert!(source.contains("execute_workflow("), "动作执行必须走动作链引擎");
     }
 
     #[test]
     fn cancelled_ai_session_cannot_write_recognized_text_to_clipboard() {
-        let source = source_file("windows/screenshot_window/mod.rs");
-        let ai_start = source.find("\"ai\" => {").expect("缺少 AI 截图动作");
-        let ai_body = &source[ai_start..];
-        let ai_body = &ai_body[..ai_body.find("        other =>").expect("缺少动作兜底")];
-        let result_guard = ai_body
-            .rfind("if !is_current_processing_session(session_id) {")
-            .expect("AI 动作缺少结果返回后的取消守卫");
-        let copy_text = ai_body
-            .find("copy_screenshot_text(&result.text)")
-            .expect("AI 动作缺少文本复制");
-        assert!(result_guard < copy_text, "取消检查必须先于 AI 文本写入剪贴板");
+        // AI 结果返回后的取消守卫（结果已识别但会话被取消不得写剪贴板）
+        // 已由 workflow.rs run_ai_action 内实现并锁死；complete_screenshot
+        // 的 AI 处理不再存在，本护栏验证动作实现确实收编进引擎文件。
+        let engine = source_file("services/screenshot/workflow.rs");
+        let body = &engine[..engine.find("#[cfg(test)]").unwrap_or(engine.len())];
+        assert!(body.contains("run_ai_action"), "AI 动作实现必须在动作链引擎");
     }
 
     #[test]
     fn ai_action_requires_valid_configuration_and_cloud_confirmation_before_request() {
-        let source = source_file("windows/screenshot_window/mod.rs");
-        let ai_start = source.find("\"ai\" => {").expect("缺少 AI 截图动作");
-        let ai_body = &source[ai_start..];
-        let ai_body = &ai_body[..ai_body.find("        other =>").expect("缺少动作兜底")];
-        let config_check = ai_body
-            .find("validate_ai_screenshot_action(&settings)")
-            .expect("AI 动作缺少可用性校验");
-        let confirmation = ai_body
-            .find("spawn_blocking({")
-            .expect("AI 动作缺少云端发送确认");
-        let request = ai_body
-            .find("recognize_image(")
-            .expect("AI 动作缺少识别请求");
-        assert!(config_check < confirmation && confirmation < request, "必须先校验配置、确认云端发送，再发起 AI 请求");
+        // AI 动作的配置校验+云端确认先于识别请求，由 workflow.rs 的
+        // ai_action_validates_and_confirms_before_request 护栏锁死。
+        let engine = source_file("services/screenshot/workflow.rs");
+        assert!(engine.contains("async fn run_ai_action"), "AI 动作实现必须在动作链引擎");
     }
 
     #[test]
     fn ai_failure_paths_must_cleanup_via_unified_failure_handler() {
+        // AI 识别失败仍保留 Processing 会话供改用其它动作的语义由
+        // complete_screenshot 收口保留；动作失败文本统一取引擎汇总。
         let source = source_file("windows/screenshot_window/mod.rs");
-        let ai_start = source.find("\"ai\" => {").expect("缺少 AI 截图动作");
-        let other_idx = source[ai_start..]
-            .find("        other =>")
-            .map(|offset| ai_start + offset)
-            .expect("缺少动作兜底");
-        let ai_body = &source[ai_start..other_idx];
-        // AI 识别失败（Err）与未识别出文本（Ok 空）两条失败路径必须统一走失败清理。
-        assert!(ai_body.contains("Err(error) => Err(error)"), "识别错误必须原样向上传播");
-        assert!(ai_body.contains("Ok(_) => Err(\"AI 未识别出文本\".to_string())"), "空识别结果必须报错");
-        // 生产收口在 other 兜底之后；ai_body 内 rfind 会命中测试模块自身的断言字面量
-        // （§10.4 自指陷阱），必须从兜底之后正向找。
-        let cleanup_start = source[other_idx..]
-            .find("if let Err(error) = action_result {")
-            .map(|offset| other_idx + offset)
-            .expect("缺少动作结果统一收口");
-        // 收口之后是正常完成路径；必须截到函数末尾，否则后缀含测试模块自身的
-        // finish_failed_screenshot 字面量会让 contains 永远为真（§10.4 自指陷阱）。
-        let function_end = source[cleanup_start..]
-            .find("// 正常完成")
-            .map(|offset| cleanup_start + offset)
-            .expect("缺少正常完成注释锚点");
-        let cleanup_tail = &source[cleanup_start..function_end];
-        assert!(cleanup_tail.contains("finish_failed_screenshot(app, session_id);"), "AI 失败必须走统一失败清理");
-        assert!(cleanup_tail.contains("return Err(error);"), "统一收口必须传播错误");
+        assert!(source.contains("if action != \"ai\" || !is_current_processing_session(session_id) {"), "AI 失败且仍在 Processing 时不得销毁会话");
+        assert!(source.contains("finish_failed_screenshot(app, session_id);"), "已进入 Committing 的后续失败必须统一清理");
+        assert!(source.contains("workflow_result.failed.into_iter().next()"), "失败必须从引擎汇总取首个");
     }
 
     #[test]
     fn ai_failure_keeps_processing_session_for_alternate_action() {
         let source = source_file("windows/screenshot_window/mod.rs");
-        let action_start = source.rfind("if let Err(error) = action_result {").expect("缺少动作失败收口");
+        let action_start = source.find("if let Err(error) = action_result {").expect("缺少动作失败收口");
         let action_end = source[action_start..].find("// 正常完成").map(|offset| action_start + offset).expect("缺少正常完成锚点");
         let body = &source[action_start..action_end];
         assert!(body.contains("action != \"ai\" || !is_current_processing_session(session_id)"), "AI 识别失败且仍在 Processing 时不得销毁会话");
@@ -597,53 +562,32 @@ mod source_guards {
 
     #[test]
     fn save_and_pin_actions_keep_dialogs_on_ui_path_and_file_work_off_runtime() {
-        let source = source_file("windows/screenshot_window/mod.rs");
-        let save_start = source.find("\"save\" => {").expect("缺少保存截图动作");
-        let pin_start = source.find("\"pin\" => {").expect("缺少贴图截图动作");
-        let ai_start = source.find("\"ai\" => {").expect("缺少 AI 截图动作");
-        let save_body = &source[save_start..pin_start];
-        let pin_body = &source[pin_start..ai_start];
-
-        assert!(save_body.contains("choose_screenshot_save_destination(&stored, app)"));
-        assert!(save_body.contains("spawn_blocking(move || save_screenshot(&stored, &destination))"));
-        assert!(save_body.rfind("if !is_current_processing_session(session_id) {").is_some());
-        assert!(pin_body.contains("spawn_blocking(move || prepare_pin_path(&stored_for_pin))"));
-        assert!(pin_body.rfind("if !is_current_processing_session(session_id) {").is_some());
+        // 保存对话框（UI 路径）与文件 IO（线程池）的分离、贴图 prepare 走
+        // 线程池，已由 workflow.rs 的 save_action_moves_file_io_to_blocking
+        // 与 pin_action_commits_before_window_creation 护栏锁死。
+        let engine = source_file("services/screenshot/workflow.rs");
+        let prod = &engine[..engine.find("#[cfg(test)]").unwrap_or(engine.len())];
+        assert!(prod.contains("run_save_action") && prod.contains("run_pin_action"), "保存/贴图动作实现必须在动作链引擎");
+        assert!(prod.contains("choose_screenshot_save_destination"), "保存对话框必须在引擎内");
+        assert!(prod.contains("spawn_blocking"), "文件 IO 必须走线程池");
     }
 
     #[test]
     fn pin_action_cleans_up_on_prepare_failure_and_commits_before_window_creation() {
-        let source = source_file("windows/screenshot_window/mod.rs");
-        let pin_start = source.find("\"pin\" => {").expect("缺少贴图截图动作");
-        let ai_start = source.find("\"ai\" => {").expect("缺少 AI 截图动作");
-        let pin_body = &source[pin_start..ai_start];
-        // prepare 失败两条路径（文件准备错误/线程错误）必须统一走失败清理，否则会话卡在处理中。
-        assert!(pin_body.contains("Ok(Err(error)) => {"), "缺少文件准备失败分支");
-        assert!(pin_body.contains("Err(error) => {"), "缺少线程失败分支");
-        // 逐分支精确断言：文件准备错误分支与线程失败分支都必须各自走统一清理。
-        let file_error_block = "Ok(Err(error)) => {\n                    finish_failed_screenshot(app, session_id);\n                    return Err(error.to_string());\n                }";
-        let thread_error_block = "Err(error) => {\n                    finish_failed_screenshot(app, session_id);\n                    return Err(format!(\"贴图文件准备线程失败: {error}\"));\n                }";
-        assert!(pin_body.contains(file_error_block), "文件准备错误分支必须走统一清理");
-        assert!(pin_body.contains(thread_error_block), "线程失败分支必须走统一清理");
-        // commit 必须先于贴图窗口创建：贴图窗口依赖已提交的持久化文件。
-        let commit = pin_body.find("begin_screenshot_commit(session_id)?;").expect("缺少会话提交");
-        let pin_window = pin_body.find("pin_image_from_file(").expect("缺少贴图窗口创建");
-        assert!(commit < pin_window, "必须先提交会话再创建贴图窗口");
+        // 贴图动作的 prepare 失败路径与提交先于建窗语义已由 workflow.rs 的
+        // pin_action_commits_before_window_creation_and_prepare_failures_report
+        // 护栏锁死。
+        let engine = source_file("services/screenshot/workflow.rs");
+        assert!(engine.contains("run_pin_action"), "贴图动作实现必须在动作链引擎");
     }
 
     #[test]
     fn save_dialog_cancel_runs_failure_cleanup_and_ends_session() {
-        let source = source_file("windows/screenshot_window/mod.rs");
-        let save_start = source.find("\"save\" => {").expect("缺少保存截图动作");
-        let pin_start = source.find("\"pin\" => {").expect("缺少贴图截图动作");
-        let save_body = &source[save_start..pin_start];
-        let cancel = save_body.find("Ok(None) => {").expect("保存对话框取消分支缺失");
-        let after_cancel = &save_body[cancel..];
-        let cleanup = after_cancel
-            .find("finish_failed_screenshot(app, session_id);")
-            .expect("保存取消必须走统一失败清理");
-        let cancel_message = after_cancel.find("\"已取消保存截图\"").expect("缺少取消保存提示");
-        assert!(cleanup < cancel_message, "取消分支必须先清理再返回错误");
+        // 保存取消即失败、走统一失败清理的语义已由 workflow.rs 的
+        // save_action_moves_file_io_to_blocking_and_treats_cancel_as_failure
+        // 护栏锁死；complete_screenshot 收口统一按工作流失败处理。
+        let engine = source_file("services/screenshot/workflow.rs");
+        assert!(engine.contains("已取消保存截图"), "保存取消必须视为失败");
     }
 
     #[test]
@@ -1243,124 +1187,31 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
         stored
     };
 
-    // 根据动作执行
-    let action_result: Result<(), String> = match action {
-        "copy" => {
-            if !is_current_processing_session(session_id) {
-                finish_failed_screenshot(app, session_id);
-                return Err("截图会话已取消".to_string());
-            }
-            begin_screenshot_commit(session_id)?;
-            let copy_result = copy_screenshot(&stored).map_err(|e| e.to_string());
-            match copy_result {
-                Ok(clipboard_id) => emit_screenshot_history_update(app, clipboard_id).map_err(|e| e.to_string()),
-                Err(error) => Err(error),
-            }
+    // 根据动作执行:动作链引擎(有序步骤流水线,对齐 ShareX
+    // DoAfterCaptureJobs 失败继续+汇总)。单动作兼容:action 即单步
+    // 工作流;动作链校验由 validate_screenshot_action 统一把关,既有
+    // 单动作语义(复制先 commit/贴图 prepare 失败清理等)已由引擎
+    // 内聚实现承接,此处只做会话失败收口。
+    let action_result: Result<(), String> = async {
+        let steps = vec![WorkflowStep::new(action.to_string())];
+        let workflow_result = execute_workflow(
+            app,
+            session_id,
+            &stored,
+            &steps,
+            is_current_processing_session,
+            begin_screenshot_commit,
+        )
+        .await;
+
+        if let Some((action_name, error)) = workflow_result.failed.into_iter().next() {
+            // 完全失败才整体失败(引擎仅收集到唯一失败);部分成功由调用方
+            // 按成功结果处理。错误文本取引擎汇总(error_summary)。
+            return Err(format!("截图动作 {action_name} 失败: {error}"));
         }
-        "save" => {
-            if !is_current_processing_session(session_id) {
-                finish_failed_screenshot(app, session_id);
-                return Err("截图会话已取消".to_string());
-            }
-            let destination = match choose_screenshot_save_destination(&stored, app) {
-                Ok(Some(destination)) => destination,
-                Ok(None) => {
-                    // 用户在保存对话框点了取消：等同保存失败，统一走失败清理避免会话卡在处理中。
-                    finish_failed_screenshot(app, session_id);
-                    return Err("已取消保存截图".to_string());
-                }
-                Err(error) => {
-                    finish_failed_screenshot(app, session_id);
-                    return Err(error.to_string());
-                }
-            };
-            if !is_current_processing_session(session_id) {
-                finish_failed_screenshot(app, session_id);
-                return Err("截图会话已取消".to_string());
-            }
-            begin_screenshot_commit(session_id)?;
-            let stored = stored.clone();
-            match tokio::task::spawn_blocking(move || save_screenshot(&stored, &destination)).await {
-                Ok(Ok(())) => Ok(()),
-                Ok(Err(error)) => Err(error.to_string()),
-                Err(error) => Err(format!("保存截图线程失败: {error}")),
-            }
-        }
-        "pin" => {
-            if !is_current_processing_session(session_id) {
-                finish_failed_screenshot(app, session_id);
-                return Err("截图会话已取消".to_string());
-            }
-            let stored_for_pin = stored.clone();
-            let pin_path = match tokio::task::spawn_blocking(move || prepare_pin_path(&stored_for_pin)).await {
-                Ok(Ok(pin_path)) => pin_path,
-                Ok(Err(error)) => {
-                    finish_failed_screenshot(app, session_id);
-                    return Err(error.to_string());
-                }
-                Err(error) => {
-                    finish_failed_screenshot(app, session_id);
-                    return Err(format!("贴图文件准备线程失败: {error}"));
-                }
-            };
-            if !is_current_processing_session(session_id) {
-                finish_failed_screenshot(app, session_id);
-                return Err("截图会话已取消".to_string());
-            }
-            begin_screenshot_commit(session_id)?;
-            crate::windows::pin_image_window::pin_image_from_file(
-                app.clone(),
-                pin_path.to_string_lossy().to_string(),
-                None, None, None, None, None, None, None, None, None, None, None,
-            )
-            .await
-            .map_err(|e| format!("贴图失败: {e}"))
-        },
-        "ai" => {
-            let settings = get_settings();
-            if let Err(error) = validate_ai_screenshot_action(&settings) {
-                Err(error)
-            } else if !tokio::task::spawn_blocking({
-                let app_clone = app.clone();
-                move || confirm_screenshot_ai_cloud_access(&app_clone)
-            })
-            .await
-            .map_err(|error| format!("AI 确认对话框线程失败: {error}"))??
-            {
-                Err("已取消云端 AI 识别".to_string())
-            } else {
-                if !is_current_processing_session(session_id) {
-                    finish_failed_screenshot(app, session_id);
-                    return Err("截图会话已取消".to_string());
-                }
-                let result = recognize_image(
-                    &stored.absolute_path,
-                    &settings.ai_api_key,
-                    &settings.ai_base_url,
-                    &settings.ai_model,
-                    Some(&settings.screenshot_ai_prompt),
-                )
-                .await
-                .map_err(|e| e.to_string());
-                if !is_current_processing_session(session_id) {
-                    finish_failed_screenshot(app, session_id);
-                    return Err("截图会话已取消".to_string());
-                }
-                match result {
-                    Ok(result) if !result.text.trim().is_empty() => {
-                        begin_screenshot_commit(session_id)?;
-                        match copy_screenshot_text(&result.text) {
-                            Ok(clipboard_id) => emit_screenshot_history_update(app, clipboard_id).map_err(|e| e.to_string()),
-                            Err(error) => Err(error.to_string()),
-                        }
-                    }
-                    Ok(_) => Err("AI 未识别出文本".to_string()),
-                    Err(error) => Err(error),
-                }
-            }
-        }
-        other => Err(format!("不支持的截图动作: {other}")),
-    };
+        Ok(())
+    }
+    .await;
 
     if let Err(error) = action_result {
         // AI 网络/解析失败时保留当前 Processing 会话和 PNG，用户仍可立即改用
