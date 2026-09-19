@@ -592,6 +592,22 @@ mod source_guards {
     }
 
     #[test]
+    fn auto_chain_uses_settings_steps_and_retains_copy_file() {
+        // 未显式指定动作(空 action)时按「截图后动作」设置自动动作链执行：
+        // 步骤取自 screenshot_after_capture_actions，空列表兜底复制。
+        let source = source_file("windows/screenshot_window/mod.rs");
+        let complete = source.find("pub async fn complete_screenshot").expect("缺少完成截图函数");
+        let body = &source[complete..];
+        assert!(body.contains("screenshot_after_capture_actions"), "自动链必须读取截图后动作设置");
+        assert!(body.contains("WorkflowStep::new(\"copy\").into()") || body.contains("vec![WorkflowStep::new(\"copy\")]") || body.contains("WorkflowStep::new(\"copy\")"), "自动链空设置必须兜底复制");
+        assert!(body.contains(".map(|a| WorkflowStep::new(a.clone())).collect()"), "设置动作必须逐项转工作流步骤");
+        // 自动链若含复制，完成时保留临时文件（历史记录指向该 PNG）；以 action
+        // 为空判定，与显式 copy 同保留语义。
+        assert!(body.contains("action.is_empty()"), "自动链必须与显式复制同保留临时文件");
+        assert!(body.contains("finish_and_retain_file"), "保留临时文件必须走保留入口");
+    }
+
+    #[test]
     fn ready_handshake_replays_pending_bootstrap_and_clears_it() {
         let source = source_file("windows/screenshot_window/mod.rs");
         // 测试模块自身含 "pub fn screenshot_window_ready" 字面量（§10.4 自指陷阱），
@@ -1194,7 +1210,19 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
     // 单动作语义(复制先 commit/贴图 prepare 失败清理等)已由引擎
     // 内聚实现承接,此处只做会话失败收口。
     let action_result: Result<(), String> = async {
-        let steps = vec![WorkflowStep::new(action.to_string())];
+        // 未显式指定(空 action)时按设置「截图后动作」自动动作链执行;
+        // 显式动作(工具栏/数字热键/快速保存等)仍单动作优先。
+        let steps: Vec<WorkflowStep> = if action.is_empty() {
+            let settings = get_settings();
+            let auto_actions = &settings.screenshot_after_capture_actions;
+            if auto_actions.is_empty() {
+                vec![WorkflowStep::new("copy")]
+            } else {
+                auto_actions.iter().map(|a| WorkflowStep::new(a.clone())).collect()
+            }
+        } else {
+            vec![WorkflowStep::new(action.to_string())]
+        };
         let workflow_result = execute_workflow(
             app,
             session_id,
@@ -1217,6 +1245,7 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
     if let Err(error) = action_result {
         // AI 网络/解析失败时保留当前 Processing 会话和 PNG，用户仍可立即改用
         // 复制、保存或贴图；只有已进入 Committing 的后续写入失败才做终态清理。
+        // 自动动作链(action 为空)走失败收口(至少复制兜底后失败才到这里)。
         if action != "ai" || !is_current_processing_session(session_id) {
             finish_failed_screenshot(app, session_id);
         }
@@ -1224,12 +1253,14 @@ pub async fn complete_screenshot(app: &AppHandle, session_id: &str, selection: c
     }
 
     // 正常完成：清理会话并恢复主窗口。动作在最后一刻已切换到 Committing。
+    // 自动动作链保留裁剪的临时文件：复制是默认动作，历史记录指向该 PNG。
     let finish_result = {
         let mut state = STATE.lock();
         let revision = MainWindowVisibilityRevision(state.visibility_revision);
-        if action == "copy" {
-            // Image history points at the content-addressed PNG, so copy is the
-            // only action that intentionally retains the session file.
+        let retain = action == "copy" || action.is_empty();
+        if retain {
+            // Image history points at the content-addressed PNG, so copy (and the
+            // auto chain with copy) intentionally retains the session file.
             state.sessions.finish_and_retain_file(session_id, revision, &stored.absolute_path)
         } else {
             // Save, pin, and AI text all create/use another durable result; the
