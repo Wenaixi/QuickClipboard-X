@@ -291,7 +291,7 @@ async fn run_ai_action(
 // 推送到已配置上传目标(默认 WebDAV),成功后把可访问 URL 复制进剪贴板。
 // 目标未配置/上传失败走失败继续,不影响截图本身。
 async fn run_upload_action(
-    app: &AppHandle,
+    _app: &AppHandle,
     session_id: &str,
     stored: &StoredScreenshot,
     is_processing: &dyn Fn(&str) -> bool,
