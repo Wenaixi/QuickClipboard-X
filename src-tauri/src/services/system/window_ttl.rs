@@ -78,11 +78,11 @@ pub fn schedule_ttl_destroy(app: AppHandle, label: &str, idle_ms: u64) {
         }
     };
 
+    // 闭包 async move 只捕获 app 与 owned_label 所有权,不引用函数参数。
+    let owned_label = label.to_string();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_millis(idle_ms)).await;
 
-        // 闭包 async move 只捕获 app 与 label 所有权,不再引用函数参数。
-        let owned_label = label.to_string();
         let (entry_label, version) = {
             let map = TTL_WINDOWS.lock().unwrap_or_else(|p| p.into_inner());
             match map.get(owned_label.as_str()) {

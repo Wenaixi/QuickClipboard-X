@@ -62,13 +62,16 @@ pub fn start_recording(
 ) -> RecordingSession {
     let session = RecordingSession::default();
     let session_clone = session.clone();
+    // HMONITOR 是 *mut c_void 句柄(非 Send),不能整体移入线程——
+    // 循环内仅用其地址作前台窗口判定,这里只把地址值本身移入。
+    let hmonitor_raw = hmonitor.0 as usize;
     std::thread::spawn(move || {
         loop {
             if session_clone.stop_flag.load(Ordering::SeqCst) {
                 break;
             }
             let _com = ensure_com_initialized();
-            match capture_monitor(hmonitor, monitor) {
+            match capture_monitor(unsafe { windows::Win32::Graphics::Gdi::HMONITOR(hmonitor_raw as *mut core::ffi::c_void) }, monitor) {
                 Ok(frame) => on_frame(frame.width, frame.height, frame.rgba),
                 Err(_) => {
                     // 单帧采集失败不中断录制：短暂重试，避免偶发帧缺失终止循环。
