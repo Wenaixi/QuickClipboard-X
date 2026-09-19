@@ -1259,11 +1259,13 @@
       "settings": "Settings",
       "tools": "Tools",
       "colorPicker": "Color Picker",
-      "qrGenerator": "QR Code Generator"
+      "qrGenerator": "QR Code Generator",
+      "fileHash": "File Hash"
     },
     "qrPrompt": "Enter text or link to generate a QR code",
     "qrGenerated": "QR code generated and copied to clipboard",
-    "qrGeneratedTitle": "QR Code"
+    "qrGeneratedTitle": "QR Code",
+    "hashCopied": "File SHA-256 copied"
   },
   "floatingToolbar": {
     "scrollToTop": "Scroll to Top",

@@ -242,3 +242,14 @@ pub fn save_qr_png_base64(
 ) -> Result<(), String> {
     crate::services::tools::store_qr_png_base64(&app, &png_base64).map(|_| ())
 }
+
+/// 计算文件 SHA-256（线程池内执行，避免阻塞 UI）。
+#[cfg(target_os = "windows")]
+#[tauri::command]
+pub async fn hash_file_sha256(file_path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        crate::services::tools::hash::file_sha256(std::path::Path::new(&file_path))
+    })
+    .await
+    .map_err(|error| format!("哈希计算线程失败: {error}"))?
+}

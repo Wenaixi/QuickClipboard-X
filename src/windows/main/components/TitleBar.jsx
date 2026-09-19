@@ -454,6 +454,11 @@ const TitleBar = forwardRef(
           label: t("tools.moreMenu.qrGenerator", "二维码生成"),
           icon: "ti ti-qrcode",
         }),
+        createMenuItem({
+          id: "menu-file-hash",
+          label: t("tools.moreMenu.fileHash", "文件哈希"),
+          icon: "ti ti-hash",
+        }),
       ];
       const fileHubItem = createMenuItem({
         id: "menu-file-hub-group",
@@ -643,6 +648,31 @@ const TitleBar = forwardRef(
             );
           } catch (error) {
             console.error("生成二维码失败:", error);
+          }
+          break;
+        }
+        case "menu-file-hash": {
+          try {
+            // 文件哈希：选文件 → 线程池算 SHA-256 → 复制摘要到剪贴板。
+            const { open } = await import("@tauri-apps/plugin-dialog");
+            const { copyTextToClipboard } = await import(
+              "@shared/api/system"
+            );
+            const { hashFileSha256 } = await import("@shared/api/tools");
+            const selected = await open({
+              multiple: false,
+              directory: false,
+            });
+            if (!selected) {
+              break;
+            }
+            const path = String(selected);
+            const digest = await hashFileSha256(path);
+            await copyTextToClipboard(digest);
+            const { toast } = await import("@shared/store/toastStore");
+            toast.success(t("tools.hashCopied", "文件 SHA-256 已复制"));
+          } catch (error) {
+            console.error("计算文件哈希失败:", error);
           }
           break;
         }

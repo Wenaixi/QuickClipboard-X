@@ -11,3 +11,7 @@ export async function openColorPicker() {
 export async function saveQrPngBase64(pngBase64) {
   return await invoke('save_qr_png_base64', { pngBase64 });
 }
+
+export async function hashFileSha256(filePath) {
+  return await invoke('hash_file_sha256', { filePath });
+}

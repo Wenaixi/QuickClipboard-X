@@ -304,6 +304,8 @@ pub fn run() {
                 commands::screenshot::color_picker_pick_at,
                 #[cfg(target_os = "windows")]
                 commands::screenshot::save_qr_png_base64,
+                #[cfg(target_os = "windows")]
+                commands::screenshot::hash_file_sha256,
                 windows::annotation::open_annotation_window,
                 windows::annotation::annotation_finished,
                 windows::annotation::annotation_cancelled,
