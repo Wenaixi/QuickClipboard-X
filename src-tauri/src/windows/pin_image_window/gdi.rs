@@ -438,8 +438,7 @@ unsafe extern "system" fn pin_image_window_proc(
                         let hwnd_raw = hwnd.0 as isize;
                         let label = label.clone();
                         let _ = tauri::async_runtime::spawn(async move {
-                            let hwnd = HWND(hwnd_raw as *mut core::ffi::c_void);
-                            let _ = super::menu::handle_pin_menu_action(&label, hwnd, id).await;
+                            let _ = super::menu::handle_pin_menu_action(&label, hwnd_raw, id).await;
                         });
                     }
                 }

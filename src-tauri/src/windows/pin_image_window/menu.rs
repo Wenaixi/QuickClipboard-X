@@ -166,7 +166,9 @@ pub(crate) fn show_pin_menu(hwnd: HWND, label: &str) -> Result<usize, String> {
 /// 处理菜单选中的动作。label 为贴图窗口标签。透明度档与开关切换写回
 /// 每窗口状态(GDI 状态表),同时落盘共享偏好设置文件(跨窗口一致)。
 /// 由 WM_RBUTTONUP 在 UI 线程调用,状态写入轻量无阻塞。
-pub(crate) async fn handle_pin_menu_action(label: &str, hwnd: HWND, id: usize) -> Result<(), String> {
+/// hwnd_raw 以 isize 传裸指针(HWND 非 Send,异步分发前由调用方转 isize)。
+pub(crate) async fn handle_pin_menu_action(label: &str, hwnd_raw: isize, id: usize) -> Result<(), String> {
+    let hwnd = HWND(hwnd_raw as *mut core::ffi::c_void);
     if let Some(opacity) = opacity_from_id(id) {
         let mut state = gdi::pin_state(label);
         state.opacity = opacity as u8;
@@ -422,7 +424,8 @@ mod tests {
     fn menu_state_changes_persist_to_global_settings() {
         let src = stripped_source();
         let body_start = src
-            .find("pub(crate) fn handle_pin_menu_action")
+            .find("async fn handle_pin_menu_action")
+            .or_else(|| src.find("pub(crate) fn handle_pin_menu_action"))
             .expect("缺 handle_pin_menu_action");
         let body = &src[body_start..];
         assert!(
