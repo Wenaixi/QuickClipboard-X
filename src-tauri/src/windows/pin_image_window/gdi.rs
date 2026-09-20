@@ -37,6 +37,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_ACTIVATE, WM_CREATE, WM_DESTROY, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEWHEEL,
     WM_MOUSEMOVE, WM_NCHITTEST, WM_RBUTTONUP, WS_POPUP,
 };
+use windows::Win32::Foundation::RECT;
 
 /// 贴图窗口统一注册的窗口类名
 pub(crate) const PIN_IMAGE_WINDOW_CLASS: &str = "QuickClipboardPinImageWindow";
@@ -317,17 +318,14 @@ pub(crate) fn render_image(
     let old = unsafe { SelectObject(mem_dc, HGDIOBJ(dib.0)) };
 
     // 渲染目标位置取当前窗口在屏幕上的坐标:渲染需以窗口物理原点为准
-    let window_rect = {
-        let mut rect = windows::Win32::Foundation::RECT::default();
-        let ok = unsafe {
-            windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut rect)
-        };
+    let (x, y) = {
+        let mut rect = RECT::default();
+        let ok = unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut rect) };
         if ok.is_err() {
             return Err("读取贴图窗口坐标失败".to_string());
         }
-        rect
+        (rect.left, rect.top)
     };
-    let (x, y) = (window_rect.left, window_rect.top);
     let mut dst_pos = POINT { x, y };
     let mut size = SIZE { cx: w, cy: h };
     let mut src_pos = POINT { x: 0, y: 0 };
