@@ -737,7 +737,7 @@ pub fn add_clipboard_to_favorites(clipboard_id: i64, group_name: Option<String>)
             if target_group != "全部" {
                 let group_exists = conn.query_row(
                     "SELECT 1 FROM groups WHERE name = ?",
-                    params![&target_group], // X
+                    params![&target_group],
                     |_| Ok(()),
                 ).optional()?.is_some();
                 if !group_exists {
