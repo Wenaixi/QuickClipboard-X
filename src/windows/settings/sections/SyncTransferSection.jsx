@@ -17,6 +17,7 @@ import {
   getSyncTransferModeInfos,
   listSyncTransferLanPairedPeers,
   pairSyncTransferLanPeer,
+  pullSyncTransferLanPeer,
   pushSyncTransferLanPeer,
   refreshSyncTransferLanPairingCode,
   removeSyncTransferLanPairedPeer,
@@ -217,6 +218,10 @@ function SyncTransferSection({ settings, onSettingChange }) {
             const report = await pushSyncTransferLanPeer(deviceId);
             recordReport('push', deviceId, report);
           })}
+          onPullPeer={deviceId => runLanAction(`pull-${deviceId}`, async () => {
+            const report = await pullSyncTransferLanPeer(deviceId);
+            recordReport('pull', deviceId, report);
+          })}
           pairingCodeVisible={pairingCodeVisible}
           onTogglePairingCodeVisible={() => setPairingCodeVisible(value => !value)}
           onRemovePeer={deviceId => runLanAction(`remove-${deviceId}`, () => removeSyncTransferLanPairedPeer(deviceId))}
@@ -246,6 +251,7 @@ function LanModePanel({
   onPairPeer,
   onFetchPeerSnapshot,
   onPushPeer,
+  onPullPeer,
   pairingCodeVisible,
   onTogglePairingCodeVisible,
   onRemovePeer,
@@ -489,6 +495,15 @@ function LanModePanel({
                       >
                         <i className={busy === `push-${peer.device_id}` ? 'ti ti-loader-2 animate-spin' : 'ti ti-upload'} />
                         {t('settings.syncTransfer.pushPeer')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onPullPeer(peer.device_id)}
+                        disabled={busy === `pull-${peer.device_id}`}
+                        className="qc-accent-button inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-[var(--qc-accent)] !bg-[var(--qc-accent)] px-3 text-sm font-medium !text-[var(--qc-accent-fg)] shadow-sm transition-colors hover:!bg-[var(--qc-accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <i className={busy === `pull-${peer.device_id}` ? 'ti ti-loader-2 animate-spin' : 'ti ti-download'} />
+                        {t('settings.syncTransfer.pullPeer')}
                       </button>
                       <IconActionButton
                         tooltip={t('settings.syncTransfer.fetchSnapshot')}

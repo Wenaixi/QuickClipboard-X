@@ -61,3 +61,9 @@ export async function pushSyncTransferLanPeer(deviceId) {
   });
 }
 
+export async function pullSyncTransferLanPeer(deviceId) {
+  return await invoke('sync_transfer_lan_pull_to_peer', {
+    deviceId,
+  });
+}
+

@@ -350,6 +350,7 @@ pub fn run() {
                 commands::sync_transfer_lan_get_auto_sync_status,
                 commands::sync_transfer_lan_update_auto_sync_settings,
                 commands::sync_transfer_lan_push_to_peer,
+                commands::sync_transfer_lan_pull_to_peer,
                 windows::plugins::context_menu::commands::show_context_menu,
                 windows::plugins::context_menu::commands::get_context_menu_options,
                 windows::plugins::context_menu::commands::submit_context_menu,

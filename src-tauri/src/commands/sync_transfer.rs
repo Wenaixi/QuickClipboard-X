@@ -74,3 +74,11 @@ pub async fn sync_transfer_lan_update_auto_sync_settings(
 pub async fn sync_transfer_lan_push_to_peer(device_id: String) -> Result<services::webdav_sync::SyncReport, String> {
     services::sync_transfer::lan_push_to_peer(&device_id).await
 }
+
+// 手动拉取镜像命令:与 push 对称,让用户在设置面板主动从对端拉回数据。
+// pull.rs 实现完整(增量 since + 全表补图 + tombstone),此前仅有服务层
+// 定义而无命令/前端入口,属"实现完成待接线"。
+#[tauri::command]
+pub async fn sync_transfer_lan_pull_to_peer(device_id: String) -> Result<services::webdav_sync::SyncReport, String> {
+    services::sync_transfer::lan_pull_from_peer(&device_id).await
+}
