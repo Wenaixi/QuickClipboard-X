@@ -45,7 +45,7 @@ pub fn save_app_icon(exe_path: &str) -> Option<String> {
         Ok(icon) => icon,
         Err(_) => return None,
     };
-    
+
     let png_data = match icon_to_png(&icon) {
         Ok(data) => data,
         Err(_) => return None,
@@ -60,17 +60,19 @@ pub fn save_app_icon(exe_path: &str) -> Option<String> {
 
     let icons_dir = data_dir.join("app_icons");
     if !icons_dir.exists() {
-        if std::fs::create_dir_all(&icons_dir).is_err() {
+        if let Err(e) = std::fs::create_dir_all(&icons_dir) {
+            eprintln!("创建图标目录失败: {}", e);
             return None;
         }
     }
 
     let icon_path = icons_dir.join(format!("{}.png", hash));
     if !icon_path.exists() {
-        if std::fs::write(&icon_path, &png_data).is_err() {
+        if let Err(e) = std::fs::write(&icon_path, &png_data) {
+            eprintln!("写入应用图标失败: {}", e);
             return None;
         }
     }
-    
+
     Some(hash)
 }
