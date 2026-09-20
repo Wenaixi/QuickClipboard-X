@@ -24,6 +24,7 @@ const TOMBSTONES_PATH: &str = "/qc-sync/tombstones";
 const FILES_PREFIX: &str = "/qc-sync/files/";
 const TRANSFER_FILES_PREFIX: &str = "/qc-transfer/files/";
 const MAX_REQUEST_BODY_SIZE: usize = super::files::MAX_DIRECT_TRANSFER_FILE_SIZE as usize;
+const MAX_PEER_IMAGE_BODY_BYTES: usize = 64 * 1024 * 1024;
 const FILE_TRANSFER_BUFFER_SIZE: usize = 1024 * 1024;
 
 static SERVER: Lazy<tokio::sync::Mutex<Option<ServerState>>> = Lazy::new(|| tokio::sync::Mutex::new(None));
@@ -389,6 +390,12 @@ fn read_file(path: &str) -> Result<Option<Vec<u8>>, String> {
 }
 
 fn save_file(path: &str, bytes: &[u8]) -> Result<serde_json::Value, String> {
+    // 图片 PUT 与 fetch 侧对称限流:接收侧读请求体上限 512MB(整文件盒
+    // 直传),而图片是单张 PNG,超 64MB 拒绝写盘——与 http_client 的
+    // MAX_PEER_IMAGE_BODY_BYTES 对齐,防对端下推超大图片占满磁盘。
+    if bytes.len() > MAX_PEER_IMAGE_BODY_BYTES {
+        return Err(format!("局域网图片超过 {} 字节上限", MAX_PEER_IMAGE_BODY_BYTES));
+    }
     let image_id = super::files::image_id_from_file_path(path)?;
     super::files::save_image_file(&image_id, bytes)?;
     Ok(serde_json::json!({ "saved": true }))
@@ -777,6 +784,34 @@ mod read_body_error_response_guard {
         assert!(
             failure_segment.contains("write_response"),
             "read_request_body 失败分支必须写错误响应,对端才能收到 413/400"
+        );
+    }
+}
+
+#[cfg(test)]
+mod save_file_image_limit_guard {
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+    // 图片 PUT 与 fetch 侧对称限流护栏(C4):save_file 必须对 body 字节数
+    // 做 64MB 上限检查再写盘,否则对端可下推超大图片占满磁盘,与
+    // http_client 的 MAX_PEER_IMAGE_BODY_BYTES 不对称。
+    #[test]
+    fn save_file_enforces_peer_image_size_limit() {
+        let src = strip_line_comments(&source_file("src/services/sync_transfer/lan/http_server.rs"));
+        let body = fn_body(&src, "fn save_file");
+        assert!(
+            body.contains("MAX_PEER_IMAGE_BODY_BYTES"),
+            "save_file 必须按 MAX_PEER_IMAGE_BODY_BYTES 限流"
+        );
+        assert!(
+            body.contains("bytes.len() > MAX_PEER_IMAGE_BODY_BYTES"),
+            "save_file 必须在写盘前拒绝超限图片"
+        );
+        let limit_pos = body.find("bytes.len() > MAX_PEER_IMAGE_BODY_BYTES").unwrap();
+        let write_pos = body.find("save_image_file").unwrap();
+        assert!(
+            limit_pos < write_pos,
+            "64MB 上限检查必须先于 save_image_file 写盘"
         );
     }
 }
