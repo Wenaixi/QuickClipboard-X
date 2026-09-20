@@ -346,6 +346,11 @@ async fn check_updates(app: &AppHandle, should_open_window: bool) -> Result<bool
 
             if effective_force {
                 FORCE_UPDATE_MODE.store(true, Ordering::Relaxed);
+                // 强制更新 = 用户确认了本次更新流程,退出时不得被低占用模式
+                // 的 ExitRequested 保活拦住:低内存模式下进程只有强制更新窗
+                // 可见,Destroyed 分支 exit(0) 若不先标记,会 prevent_exit
+                // 僵死(唯一可见窗口已销毁、无任何 UI 可交互)。
+                crate::services::low_memory::set_user_requested_exit(true);
                 if let Some(main_window) = app.get_webview_window("main") {
                     crate::hide_main_window(&main_window);
                 }
@@ -440,6 +445,12 @@ mod tests {
         assert!(
             src.contains(&mode_store),
             "锁死动作分支必须设置强制更新标志"
+        );
+        let mark_pos = src.find("set_user_requested_exit(true)").expect("锁死动作分支必须标记用户请求退出");
+        let mode_pos = src.find(&mode_store).expect("缺少强制更新标志写入");
+        assert!(
+            mode_pos < mark_pos,
+            "强制更新标志写入必须先于用户请求退出标记(保证低占用模式 ExitRequested 不 prevent_exit)"
         );
     }
 
