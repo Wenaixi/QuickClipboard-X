@@ -534,6 +534,12 @@ fn upsert_history_records(records: &[CloudRecord], ignore_tombstones: bool) -> R
             if record.uuid.trim().is_empty() {
                 continue;
             }
+            // 远端 content 不可信(files: 内路径可能指向本机任意文件),
+            // 写库前净化,不放行绝对路径/含父目录段的条目
+            let mut record = record.clone();
+            if record.content_type == "file" || record.content_type == "image" {
+                record.content = crate::services::sanitize_remote_files_content(&record.content);
+            }
             let tombstone_deleted_at = super::tombstones::sync_tombstone_deleted_at_in_conn(
                 &tx,
                 super::tombstones::COLLECTION_HISTORY,

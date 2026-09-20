@@ -92,6 +92,33 @@ pub fn resolve_stored_path(stored_path: &str) -> String {
     stored_path.to_string()
 }
 
+// 远端同步记录(files: 内容)净化:仅保留应用管理的三个固定子目录相对路径。
+// 本地采集链路自身保证只存相对路径或本机已存在路径(processor collect_file_info),
+// 而 LAN 对端/WebDAV 下发的 content 完全不可信——恶意对端可下发本机绝对路径
+// 让 hydrate 时 resolve_stored_path 原样返回、exists() 探测到文件后经 asset 协议
+// 拉进渲染。绝对路径或含 .. 段路径的条目在写库前整条删除,净化幂等。
+pub fn sanitize_remote_files_content(content: &str) -> String {
+    if !content.starts_with("files:") {
+        return content.to_string();
+    }
+    let Ok(mut data) = serde_json::from_str::<crate::services::paste::FilesData>(&content[6..])
+    else {
+        // 解析不了的 files: 内容原样入库(前端同样解析失败,不会加载任何路径)
+        return content.to_string();
+    };
+    data.files.retain(|file| {
+        let normalized = file.path.replace("/", "\\");
+        !contains_parent_segments(&normalized)
+            && (normalized.starts_with("clipboard_images\\")
+                || normalized.starts_with("pin_images\\")
+                || normalized.starts_with("image_library\\"))
+    });
+    match serde_json::to_string(&data) {
+        Ok(json) => format!("files:{}", json),
+        Err(_) => content.to_string(),
+    }
+}
+
 pub fn is_portable_build() -> bool {
     std::env::current_exe()
         .ok()
@@ -293,5 +320,31 @@ mod tests {
             reject_seg.contains("String::new()"),
             "拒绝父目录段必须返回空串,禁止回退原始输入(下游 fs::read 会跟随 ..)"
         );
+    }
+
+    #[test]
+    fn sanitize_remote_files_content_strips_absolute_and_parent_paths() {
+        // 远端同步记录 files: 内容不可信:绝对路径、含父目录段的条目
+        // 整条删除,只保留三固定子目录相对路径(与 resolve_stored_path 白名单同源)。
+        let input = r#"files:{"files":[{"path":"C:\\Users\\me\\secret.png","name":"a"},{"path":"clipboard_images/abc.png","name":"b"},{"path":"..\\evil.png","name":"c"},{"path":"pin_images/x.png","name":"d"}]}"#;
+        let out = crate::services::sanitize_remote_files_content(input);
+        assert!(out.starts_with("files:"), "files: 前缀必须保留");
+        let data: crate::services::paste::FilesData =
+            serde_json::from_str(&out[6..]).expect("净化后仍必须是合法 files: JSON");
+        let paths: Vec<&str> = data.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec!["clipboard_images/abc.png", "pin_images/x.png"],
+            "绝对路径与父目录段条目必须被删除,固定子目录相对路径必须保留"
+        );
+    }
+
+    #[test]
+    fn sanitize_remote_files_content_leaves_other_content_untouched() {
+        // 非 files: 内容原样返回;纯相对路径 files: 内容原样保留(净化幂等)
+        let text = "普通文本内容";
+        assert_eq!(crate::services::sanitize_remote_files_content(text), text);
+        let clean = r#"files:{"files":[{"path":"clipboard_images/abc.png","name":"a"}]}"#;
+        assert_eq!(crate::services::sanitize_remote_files_content(clean), clean);
     }
 }
