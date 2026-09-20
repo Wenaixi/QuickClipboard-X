@@ -83,8 +83,8 @@ fn calculate_best_position(
         y = cursor.y - h - margin;
     }
 
-    x = x.max(work_x).min(work_x + work_w - w);
-    y = y.max(work_y).min(work_y + work_h - h);
+    x = x.max(work_x).min(work_x + work_w - w).max(work_x);
+    y = y.max(work_y).min(work_y + work_h - h).max(work_y);
 
     PhysicalPosition::new(x, y)
 }
@@ -115,9 +115,10 @@ pub fn center_at_cursor(window: &WebviewWindow) -> Result<(), String> {
     let mut x = cursor_x - w / 2;
     let mut y = cursor_y - h / 2;
 
-    // 确保不超出屏幕边界
-    x = x.max(work_x).min(work_x + work_w - w);
-    y = y.max(work_y).min(work_y + work_h - h);
+    // 确保不超出屏幕边界:窗口比屏还宽/高(高 DPI 面板或副屏小于主屏)时
+    // 直接 min 会把钳到负坐标屏外,末尾补 max 兜底保证落在工作区内。
+    x = x.max(work_x).min(work_x + work_w - w).max(work_x);
+    y = y.max(work_y).min(work_y + work_h - h).max(work_y);
 
     window
         .set_position(PhysicalPosition::new(x, y))
@@ -129,4 +130,36 @@ pub fn get_window_bounds(window: &WebviewWindow) -> Result<(i32, i32, u32, u32),
     let pos = window.outer_position().map_err(|e| e.to_string())?;
     let size = window.outer_size().map_err(|e| e.to_string())?;
     Ok((pos.x, pos.y, size.width, size.height))
+}
+
+#[cfg(test)]
+mod tests {
+    // 护栏:窗口比工作区还大(高 DPI 面板落在低分辨率屏/副屏小于主屏)时,
+    // clamp 末尾必须保留二次 max 兜底,否则窗口被钳到负坐标屏外不可见。
+    // 删掉末尾 .max 兜底,把窗口宽加大到超过屏宽即见红。
+    #[test]
+    fn clamp_keeps_trailing_max_fallback() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/utils/positioning.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读 positioning.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let x_line = stripped
+            .lines()
+            .find(|l| l.contains("min(work_x + work_w - w).max(work_x)"))
+            .expect("calculate_best_position clamp 末尾必须带 max 兜底");
+        let y_line = stripped
+            .lines()
+            .find(|l| l.contains("min(work_y + work_h - h).max(work_y)"))
+            .expect("clamp 纵向末尾必须带 max 兜底");
+        assert!(x_line.contains(".max(work_x)"), "横向 clamp 必须二次 max");
+        assert!(y_line.contains(".max(work_y)"), "纵向 clamp 必须二次 max");
+        // center_at_cursor 同族修复,防只补一处漏另一处。
+        assert!(stripped.contains("min(work_x + work_w - w).max(work_x)"), "center_at_cursor 横向必须同款");
+    }
 }
