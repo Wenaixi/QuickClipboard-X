@@ -31,7 +31,9 @@ test('renderModel 源码护栏：指令表全类型 + 扁平化存在', () => {
   const source = readFileSync(new URL('./renderModel.js', import.meta.url), 'utf8');
   assert.ok(source.includes('export const RENDER_COMMANDS'), '必须声明渲染指令表');
   assert.ok(source.includes('arrow:'), '指令表必须含箭头');
-  assert.ok(source.includes('mosaic:'), '指令表必须含马赛克');
   assert.ok(source.includes('crop:'), '指令表必须含裁剪');
-  assert.ok(source.includes('flattenRenderCommands'), '必须提供扁平化');
+  // mosaic/blur 标注未实现(拖动只会降级成空心矩形),已从指令表移除;
+  // 负向断言防止未来挂回未实现的绘制工具而不连同实现。
+  assert.ok(!source.includes('mosaic:'), '指令表不得含未实现的马赛克');
+  assert.ok(!source.includes('flattenRenderCommands') === false, '必须提供扁平化');
 });

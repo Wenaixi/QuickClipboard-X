@@ -4,7 +4,7 @@
 // removeLayer/clearLayers 删除、reorderLayer 调整 z 序、mergeLayer 扁平化
 // 栅格标注为单层（对齐 ShareX FlattenAnnotations）。
 
-export const LAYER_TYPES = ['rect', 'ellipse', 'line', 'arrow', 'pen', 'text', 'highlight', 'mosaic', 'blur', 'crop', 'rotate', 'flip'];
+export const LAYER_TYPES = ['rect', 'ellipse', 'line', 'arrow', 'pen', 'text', 'highlight', 'crop', 'rotate', 'flip'];
 
 // 新建标注层：id 调用方注入（后续代际校验防异步乱序）。
 export function createLayer(id, type, params = {}, points = []) {

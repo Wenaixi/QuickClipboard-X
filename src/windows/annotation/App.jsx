@@ -29,7 +29,9 @@ import {
 } from './historyModel';
 
 const ANNOTATION_LOAD_EVENT = 'annotation:load';
-const TOOL_TYPES = ['pen', 'rect', 'ellipse', 'line', 'arrow', 'text', 'highlight', 'mosaic', 'blur'];
+// 工具栏只暴露已实现的绘制工具。mosaic/blur(像素化/模糊)标注尚未实现
+// (拖动只会降级成空心矩形,制造"已打码"假象),待专项实现后再启用。
+const TOOL_TYPES = ['pen', 'rect', 'ellipse', 'line', 'arrow', 'text', 'highlight'];
 const STROKE_COLORS = ['#ef4444', '#3b82f6', '#22c55e', '#eab308', '#1f2937', '#ffffff'];
 
 // 由 RENDER_COMMANDS 补全的变换类指令（crop/rotate/flip 由保存路径做
@@ -175,8 +177,6 @@ function AnnotationApp() {
     if (type === 'pen') return { stroke, width: 3 };
     if (type === 'text') return { text: '', x: start.x, y: start.y, fill: stroke, fontSize: 24 };
     if (type === 'highlight') return { x: start.x, y: start.y, w: end.x - start.x, h: end.y - start.y, fill: '#fef08a', opacity: 0.4 };
-    if (type === 'mosaic') return { x: start.x, y: start.y, w: end.x - start.x, h: end.y - start.y, mosaic: true };
-    if (type === 'blur') return { x: start.x, y: start.y, w: end.x - start.x, h: end.y - start.y, blur: true };
     if (type === 'line') return { x1: start.x, y1: start.y, x2: end.x, y2: end.y, stroke, width: 3 };
     if (type === 'arrow') return { x1: start.x, y1: start.y, x2: end.x, y2: end.y, stroke, width: 3 };
     return { x: start.x, y: start.y, w: end.x - start.x, h: end.y - start.y, stroke, fill: type === 'rect' ? '' : '', width: 2 };
