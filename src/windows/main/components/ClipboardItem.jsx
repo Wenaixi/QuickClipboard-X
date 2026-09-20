@@ -106,10 +106,18 @@ function ClipboardItem({
   const [iconLoadFailed, setIconLoadFailed] = useState(false);
 
   const sourceTitle = item.source_app || '';
+  // 与 image_id 的 IMAGE_ID_WHITELIST 同对称:远端同步来源的 source_icon_hash
+  // 是外部可控输入,不白名单校验直接拼路径会让 app_icons 下任意文件被引用,
+  // 也封死未来路径注入面。本地捕获侧哈希天然是 16 位 hex,白名单不误伤。
+  const ICON_HASH_WHITELIST = /^[0-9a-f]{16}$/;
 
   useEffect(() => {
     if (item.source_icon_hash) {
       setIconLoadFailed(false);
+      if (!ICON_HASH_WHITELIST.test(item.source_icon_hash)) {
+        setIconLoadFailed(true);
+        return;
+      }
       invoke('get_data_directory').then(dataDir => {
         const iconPath = `${dataDir}/app_icons/${item.source_icon_hash}.png`;
         setSourceIconUrl(convertFileSrc(iconPath, 'asset'));
