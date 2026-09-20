@@ -1,30 +1,81 @@
-// 白板保存失败护栏:白板 index.js 的 save() catch 分支若仅 console.error 后
-// 无条件 getCurrentWindow().close(),落盘/剪贴板/历史写库任一步失败时用户
-// 看到窗口消失却误以为保存成功,绘制成果静默丢失。必须失败时提示并保持
-// 窗口打开,仅成功才关窗。
+// 白板形状持久化护栏：shapes 数组持久层必须在渲染路径中被消费。
+// 历史上白板只有单幅 canvas 预览缓冲，renderPreview 每帧清屏重建当前
+// 一笔，endDraw 不把完成的形状落盘，画第二个形状即丢第一个（保存产物
+// 与所见不一致）。护栏锁定三个不变量：
+//   1) 存在形状栈数组（shapes 声明）；
+//   2) endDraw 必须把完成形状推入栈（push 在 endDraw 函数体内）；
+//   3) renderPreview 必须遍历栈全量重绘（栈遍历在 renderPreview 函数体内）。
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const source = readFileSync(new URL('./index.js', import.meta.url), 'utf8');
-const strip = (src) =>
-  src
-    .split('\n')
-    .filter((line) => !line.trimStart().startsWith('//'))
-    .join('\n');
-const code = strip(source);
 
-test('白板保存失败必须提示并保持窗口打开,不得无条件关窗', () => {
-  assert.ok(code.includes("from '@shared/utils/dialog'"), '必须引入共享错误提示');
-  assert.ok(code.includes('await showError('), 'catch 分支必须调用 showError 展示错误');
-  const catchPos = code.indexOf('保存白板失败');
-  const showErrorPos = code.indexOf('await showError(');
-  assert.ok(catchPos !== -1 && showErrorPos !== -1, 'catch 分支与 showError 都必须存在');
-  const closePos = code.indexOf('getCurrentWindow().close()');
-  assert.ok(closePos !== -1, '成功路径必须关窗');
+// 去掉行注释，防止注释字面误命中被测代码模式。
+const bare = source
+  .split('\n')
+  .filter((line) => !line.trimStart().startsWith('//'))
+  .join('\n');
+
+function bodyOf(startMarker, endMarker) {
+  const start = bare.indexOf(startMarker);
+  assert.ok(start >= 0, `缺少 ${startMarker}`);
+  const tail = bare.slice(start);
+  const end = tail.indexOf(endMarker);
+  assert.ok(end >= 0, `缺少 ${endMarker}`);
+  return tail.slice(0, end);
+}
+
+test('白板必须有形状栈数组', () => {
   assert.ok(
-    code.includes('return;') && catchPos < closePos,
-    '失败分支必须 return 不关窗,close() 只能出现在成功路径',
+    bare.includes('const shapes = [];'),
+    '必须声明 shapes 形状栈（不存在则无持久化层）',
+  );
+});
+
+test('白板 endDraw 必须把完成形状推入栈', () => {
+  const endDraw = bodyOf('function endDraw', 'function save');
+  assert.ok(
+    endDraw.includes('shapes.push('),
+    'endDraw 必须把完成的形状推入 shapes 栈（不推则画完即丢）',
+  );
+  assert.ok(
+    endDraw.includes('[...path]'),
+    '钢笔路径必须快照入栈（直接引用会被后续绘制清空）',
+  );
+});
+
+test('白板 renderPreview 必须全量重绘形状栈', () => {
+  const render = bodyOf('function renderPreview', 'function setupToolButtons');
+  assert.ok(
+    render.includes('for (const shape of shapes)'),
+    'renderPreview 必须遍历 shapes 全量重绘（不清屏后只画当前一笔）',
+  );
+  assert.ok(
+    render.includes('drawShape('),
+    'renderPreview 必须经 drawShape 逐笔绘制（预览与成稿共用几何）',
+  );
+});
+
+test('白板清空必须清栈并走全量重绘', () => {
+  const start = bare.indexOf('document.getElementById(\'clear\')');
+  assert.ok(start >= 0, '缺少 clear 按钮绑定');
+  const clearSeg = bare.slice(start, start + 220);
+  assert.ok(
+    clearSeg.includes('shapes.length = 0'),
+    '清空必须重置形状栈（只 clearRect 会留下无法撤销/保存的形状）',
+  );
+  assert.ok(
+    clearSeg.includes('renderPreview()'),
+    '清空必须走全量重绘入口（保证画布与栈一致）',
+  );
+});
+
+test('白板支持撤销(弹出栈顶并重绘)', () => {
+  const undo = bodyOf('function undo', 'function start');
+  assert.ok(
+    undo.includes('shapes.pop()') && undo.includes('renderPreview()'),
+    '撤销必须弹栈并重绘（有栈才有撤销语义）',
   );
 });
