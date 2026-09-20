@@ -719,6 +719,20 @@ pub fn add_clipboard_to_favorites(clipboard_id: i64, group_name: Option<String>)
         ).optional()?;
 
         if let Some(existing) = existing {
+            // 已收藏过的项:若用户对同一项再次「收藏到指定分组」,静默返回
+            // existing 会让前端 toast 成功而实际分组未变(用户以为已归入
+            // 目标组)。此时把收藏迁移到目标分组——同一条收藏可归属新分组,
+            // 保持单条语义(不复制出第二条同源收藏)。
+            let target_group = group_name.clone();
+            if existing.group_name != target_group {
+                conn.execute(
+                    "UPDATE favorites SET group_name = ?1, updated_at = ?2 WHERE id = ?3",
+                    params![target_group, chrono::Local::now().timestamp(), existing.id],
+                )?;
+                let mut moved = existing;
+                moved.group_name = target_group;
+                return Ok((moved, false));
+            }
             return Ok((existing, false));
         }
 
@@ -818,9 +832,22 @@ pub fn move_favorite_to_group(id: String, group_name: String) -> Result<(), Stri
             params![&id],
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         )?;
-        
+
         let old_group_name = existing_item.1;
-        
+
+        // 目标分组必须真实存在:收藏只能落到已创建的分组(后端「全部」哨兵
+        // 不存在于 groups 表,由前端 UI 构造;UI 移动菜单已过滤当前所在组)。
+        // 查询失败即"分组不存在"整条拒绝,不留下孤儿分组名。
+        let group_exists = conn.query_row(
+            "SELECT 1 FROM groups WHERE name = ?",
+            params![&group_name],
+            |_| Ok(()),
+        ).optional()?.is_some();
+
+        if !group_exists {
+            return Err("目标分组不存在".to_string());
+        }
+
         if old_group_name == group_name {
             return Ok(());
         }
@@ -1262,6 +1289,60 @@ mod content_type_like_tests {
         assert!(
             !fn_body.contains("contains(\"QueryReturnedNoRows\")"),
             "不得拿驼峰变体名做字符串匹配(永远为 false)——只能匹配 Display 输出"
+        );
+    }
+
+    // 已收藏项再次「收藏到指定分组」必须迁移分组:静默返回 existing 会让
+    // 前端 toast 成功而实际分组未变。收藏保持单条语义(不复制第二条同源
+    // 收藏),同源收藏归属由最后指定的分组决定。
+    #[test]
+    fn add_clipboard_to_favorites_moves_existing_to_target_group() {
+        use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+        let src = strip_line_comments(&source_file("src/services/database/favorites.rs"));
+        let body = fn_body(&src, "add_clipboard_to_favorites");
+        let existing_pos = body.find("if let Some(existing) = existing").unwrap();
+        let tail = &body[existing_pos..];
+        assert!(
+            tail.contains("existing.group_name != target_group"),
+            "已收藏项必须仅在目标分组不同时迁移"
+        );
+        assert!(
+            tail.contains("UPDATE favorites SET group_name"),
+            "迁移必须写 UPDATE favorites 改 group_name"
+        );
+        let update_pos = body.find("UPDATE favorites SET group_name").unwrap();
+        let insert_pos = body
+            .find("INSERT INTO favorites")
+            .unwrap_or(usize::MAX);
+        assert!(
+            update_pos < insert_pos,
+            "迁移 UPDATE 必须先于新收藏 INSERT 分支(避免重复收藏)"
+        );
+    }
+
+    // move_favorite_to_group 必须校验目标分组存在:收藏不得落入不存在的
+    // 分组(UI 不可见但仍在库/同步的数据孤儿)。查询失败整条拒绝。
+    #[test]
+    fn move_favorite_to_group_validates_group_exists() {
+        use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+        let src = strip_line_comments(&source_file("src/services/database/favorites.rs"));
+        let body = fn_body(&src, "move_favorite_to_group");
+        assert!(
+            body.contains("FROM groups WHERE name ="),
+            "移动前必须查询分组存在性"
+        );
+        assert!(
+            body.contains("目标分组不存在"),
+            "不存在的分组必须拒绝(报友好错误)"
+        );
+        let group_check = body.find("FROM groups WHERE name =").unwrap();
+        let update = body
+            .find("UPDATE favorites SET group_name")
+            .or_else(|| body.find("UPDATE favorites"))
+            .unwrap();
+        assert!(
+            group_check < update,
+            "分组存在性校验必须先于移动 UPDATE"
         );
     }
 }

@@ -1276,6 +1276,7 @@ pub fn export_data_zip(target_path: PathBuf) -> Result<PathBuf, String> {
         let images_dir = current_dir.join("clipboard_images");
         let image_library_dir = current_dir.join("image_library");
         let app_icons_dir = current_dir.join("app_icons");
+        let pin_images_dir = current_dir.join("pin_images");
         let db_files = [
             "quickclipboard.db",
         ];
@@ -1302,6 +1303,15 @@ pub fn export_data_zip(target_path: PathBuf) -> Result<PathBuf, String> {
             zip.start_file("settings.json", options).map_err(|e| e.to_string())?;
             std::io::copy(&mut f, &mut zip).map_err(|e| e.to_string())?;
         }
+
+        // 图片/图库/贴图/图标四目录递归收进导出包:替换导入会 remove_dir_all
+        // 清空这些目录,导出若缺它们,换机恢复时图片数据永久丢失(备份里有,
+        // 但用户主动导出迁移时备份不随 zip 走)。统一走 add_dir_to_zip 递归,
+        // 禁止回归成顶层 read_dir 平铺(图库按分组子目录存储)。
+        add_dir_to_zip(&images_dir, &images_dir, "clipboard_images", &mut zip, options)?;
+        add_dir_to_zip(&image_library_dir, &image_library_dir, "image_library", &mut zip, options)?;
+        add_dir_to_zip(&pin_images_dir, &pin_images_dir, "pin_images", &mut zip, options)?;
+        add_dir_to_zip(&app_icons_dir, &app_icons_dir, "app_icons", &mut zip, options)?;
 
         zip.finish().map_err(|e| e.to_string())?;
         Ok(())
