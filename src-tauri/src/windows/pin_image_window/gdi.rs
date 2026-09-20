@@ -322,6 +322,14 @@ pub(crate) fn render_image(
         let mut rect = RECT::default();
         let ok = unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut rect) };
         if ok.is_err() {
+            // 失败分支必须走与尾部相同的清理序列,否则 DIB 仍被选入 mem_dc,
+            // old/DeleteObject/DeleteDC/ReleaseDC 全部跳过,GDI 句柄泄漏 4 个/次。
+            unsafe {
+                let _ = SelectObject(mem_dc, old);
+                let _ = DeleteObject(HGDIOBJ(dib.0));
+                let _ = DeleteDC(mem_dc);
+                ReleaseDC(None, screen_dc);
+            }
             return Err("读取贴图窗口坐标失败".to_string());
         }
         (rect.left, rect.top)
@@ -430,9 +438,12 @@ unsafe extern "system" fn pin_image_window_proc(
         }
         WM_DESTROY => {
             let hwnd_val = hwnd.0 as isize;
+            // 先反查标签、再移除句柄、再删状态——顺序必须如此:先 retain 删
+            // 句柄会令 label_for_hwnd 恒 None,state 残留(贴图窗口每关一次
+            // PIN_STATE_MAP 积 200B,预览固定标签反复开/关还会串场残留状态)。
+            let label = label_for_hwnd(hwnd);
             lock_hwnd_map().retain(|_, h| *h != hwnd_val);
-            // 窗口销毁时按标签移除状态(能反查则精确移除)
-            if let Some(label) = label_for_hwnd(hwnd) {
+            if let Some(label) = label {
                 lock_state_map().remove(&label);
             }
             DefWindowProcW(hwnd, msg, wparam, lparam)
@@ -533,6 +544,17 @@ mod tests {
             restore < delete_dib && delete_dib < delete_dc && delete_dc < release,
             "句柄释放必须按 恢复旧位图→删DIB→删DC→释放DC 顺序成对"
         );
+        // G-2 early-return 清理护栏:GetWindowRect 失败分支必须重复同一套
+        // 清理序列(否则 DIB 仍被选入 mem_dc 即返回,GDI 句柄泄漏 4 个/次)。
+        let fail_pos = body.find("if ok.is_err()").expect("缺少坐标失败分支");
+        let fail_seg = &body[fail_pos..];
+        assert!(
+            fail_seg.contains("SelectObject(mem_dc, old)") &&
+            fail_seg.contains("DeleteObject(HGDIOBJ(dib.0))") &&
+            fail_seg.contains("DeleteDC(mem_dc)") &&
+            fail_seg.contains("ReleaseDC(None, screen_dc)"),
+            "坐标失败 early-return 必须走完整清理序列(防 GDI 句柄泄漏)"
+        );
     }
 
     // 分层窗口必须 WS_EX_LAYERED 建窗,预览模式必须 WS_EX_TRANSPARENT 穿透
@@ -595,6 +617,17 @@ mod tests {
         assert!(
             tail.contains("lock_state_map().remove"),
             "WM_DESTROY 必须移除本窗口的状态记录"
+        );
+        // G-1 顺序护栏:必须"先反查标签、再 retain 删句柄、再删状态"——
+        // 若先 retain 再反查,label 恒 None,state 永不删除(内存泄漏 +
+        // 预览固定标签状态串场)。find 下标:label 反查必须前于 retain,
+        // retain 必须前于 remove。
+        let label_pos = tail.find("label_for_hwnd(hwnd)").expect("WM_DESTROY 必须先反查标签");
+        let retain_pos = tail.find("lock_hwnd_map().retain").expect("WM_DESTROY 必须 retain 删句柄");
+        let remove_pos = tail.find("lock_state_map().remove").expect("WM_DESTROY 必须删状态");
+        assert!(
+            label_pos < retain_pos && retain_pos < remove_pos,
+            "WM_DESTROY 清理顺序必须为 反查标签 → retain 删句柄 → 删状态,否则 state 永不删除"
         );
     }
 
