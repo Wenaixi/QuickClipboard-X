@@ -92,3 +92,12 @@ test('编辑器必须实接三 model（非仅摆设）', () => {
   assert.ok(appSource.includes('redoSnapshot(history, redoStack)'), '重做必须调 redoSnapshot');
   assert.ok(appSource.includes('pushSnapshot(h, layers)') || appSource.includes('pushSnapshot(h, prev)'), '提交层前必须压入快照');
 });
+
+test('编辑器绘制必须捕获指针并随窗口尺寸重绘', () => {
+  // 指针捕获:绘制中把笔划拖出画布边界(工具栏/窗口外)释放时仍能收到
+  // 抬起事件收口,否则提交半截笔画(与白板同款保护)。
+  assert.ok(appSource.includes('canvasRef.current.setPointerCapture(event.pointerId)'), '画布必须捕获指针');
+  // 窗口尺寸/跨 DPI 变化必须重跑 draw,否则位图被 CSS 拉伸显示模糊。
+  assert.ok(appSource.includes('.onResized(redraw)'), '窗口尺寸变化必须重绘');
+  assert.ok(appSource.includes("matchMedia('(resolution: ' + window.devicePixelRatio + 'dppx)')"), '跨 DPI 变化必须重绘');
+});

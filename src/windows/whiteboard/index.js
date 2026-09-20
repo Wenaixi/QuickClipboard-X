@@ -227,6 +227,11 @@ async function save() {
 
 // 撤销最后一笔：弹栈后全栈重绘（保留工具/颜色/粗细设置，仅回退一笔）。
 function undo() {
+  // 绘制中按 Ctrl+Z 先收口当前一笔(快照入栈或丢弃空笔)再弹栈撤销——
+  // 否则撤销的是"已完成历史笔"而进行中的半笔悬浮在画布上,视觉像撤错。
+  if (drawing) {
+    endDraw({ pointerId: activePointerId });
+  }
   if (!shapes.length) return;
   shapes.pop();
   renderPreview();

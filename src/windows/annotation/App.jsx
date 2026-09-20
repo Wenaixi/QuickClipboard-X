@@ -192,6 +192,32 @@ function AnnotationApp() {
     draw();
   }, [draw, imageSize]);
 
+  // 窗口尺寸/跨 DPI 显示器拖动后画布物理像素尺寸不变,位图被 CSS 拉伸
+  // 显示模糊:监听窗口 resize 与 devicePixelRatio 变化重跑 draw 重建位图。
+  useEffect(() => {
+    const win = getCurrentWindow();
+    const redraw = () => {
+      if (!imageRef.current) return;
+      draw();
+    };
+    let unlistenResized;
+    win
+      .onResized(redraw)
+      .then((u) => (unlistenResized = u))
+      .catch(() => {});
+    // 跨 DPI 显示器移动不触发窗口尺寸事件,用 matchMedia 订阅 dppx 变化
+    // (分辨率档位变化时 change 事件触发),重建查询以拿到新的 dppx。
+    const mq = window.matchMedia('(resolution: ' + window.devicePixelRatio + 'dppx)');
+    const onDpiChange = () => {
+      redraw();
+    };
+    mq.addEventListener('change', onDpiChange);
+    return () => {
+      unlistenResized?.();
+      mq.removeEventListener('change', onDpiChange);
+    };
+  }, [draw]);
+
   useEffect(() => {
     let unlistenPromise;
     // 监听截图动作链推送的待编辑图片路径。
@@ -235,6 +261,14 @@ function AnnotationApp() {
   const handlePointerDown = (event) => {
     event.preventDefault();
     if (!imageRef.current) return;
+    // 捕获指针:绘制中把笔划拖出画布边界时仍能收到 pointerup 收口,
+    // 否则指针滑到工具栏上方释放时画布收不到抬起事件,提交半截笔画
+    // (与白板同款保护)。
+    try {
+      canvasRef.current.setPointerCapture(event.pointerId);
+    } catch {
+      // 个别指针 id 已失效时忽略,后续 move/up 守卫兜底。
+    }
     const rect = canvasRef.current.getBoundingClientRect();
     const start = pointFromEvent(event, rect);
     if (tool === 'pen') {

@@ -101,12 +101,9 @@ pub(crate) fn show_pin_menu(hwnd: HWND, label: &str) -> Result<usize, String> {
             "像素级显示",
             state.pixel_render,
         )?;
-        append_checked(
-            menu,
-            PinMenuId::ToggleThumbnail as usize,
-            "缩略图模式",
-            state.thumbnail_mode,
-        )?;
+        // 缩略图模式:切换只把窗口缩到 50x50 且无恢复语义(原尺寸/位置记录
+        // 未接线),入口点进去不可逆,属于残缺功能——从菜单隐藏避免误导,
+        // 待恢复语义接入后再恢复入口。
 
         let sub = unsafe { CreatePopupMenu() }.map_err(|e| format!("创建子菜单失败: {}", e))?;
         append_checked(
@@ -301,8 +298,9 @@ mod tests {
             .join("\n")
     }
 
-    // 枚举必须覆盖全部菜单条目:置顶/阴影/锁定/像素级/缩略图 5 项 +
-    // 恢复模式 2 项 + 透明度 6 档 + 自定义 + 复制/另存/关闭 3 项 = 17
+    // 枚举必须覆盖全部菜单条目:置顶/阴影/锁定/像素级 4 项(缩略图模式因
+    // 无恢复语义已从菜单隐藏,枚举保留供 UI 语义与未来接入) + 恢复模式
+    // 2 项 + 透明度 6 档 + 自定义 + 复制/另存/关闭 3 项 = 16 展示项。
     #[test]
     fn context_menu_defines_all_expected_entries() {
         let src = stripped_source();
@@ -340,7 +338,17 @@ mod tests {
         assert_eq!(
             toggles + restore + opacities + custom + actions,
             17,
-            "菜单条目总数应为 17"
+            "菜单枚举总数应为 17"
+        );
+        // 缩略图菜单项:不可见(show_pin_menu 不再 append),因为切换只缩
+        // 50x50 且无恢复语义,入口不可逆会误导。
+        let show_menu_start = src
+            .find("pub(crate) fn show_pin_menu")
+            .expect("缺 show_pin_menu");
+        let show_menu_seg = &src[show_menu_start..src.len().min(show_menu_start + 4000)];
+        assert!(
+            !show_menu_seg.contains("PinMenuId::ToggleThumbnail as usize"),
+            "缩略图模式入口不得出现在右键菜单(无恢复语义的残缺功能)"
         );
     }
 
