@@ -305,6 +305,21 @@ fn sanitize_file_name(raw: &str) -> Result<String, String> {
     if name.starts_with('.') {
         return Err("文件名无效".to_string());
     }
+    // 拒绝 Windows 保留设备名与结尾句点/空格:CON/COM1/NUL 等无法在
+    // Windows 创建/重命名,结尾句点会被系统吞掉造成落盘名与显示名不符;
+    // cloud_files.rs 已处理同族,LAN 侧对齐保持一致。
+    let trimmed_name = name.trim_end_matches([' ', '.']);
+    if trimmed_name != name {
+        return Err("文件名无效".to_string());
+    }
+    let stem = trimmed_name.split('.').next().unwrap_or("").to_ascii_uppercase();
+    if matches!(
+        stem.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9"
+            | "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9"
+    ) {
+        return Err("文件名无效".to_string());
+    }
     if name.contains('/') || name.contains('\\') || name.contains(':') {
         return Err("文件名包含非法字符".to_string());
     }
@@ -497,6 +512,14 @@ mod tests {
         assert!(
             body.contains("name.starts_with('.')"),
             "净化必须拒绝点开头文件名"
+        );
+        assert!(
+            body.contains("trim_end_matches([' ', '.'])"),
+            "净化必须拒绝结尾句点/空格"
+        );
+        assert!(
+            body.contains("\"CON\" | \"PRN\" | \"AUX\" | \"NUL\""),
+            "净化必须拒绝 Windows 保留设备名"
         );
         assert!(
             !body.contains("name.contains('/')") || body.contains("name.contains('/') || name.contains('\\\\')"),
