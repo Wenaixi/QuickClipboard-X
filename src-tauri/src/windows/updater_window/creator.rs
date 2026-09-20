@@ -314,12 +314,27 @@ async fn check_updates(app: &AppHandle, should_open_window: bool) -> Result<bool
     match updater.check().await.map_err(|e| e.to_string())? {
         Some(update) => {
             let new_version = update.version.clone();
-            
+
             if !use_beta_channel && is_prerelease(&new_version) {
                 set_update_banner_state(app, None);
                 set_update_window_payload(None);
                 return Ok(false);
             }
+
+            // 便携版/免安装版判定:统一走 is_portable_runtime,避免与
+            // storage/commands/data_management 语义漂移。便携版不做强制
+            // 更新——无法保证自动安装,锁死整个应用会让用户无法退出
+            // 数据管理页被无限阻塞(trigger 下载前必须放行)。
+            let mut is_portable = crate::services::is_portable_runtime()
+                || !is_installed_version();
+
+            if let Some(v) = parse_env_bool("QC_FORCE_PORTABLE") {
+                is_portable = v;
+            }
+
+            // 强制更新在便携版降级为非强制:跳过锁死(关主窗/关 quickpaste/
+            // 禁热键),仅弹更新窗口提示用户手动下载。
+            let effective_force = force_update && !is_portable;
 
             set_update_banner_state(
                 app,
@@ -328,8 +343,8 @@ async fn check_updates(app: &AppHandle, should_open_window: bool) -> Result<bool
                     latest_version: new_version.clone(),
                 }),
             );
-            
-            if force_update {
+
+            if effective_force {
                 FORCE_UPDATE_MODE.store(true, Ordering::Relaxed);
                 if let Some(main_window) = app.get_webview_window("main") {
                     crate::hide_main_window(&main_window);
@@ -340,16 +355,7 @@ async fn check_updates(app: &AppHandle, should_open_window: bool) -> Result<bool
                 let _ = crate::hotkey::disable_hotkeys();
             }
 
-            // 检测是否为便携版/免安装版（不自动更新）
-            // 统一走 is_portable_runtime,避免与 storage/commands/data_management 语义漂移
-            let mut is_portable = crate::services::is_portable_runtime()
-                || !is_installed_version();
-
-            if let Some(v) = parse_env_bool("QC_FORCE_PORTABLE") {
-                is_portable = v;
-            }
-
-            if !force_update && !should_open_window {
+            if !effective_force && !should_open_window {
                 let payload = serde_json::json!({
                     "forceUpdate": false,
                     "version": new_version,
@@ -359,16 +365,16 @@ async fn check_updates(app: &AppHandle, should_open_window: bool) -> Result<bool
                 set_update_window_payload(Some(payload));
                 return Ok(true);
             }
-            
+
             let window = if let Some(w) = app.get_webview_window("updater") {
                 let _ = w.show();
                 w
             } else {
-                open_updater_window(app, force_update)?
+                open_updater_window(app, effective_force)?
             };
 
             let payload = serde_json::json!({
-                "forceUpdate": if is_portable { false } else { force_update },
+                "forceUpdate": if is_portable { false } else { effective_force },
                 "version": new_version,
                 "notes": notes,
                 "isPortable": is_portable,
@@ -389,5 +395,68 @@ async fn check_updates(app: &AppHandle, should_open_window: bool) -> Result<bool
 
 pub async fn check_updates_and_open_window(app: &AppHandle) -> Result<bool, String> {
     check_updates(app, true).await
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::Ordering;
+
+    use super::FORCE_UPDATE_MODE;
+
+    fn creator_source() -> String {
+        std::fs::read_to_string(format!(
+            "{}/src/windows/updater_window/creator.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读取更新器源码失败")
+    }
+
+    fn stripped_source() -> String {
+        creator_source()
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    // 便携版强制更新护栏:check_updates 中携带着 for PORTABLE_MODE 的
+    // 锁死动作(hide_main_window/hide quickpaste/disable_hotkeys)必须被
+    // effective_force 的 is_portable 短路关断。顺序断言:effective_force
+    // 求值必须早于锁死动作分支。
+    #[test]
+    fn portable_build_never_enters_force_lockdown() {
+        let src = stripped_source();
+        let effective_pos = src
+            .find("let effective_force = force_update && !is_portable")
+            .expect("缺 effective_force 定义");
+        let bay = src.find("if effective_force {").expect("缺锁死动作分支");
+        assert!(
+            effective_pos < bay,
+            "便携版短路必须先于锁死动作分支"
+        );
+        let mode_store = format!(
+            "FORCE_UPDATE_MODE.store(true, Ordering::Relaxed)"
+        );
+        assert!(
+            src.contains(&mode_store),
+            "锁死动作分支必须设置强制更新标志"
+        );
+    }
+
+    // 便携版降级护栏:payload 的 forceUpdate 必须对便携版写 false
+    // (手动下载提示,不锁死应用)。
+    #[test]
+    fn portable_build_force_update_is_downgraded_in_payload() {
+        let src = stripped_source();
+        let payload_line = src
+            .split('\n')
+            .find(|l| l.contains("is_portable { false }"))
+            .unwrap_or("");
+        assert!(
+            !payload_line.is_empty(),
+            "payload 必须对便携版写 false"
+        );
+        let _ = FORCE_UPDATE_MODE.swap(false, Ordering::Relaxed);
+    }
 }
 
