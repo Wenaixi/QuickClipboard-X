@@ -929,7 +929,9 @@
       "promptPlaceholder": "Example: You are a professional translation assistant...",
       "test": "Test Translation",
       "testDesc": "Test if current translation configuration works",
-      "testButton": "Test Translation"
+      "testButton": "Test Translation",
+      "testSuccess": "AI translation configuration test succeeded",
+      "testFailed": "AI translation configuration test failed:{error}"
     },
     "quickpaste": {
       "title": "Quick Paste",

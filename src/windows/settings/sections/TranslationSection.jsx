@@ -1,6 +1,8 @@
 import '@tabler/icons-webfont/dist/tabler-icons.min.css';
 import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { toast } from '@shared/store/toastStore';
 import SettingsSection from '../components/SettingsSection';
 import SettingItem from '../components/SettingItem';
 import Toggle from '@shared/components/ui/Toggle';
@@ -69,7 +71,17 @@ function TranslationSection({
   }];
   const handleTestTranslation = async () => {
     setTesting(true);
-    setTimeout(() => setTesting(false), 2000);
+    try {
+      // 复用截图 AI 配置测试命令:后端 test_configuration 只依赖
+      // ai_api_key/ai_base_url/ai_model(翻译与截图共享同一 AI 配置),
+      // 对目标语言/提示词无依赖,可复用命令面免新增后端。
+      await invoke('test_screenshot_ai_config');
+      toast.success(t('settings.translation.testSuccess'));
+    } catch (error) {
+      toast.error(t('settings.translation.testFailed', { error: String(error) }));
+    } finally {
+      setTesting(false);
+    }
   };
   return <>
       <SettingsSection title={t('settings.translation.title')} description={t('settings.translation.description')}>

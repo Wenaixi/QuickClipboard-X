@@ -929,7 +929,9 @@
       "promptPlaceholder": "例如：你是一个专业的翻译助手，请将用户输入的文本翻译成指定语言...",
       "test": "测试翻译",
       "testDesc": "测试当前翻译配置是否正常工作",
-      "testButton": "测试翻译"
+      "testButton": "测试翻译",
+      "testSuccess": "AI 翻译配置测试成功",
+      "testFailed": "AI 翻译配置测试失败:{error}"
     },
     "quickpaste": {
       "title": "便捷粘贴",

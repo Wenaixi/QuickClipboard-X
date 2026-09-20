@@ -68,6 +68,15 @@ jobs:
       - name: Run mouse-guard tests
         run: npm run test:mouse-guard
 
+      - name: Run annotation tests
+        run: npm run test:annotation
+
+      - name: Run text-editor tests
+        run: npm run test:text-editor
+
+      - name: Run clipboard-content tests
+        run: npm run test:clipboard-content
+
       - name: Run Rust unit tests
         run: npm run test:rust
 
