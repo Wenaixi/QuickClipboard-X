@@ -217,8 +217,31 @@ pub(crate) fn handle_pin_menu_action(label: &str, hwnd: HWND, id: usize) -> Resu
             Ok(())
         }
         id if id == PinMenuId::OpacityCustom as usize => {
-            // 自定义透明度经 input_dialog 命令输入;接线持久化前保留占位
-            Err("自定义透明度待接线".to_string())
+            // 自定义透明度:经 input_dialog 数字输入框取 0-255,写入状态后
+            // 落盘并重渲染——与 5 档透明度同一条 UpdateLayeredWindow 路径。
+            let app = gdi::app_handle().ok_or_else(|| "贴图窗口句柄不可用".to_string())?;
+            let current = gdi::pin_state(label).opacity;
+            let value = crate::windows::plugins::input_dialog::commands::show_input(
+                app,
+                "自定义透明度".to_string(),
+                "请输入透明度 (0-255, 数值越大越不透明)".to_string(),
+                Some("0-255".to_string()),
+                Some(current.to_string()),
+                Some("number".to_string()),
+                Some(0),
+                Some(255),
+            )
+            .await?
+            .ok_or_else(|| "已取消".to_string())?;
+            let opacity: u8 = value.trim().parse().map_err(|_| "透明度必须是 0-255 的整数".to_string())?;
+            let mut state = gdi::pin_state(label);
+            state.opacity = opacity;
+            gdi::set_pin_state(label, state);
+            persist_state_preferences(label);
+            if let Some(hwnd) = gdi::find_gdi_window(label) {
+                let _ = gdi::render_current(label, hwnd);
+            }
+            Ok(())
         }
         id if id == PinMenuId::Copy as usize => {
             let path = pin_image_window::pin_image_file_path(label)?;
