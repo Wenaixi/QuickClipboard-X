@@ -1018,16 +1018,15 @@ pub fn add_favorite(title: String, content: String, group_name: Option<String>) 
     // 落入不存在的分组(UI 不可见但在库/同步的数据孤儿)。
     if group_name != "全部" {
         let exists = with_connection(|conn| {
-            conn.query_row(
+            let row = conn.query_row(
                 "SELECT 1 FROM groups WHERE name = ?",
                 params![&group_name],
                 |_| Ok(()),
-            ).optional().map(|o| o.is_some())
-        })??;
+            ).optional()?;
+            Ok(row.is_some())
+        })?;
         if !exists {
-            return Err(rusqlite::Error::InvalidParameterName(
-                "目标分组不存在".to_string(),
-            ));
+            return Err("目标分组不存在".to_string());
         }
     }
     let (id, now) = (Uuid::new_v4().to_string(), chrono::Local::now().timestamp());
@@ -1069,16 +1068,15 @@ pub fn update_favorite(
     // move_favorite_to_group 同对称)——收藏不得落入不存在的分组。
     if group_name != "全部" {
         let exists = with_connection(|conn| {
-            conn.query_row(
+            let row = conn.query_row(
                 "SELECT 1 FROM groups WHERE name = ?",
                 params![&group_name],
                 |_| Ok(()),
-            ).optional().map(|o| o.is_some())
-        })??;
+            ).optional()?;
+            Ok(row.is_some())
+        })?;
         if !exists {
-            return Err(rusqlite::Error::InvalidParameterName(
-                "目标分组不存在".to_string(),
-            ));
+            return Err("目标分组不存在".to_string());
         }
     }
 
