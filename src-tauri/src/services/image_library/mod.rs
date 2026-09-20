@@ -408,6 +408,22 @@ fn validate_filename(filename: &str) -> Result<String, String> {
         return Err("文件名不能包含 \\ / : * ? \" < > |".to_string());
     }
 
+    // Windows 保留设备名(含带扩展名形态,如 CON.png)同分组名校验一致拒绝,
+    // 否则 fs::rename 目标会被 NTFS 当设备解析,报"目标已存在/重命名失败"。
+    let reserved = filename
+        .split('.')
+        .next()
+        .unwrap_or(filename)
+        .to_ascii_uppercase();
+    if matches!(
+        reserved.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" |
+        "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9" |
+        "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9"
+    ) {
+        return Err("文件名是系统保留名称".to_string());
+    }
+
     Ok(filename.to_string())
 }
 
@@ -842,4 +858,60 @@ fn image_info_from_path(group: &str, path: &Path) -> Result<ImageInfo, String> {
         category: group.to_string(),
         group: group.to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn source() -> String {
+        std::fs::read_to_string(format!(
+            "{}/src/services/image_library/mod.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读取图库源码失败")
+    }
+
+    fn stripped_source() -> String {
+        source()
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    // 文件名与分组名校验都必须拒绝 Windows 保留设备名(含带扩展名形态,
+    // 取点前段大写匹配 CON/PRN/AUX/NUL/COM1-9/LPT1-9),否则 fs::rename
+    // 目标会被 NTFS 当设备解析导致误导性失败。
+    #[test]
+    fn filename_validation_rejects_windows_reserved_names() {
+        let src = stripped_source();
+        let filename_start = src
+            .find("fn validate_filename")
+            .expect("缺 validate_filename");
+        let filename_body = &src[filename_start..filename_start + 1500];
+        assert!(
+            filename_body.contains("split('.').next()"),
+            "文件名校验必须取点前段判断保留名"
+        );
+        assert!(
+            filename_body.contains("\"CON\" | \"PRN\" | \"AUX\" | \"NUL\"")
+                && filename_body.contains("\"COM1\"")
+                && filename_body.contains("\"LPT1\""),
+            "文件名校验必须拒绝 Windows 保留设备名清单"
+        );
+        assert!(
+            filename_body.contains("文件名是系统保留名称"),
+            "命中保留名必须返回明确错误"
+        );
+        // 分组名校验同款段必须仍在(两处同族一致性护栏)。
+        let group_start = src
+            .find("fn validate_group_name")
+            .expect("缺 validate_group_name");
+        let group_body = &src[group_start..group_start + 1200];
+        assert!(
+            group_body.contains("\"CON\" | \"PRN\" | \"AUX\" | \"NUL\""),
+            "分组名校验必须同样拒绝保留设备名"
+        );
+    }
 }
