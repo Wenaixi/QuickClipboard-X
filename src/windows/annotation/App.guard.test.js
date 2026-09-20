@@ -24,6 +24,19 @@ test('编辑器保存必须走通用画布命令 save_img_png_base64', () => {
   assert.ok(appSource.includes("octx.fillStyle = '#ffffff'"), '保存必须合成白底');
 });
 
+test('编辑器保存逆映射平移项必须为负(居中偏移漂移符号)', () => {
+  // E-1:显示→图像逆映射 图像坐标=(显示坐标-居中偏移)/scale,
+  // setTransform 平移项必须带负号;若写成正号,标注会整体向右下偏
+  // 移 offset/scale 像素(缩放显示缩放越大越严重)。负号被改成正号即
+  // 见红。
+  const transformLine = appSource
+    .split('\n')
+    .find((line) => line.includes('setTransform(dpr / scale'));
+  assert.ok(transformLine, '必须存在逆映射 setTransform 行');
+  assert.ok(transformLine.includes('-offsetX'), 'X 平移项必须带负号');
+  assert.ok(transformLine.includes('-offsetY'), 'Y 平移项必须带负号');
+});
+
 test('编辑器保存失败必须提示并保持窗口打开,不得无条件关窗', () => {
   assert.ok(appSource.includes("from '@shared/utils/dialog'"), '保存失败必须走共享错误提示');
   assert.ok(appSource.includes('await showError('), 'catch 分支必须调用 showError 展示错误');

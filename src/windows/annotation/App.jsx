@@ -320,9 +320,10 @@ function AnnotationApp() {
     octx.fillRect(0, 0, image.naturalWidth, image.naturalHeight);
     octx.drawImage(image, 0, 0, image.naturalWidth, image.naturalHeight);
     // 标注坐标记录于显示空间（CSS 像素），缩放显示时须先把当前映射逆算回
-    // 原图像素：平移 offset 在显示空间补偿后 ÷scale 得图像空间坐标。
+    // 原图像素：图像坐标 = (显示坐标 - 居中偏移) / scale，设备像素再乘 dpr，
+    // 故平移项符号为负（加号会让标注向右下漂移 offset/scale 像素）。
     const { scale, offsetX, offsetY } = displayTransformRef.current;
-    octx.setTransform(dpr / scale, 0, 0, dpr / scale, offsetX * (dpr / scale), offsetY * (dpr / scale));
+    octx.setTransform(dpr / scale, 0, 0, dpr / scale, -offsetX * (dpr / scale), -offsetY * (dpr / scale));
     drawLayersToContext(octx, layers, image.naturalWidth, image.naturalHeight);
     const base64 = out.toDataURL('image/png').split(',')[1];
     try {
