@@ -875,17 +875,21 @@ pub fn move_favorite_to_group(id: String, group_name: String) -> Result<(), Stri
 
         // 目标分组必须真实存在:收藏只能落到已创建的分组(后端「全部」哨兵
         // 不存在于 groups 表,由前端 UI 构造;UI 移动菜单已过滤当前所在组)。
+        // 「全部」哨兵豁免——与 add_clipboard_to_favorites 迁移分支同款,
+        // 否则收藏在"某组"时移回"全部"会被误判为不存在分组而拒绝。
         // 查询失败即"分组不存在"整条拒绝,不留下孤儿分组名。
-        let group_exists = conn.query_row(
-            "SELECT 1 FROM groups WHERE name = ?",
-            params![&group_name],
-            |_| Ok(()),
-        ).optional()?.is_some();
+        if group_name != "全部" {
+            let group_exists = conn.query_row(
+                "SELECT 1 FROM groups WHERE name = ?",
+                params![&group_name],
+                |_| Ok(()),
+            ).optional()?.is_some();
 
-        if !group_exists {
-            return Err(rusqlite::Error::InvalidParameterName(
-                "目标分组不存在".to_string(),
-            ));
+            if !group_exists {
+                return Err(rusqlite::Error::InvalidParameterName(
+                    "目标分组不存在".to_string(),
+                ));
+            }
         }
 
         if old_group_name == group_name {
@@ -938,6 +942,9 @@ pub fn delete_favorite(id: String) -> Result<(), String> {
         Ok(to_delete)
     })?;
 
+    // 与批量删除同构:单删也要清掉 clipboard_data 里该收藏的 raw formats,
+    // 否则留下孤儿行累积占空间(UI 不可见,merge 导入已有 EXISTS 守卫挡)。
+    let _ = super::clipboard::delete_clipboard_data_items("favorite", &id);
     delete_image_files(images_to_delete)
 }
 
@@ -1435,6 +1442,8 @@ mod content_type_like_tests {
 
     // move_favorite_to_group 必须校验目标分组存在:收藏不得落入不存在的
     // 分组(UI 不可见但仍在库/同步的数据孤儿)。查询失败整条拒绝。
+    // 「全部」哨兵必须豁免——收藏在"某组"时移回"全部"是合法操作,
+    // 与 add_clipboard_to_favorites 迁移分支/新收藏分支同对称。
     #[test]
     fn move_favorite_to_group_validates_group_exists() {
         use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
@@ -1447,6 +1456,10 @@ mod content_type_like_tests {
         assert!(
             body.contains("目标分组不存在"),
             "不存在的分组必须拒绝(报友好错误)"
+        );
+        assert!(
+            body.contains("group_name != \"全部\""),
+            "「全部」哨兵必须豁免(移回全部是合法操作)"
         );
         let group_check = body.find("FROM groups WHERE name =").unwrap();
         let update = body
