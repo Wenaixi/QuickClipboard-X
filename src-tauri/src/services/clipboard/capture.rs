@@ -194,6 +194,13 @@ impl ClipboardContent {
                     for file in files {
                         let normalized = crate::services::normalize_path_for_hash(file);
                         hasher.update(normalized.as_bytes());
+                        // 路径间必须插入分隔字节,与 monitor.rs 的
+                        // set_last_hash_files/hash_clipboard_content 同口径;
+                        // 缺分隔符会让 {"a,b","c"} 与 {"a","b,c"} 哈希相同,
+                        // 且文件/图片自粘贴 fast-path 永远失配(fast-path
+                        // 命中才走原位不置顶;失配落 find_duplicate 兜底
+                        // 无条件置顶,违背 pasteToTop=false)。
+                        hasher.update([0u8]);
                     }
                     return format!("{:x}", hasher.finalize());
                 }
@@ -414,6 +421,29 @@ mod hash_guards {
         assert!(
             files_start.unwrap() < raw_start.unwrap(),
             "主内容(Files)分支必须先于 raw_formats 回退"
+        );
+    }
+
+    // 文件/图片自粘贴 fast-path 依赖 capture 侧简哈希与粘贴侧预置哈希
+    // 完全一致:Files 分支每段路径后必须插入 [0u8] 分隔字节(与
+    // monitor.rs set_last_hash_files 同口径),缺分隔符会让多文件集合
+    // 哈希合糊且自粘贴永远落 find_duplicate 兜底无条件置顶。
+    #[test]
+    fn files_hash_branch_uses_zero_byte_separators_like_paste_side() {
+        let src = strip_line_comments(&source_file("src/services/clipboard/capture.rs"));
+        let body = fn_body(&src, "calculate_hash");
+        let files_seg = {
+            let start = body
+                .find("ContentType::Files =>")
+                .expect("缺 Files 哈希分支");
+            let raw = body
+                .find("raw_formats")
+                .expect("缺 raw_formats 回退分支");
+            &body[start..raw]
+        };
+        assert!(
+            files_seg.contains("hasher.update([0u8])"),
+            "Files 分支每段路径后必须插入零字节分隔符(与粘贴侧同口径)"
         );
     }
 }
