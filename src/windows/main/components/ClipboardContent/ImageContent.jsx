@@ -6,6 +6,12 @@ import { settingsStore } from '@shared/store/settingsStore';
 import { formatFileSize } from '@shared/utils/format';
 import Tooltip from '@shared/components/common/Tooltip.jsx';
 
+// 图片 ID 白名单:与后端 is_valid_image_id 同语义。image_id 直接拼
+// `${dataDir}/clipboard_images/{id}.png` 调 convertFileSrc,恶意 `..`/
+// 绝对路径可越出图片目录读写 appdata 内任意文件,必须拼路径前校验
+// (对齐 HtmlContent/HtmlPreview/preview 同款白名单)。
+const IMAGE_ID_WHITELIST = /^[A-Za-z0-9_-]{1,128}$/;
+
 function parseFirstImageId(imageId) {
   if (typeof imageId !== 'string' || !imageId.trim()) {
     return '';
@@ -106,6 +112,12 @@ function ImageContent({ item, maxContentHeightPx }) {
 
         const imageId = parseFirstImageId(item.image_id);
         if (imageId) {
+          // 白名单校验先于路径拼接:不合法的 image_id(远程记录原样入库)
+          // 直接走失败态,不得拼路径调 convertFileSrc。
+          if (!IMAGE_ID_WHITELIST.test(imageId)) {
+            setError(true);
+            return;
+          }
           const dataDir = await invoke('get_data_directory');
           if (disposed) {
             return;
