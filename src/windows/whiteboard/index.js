@@ -130,6 +130,16 @@ function setupToolButtons() {
 
 function startDraw(event) {
   event.preventDefault();
+  // 指针捕获:不捕获时绘制中指针滑到工具栏(fixed 悬浮层)释放,pointerup
+  // 目标变工具栏按钮,endDraw 不触发,drawing 永久卡死(此后无法再画,
+  // 清空/撤销都不重置 drawing)。捕获后释放事件仍落在 canvas。
+  if (event.pointerId !== undefined) {
+    try {
+      canvas.setPointerCapture(event.pointerId);
+    } catch {
+      // 指针已抬起等情形捕获失败,不阻塞绘制
+    }
+  }
   if (!drawing) {
     drawing = true;
     anchor = localPoint(event);
@@ -145,8 +155,15 @@ function moveDraw(event) {
   renderPreview();
 }
 
-function endDraw() {
+function endDraw(event) {
   if (!drawing) return;
+  if (event && event.pointerId !== undefined) {
+    try {
+      canvas.releasePointerCapture(event.pointerId);
+    } catch {
+      // 未捕获时释放无意义,忽略
+    }
+  }
   // 完成一笔：快照入栈后再清进行中状态，全栈重绘让成稿常驻。
   if (tool === 'pen') {
     if (path.length > 1) {
@@ -160,6 +177,12 @@ function endDraw() {
   end = null;
   path = [];
   renderPreview();
+}
+
+// 绘制中断兜底(指针移出窗口/系统打断/多点触控切换):与 endDraw 同一
+// 收口语义——完成当前一笔或丢弃空笔,重置 drawing 防永久卡死。
+function cancelDraw() {
+  endDraw();
 }
 
 async function save() {
@@ -208,6 +231,11 @@ function start() {
   canvas.addEventListener('pointerdown', startDraw);
   canvas.addEventListener('pointermove', moveDraw);
   canvas.addEventListener('pointerup', endDraw);
+  // 绘制中断兜底:指针移出窗口/系统打断都会触发 pointercancel/pointerleave,
+  // 必须走 endDraw 收口,否则 drawing 残留卡死(见 startDraw 注释)。
+  canvas.addEventListener('pointercancel', cancelDraw);
+  canvas.addEventListener('pointerleave', cancelDraw);
+  document.addEventListener('pointerup', endDraw);
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') window.close().catch(() => {});
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {

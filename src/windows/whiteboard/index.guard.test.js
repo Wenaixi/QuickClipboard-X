@@ -79,3 +79,21 @@ test('白板支持撤销(弹出栈顶并重绘)', () => {
     '撤销必须弹栈并重绘（有栈才有撤销语义）',
   );
 });
+
+test('白板绘制中断必须兜底 endDraw(防 drawing 卡死)', () => {
+  const start = bare.indexOf('function startDraw');
+  assert.ok(start >= 0, '缺 startDraw');
+  assert.ok(
+    bare.includes('setPointerCapture('),
+    'pointerdown 必须 setPointerCapture（否则滑到工具栏释放会丢 pointerup）',
+  );
+  assert.ok(
+    bare.includes('pointercancel'),
+    '必须监听 pointercancel（绘制中断兜底入口）',
+  );
+  const cancel = bodyOf('function cancelDraw', 'function start');
+  assert.ok(
+    cancel.includes('endDraw()'),
+    'cancelDraw 必须委托 endDraw 收口（重置 drawing 防永久卡死）',
+  );
+});
