@@ -18,6 +18,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, HMENU, MF_CHECKED, MF_POPUP,
     MF_SEPARATOR, MF_STRING, MENU_ITEM_FLAGS, TrackPopupMenu, TPM_RETURNCMD,
 };
+use windows::core::PCWSTR;
 
 use super::{gdi, pin_image_window};
 
@@ -178,26 +179,26 @@ pub(crate) fn handle_pin_menu_action(label: &str, hwnd: HWND, id: usize) -> Resu
     }
 
     match id {
-        PinMenuId::ToggleTop => {
+        id if id == PinMenuId::ToggleTop as usize => {
             gdi::toggle_topmost(hwnd)?;
             Ok(())
         }
-        PinMenuId::ToggleShadow => {
+        id if id == PinMenuId::ToggleShadow as usize => {
             gdi::toggle_state_bool(label, gdi::PinStateFlag::Shadow)?;
             persist_state_preferences(label);
             Ok(())
         }
-        PinMenuId::ToggleLockPosition => {
+        id if id == PinMenuId::ToggleLockPosition as usize => {
             gdi::toggle_state_bool(label, gdi::PinStateFlag::LockPosition)?;
             persist_state_preferences(label);
             Ok(())
         }
-        PinMenuId::TogglePixelRender => {
+        id if id == PinMenuId::TogglePixelRender as usize => {
             gdi::toggle_state_bool(label, gdi::PinStateFlag::PixelRender)?;
             persist_state_preferences(label);
             Ok(())
         }
-        PinMenuId::ToggleThumbnail => {
+        id if id == PinMenuId::ToggleThumbnail as usize => {
             // 缩略图切换:窗口缩放动画到 50x50。完整恢复语义(记录原尺寸/
             // 位置/恢复模式)由交互任务接入,此处保留菜单入口的行为占位。
             let _ = pin_image_window::animate_window_resize(
@@ -205,25 +206,25 @@ pub(crate) fn handle_pin_menu_action(label: &str, hwnd: HWND, id: usize) -> Resu
             );
             Ok(())
         }
-        PinMenuId::RestoreModeFollow => {
+        id if id == PinMenuId::RestoreModeFollow as usize => {
             gdi::set_state_str(label, gdi::PinStateFlag::RestoreMode, "follow")?;
             persist_state_preferences(label);
             Ok(())
         }
-        PinMenuId::RestoreModeKeep => {
+        id if id == PinMenuId::RestoreModeKeep as usize => {
             gdi::set_state_str(label, gdi::PinStateFlag::RestoreMode, "keep")?;
             persist_state_preferences(label);
             Ok(())
         }
-        PinMenuId::OpacityCustom => {
+        id if id == PinMenuId::OpacityCustom as usize => {
             // 自定义透明度经 input_dialog 命令输入;接线持久化前保留占位
             Err("自定义透明度待接线".to_string())
         }
-        PinMenuId::Copy => {
+        id if id == PinMenuId::Copy as usize => {
             let path = pin_image_window::pin_image_file_path(label)?;
             crate::commands::copy_image_to_clipboard(path)
         }
-        PinMenuId::SaveAs => {
+        id if id == PinMenuId::SaveAs as usize => {
             if let Some(app) = gdi::app_handle() {
                 let label = label.to_string();
                 tauri::async_runtime::spawn(async move {
@@ -234,7 +235,7 @@ pub(crate) fn handle_pin_menu_action(label: &str, hwnd: HWND, id: usize) -> Resu
                 Err("AppHandle 未初始化".to_string())
             }
         }
-        PinMenuId::Close => pin_image_window::close_pin_image_window(label),
+        id if id == PinMenuId::Close as usize => pin_image_window::close_pin_image_window(label),
         _ => Err("未知菜单项".to_string()),
     }
 }

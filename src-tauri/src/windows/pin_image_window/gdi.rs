@@ -265,9 +265,15 @@ pub(crate) fn render_image(
         return Err("贴图尺寸无效".to_string());
     }
 
-    let screen_dc = unsafe { GetDC(None) }.map_err(|e| format!("获取屏幕 DC 失败: {}", e))?;
-    let mem_dc = unsafe { CreateCompatibleDC(Some(screen_dc)) }
-        .map_err(|e| format!("创建内存 DC 失败: {}", e))?;
+    let screen_dc = unsafe { GetDC(None) };
+    if screen_dc.is_invalid() {
+        return Err("获取屏幕 DC 失败".to_string());
+    }
+    let mem_dc = unsafe { CreateCompatibleDC(Some(screen_dc)) };
+    if mem_dc.is_invalid() {
+        unsafe { ReleaseDC(None, screen_dc) };
+        return Err("创建内存 DC 失败".to_string());
+    }
 
     // 32bpp 自顶向下 DIB(负高度 = 顶行在内存首行,与 RGBA 行序一致)
     let mut bmi = BITMAPINFO::default();
@@ -308,11 +314,11 @@ pub(crate) fn render_image(
         *d = (a << 24) | (pr << 16) | (pg << 8) | pb;
     }
 
-    let old = unsafe { SelectObject(mem_dc, HGDIOBJ(dib)) };
+    let old = unsafe { SelectObject(mem_dc, HGDIOBJ(dib.0)) };
 
     // 渲染目标位置取当前窗口在屏幕上的坐标:渲染需以窗口物理原点为准
     let window_rect = {
-        let mut rect = windows::Win32::UI::WindowsAndMessaging::RECT::default();
+        let mut rect = windows::Win32::Foundation::RECT::default();
         let ok = unsafe {
             windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut rect)
         };
@@ -348,9 +354,9 @@ pub(crate) fn render_image(
 
     // 句柄进出必须成对:恢复旧位图 → 删 DIB → 删内存 DC → 释放屏幕 DC
     unsafe {
-        SelectObject(mem_dc, old).map_err(|e| format!("恢复旧位图失败: {}", e))?;
-        DeleteObject(HGDIOBJ(dib)).map_err(|e| format!("删除 DIB 位图失败: {}", e))?;
-        DeleteDC(mem_dc);
+        let _ = SelectObject(mem_dc, old);
+        let _ = DeleteObject(HGDIOBJ(dib.0));
+        let _ = DeleteDC(mem_dc);
         ReleaseDC(None, screen_dc);
     }
 
