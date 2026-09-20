@@ -20,6 +20,7 @@ import TextEditor from './components/TextEditor';
 import HtmlEditor from './components/HtmlEditor';
 import StatusBar from './components/StatusBar';
 import ToastContainer from '@shared/components/common/ToastContainer';
+import { toast } from '@shared/store/toastStore';
 
 function resolveEditableTypes(contentType, htmlContent) {
   const normalizedType = String(contentType || '');
@@ -226,7 +227,10 @@ function App() {
       const currentWindow = Window.getCurrent();
       await currentWindow.close();
     } catch (error) {
+      // 保存失败必须提示用户并保持窗口打开——失败关窗会让改动静默丢失,
+      // 用户误以为保存成功(ToastContainer 已挂载,直接复用 toast 提示)。
       console.error('保存失败:', error);
+      toast.error('保存失败:' + String(error?.message || error), { duration: 4000 });
     }
   };
 
