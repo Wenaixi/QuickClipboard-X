@@ -176,10 +176,14 @@ const TitleBar = forwardRef(
       const previousValue = Boolean(settingsStore.edgeHideEnabled);
       const nextValue = !previousValue;
       try {
-        const result = await settingsStore.saveSetting(
-          "edgeHideEnabled",
-          nextValue,
-        );
+        // 关闭贴边隐藏必须连带关闭悬浮弹出,对齐 §5.6 设置页语义——
+        // 后端 save_settings 归一化(hide=false⇒hover=false)只压后端,
+        // 前端 emit 原始 payload 会把 hover 弹回 true,store 层出现
+        // hide=false/hover=true 违规组合且持续,设置页开关显示开启。
+        const result = await settingsStore.saveSettings({
+          edgeHideEnabled: nextValue,
+          edgeHoverPopupEnabled: nextValue,
+        });
         if (result?.success === false) {
           settingsStore.edgeHideEnabled = previousValue;
         }
