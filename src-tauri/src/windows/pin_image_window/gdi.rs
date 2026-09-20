@@ -433,7 +433,7 @@ unsafe extern "system" fn pin_image_window_proc(
                 if id != 0 {
                     // 自定义透明度经 input_dialog 数字输入框异步等待用户输入,
                     // 动作分发在异步任务中执行,不阻塞消息泵。
-                    if let Some(app) = super::menu::gdi::app_handle() {
+                    if let Some(app) = app_handle() {
                         let label = label.clone();
                         let _ = tauri::async_runtime::spawn(async move {
                             let _ = super::menu::handle_pin_menu_action(&label, hwnd, id).await;
