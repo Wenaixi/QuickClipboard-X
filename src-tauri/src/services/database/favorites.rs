@@ -845,7 +845,9 @@ pub fn move_favorite_to_group(id: String, group_name: String) -> Result<(), Stri
         ).optional()?.is_some();
 
         if !group_exists {
-            return Err("目标分组不存在".to_string());
+            return Err(rusqlite::Error::InvalidParameterName(
+                "目标分组不存在".to_string(),
+            ));
         }
 
         if old_group_name == group_name {
