@@ -14,8 +14,24 @@ pub mod webdav_client;
 
 pub use types::{SyncReport, WebdavStatus};
 
+use std::sync::LazyLock;
+use tokio::sync::Mutex as AsyncMutex;
+
 use types::WebdavConfig;
 use webdav_client::WebdavClient;
+
+// 云文件(cloud_files)索引串行化锁:cloud_files/index.json 的读-改-写
+// 是整块 PUT 无 merge(与 uploader 的 merge_index 不同),upload/delete
+// 等操作若并发交叠会整块覆盖丢失彼此的 manifest。锁把索引读写临界
+// 区串行化,防并发覆盖。download 只读 index 不写,不持锁无碍。
+static CLOUD_FILES_MUTATION_LOCK: LazyLock<AsyncMutex<()>> =
+    LazyLock::new(|| AsyncMutex::new(()));
+
+// 持有云文件索引锁后再进入 cloud_files 写路径(上传/删除)。
+// 锁内不 await 网络 IO 的调用方请勿加锁——避免锁面扩大拖慢读路径。
+async fn cloud_files_lock() -> tokio::sync::MutexGuard<'static, ()> {
+    CLOUD_FILES_MUTATION_LOCK.lock().await
+}
 
 pub async fn test_connection() -> Result<(), String> {
     let client = build_client().await?;
@@ -63,6 +79,9 @@ pub async fn upload_parts(
 pub async fn upload_cloud_files_with_progress(
     requests: Vec<cloud_files::CloudFileUploadRequest>,
 ) -> Result<Vec<cloud_files::CloudFileUploadBatchItem>, String> {
+    // 索引写临界区:upload 与 delete 并发整块覆盖丢 manifest,锁内完成
+    // load_index→改→save_index 全链(网络 IO 在锁内,低并发无害)。
+    let _lock = cloud_files_lock().await;
     let client = build_client().await?;
     cloud_files::upload_files_with_progress(&client, requests).await
 }
@@ -78,6 +97,8 @@ pub async fn download_cloud_file(file_id: &str) -> Result<cloud_files::CloudFile
 }
 
 pub async fn delete_cloud_file(file_id: &str) -> Result<(), String> {
+    // 索引写临界区:与 upload_cloud_files 串行,防整块覆盖丢 manifest。
+    let _lock = cloud_files_lock().await;
     let client = build_client().await?;
     cloud_files::delete_file(&client, file_id).await
 }
@@ -135,4 +156,59 @@ async fn build_client() -> Result<WebdavClient, String> {
     let mut client = WebdavClient::new(config)?;
     client.enable_encryption(&encryption_password).await?;
     Ok(client)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mod_source() -> String {
+        std::fs::read_to_string(format!(
+            "{}/src/services/webdav_sync/mod.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读取 webdav_sync/mod.rs 源码失败")
+    }
+
+    fn stripped_source() -> String {
+        mod_source()
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    // 云文件索引写锁护栏(C2):upload_cloud_files_with_progress 与
+    // delete_cloud_file 两个写路径必须各持 cloud_files_lock 进入——
+    // cloud_files/index.json 是整块 PUT 无 merge,写路径并发交叠会覆盖
+    // 丢 manifest。顺序断言:锁获取必须先于 build_client 后的写调用
+    // (锁在函数体开头)。
+    #[test]
+    fn cloud_file_mutations_hold_index_lock() {
+        let src = stripped_source();
+        for fn_name in [
+            "upload_cloud_files_with_progress",
+            "delete_cloud_file",
+        ] {
+            let pos = src
+                .find(&format!("pub async fn {fn_name}"))
+                .unwrap_or_else(|| panic!("缺 {fn_name}"));
+            let tail = &src[pos..];
+            let end = tail
+                .find("\npub ")
+                .unwrap_or(tail.len());
+            let body = &tail[..end];
+            assert!(
+                body.contains("cloud_files_lock().await"),
+                "{fn_name} 必须持 cloud_files_lock 进入(防整块覆盖丢 manifest)"
+            );
+            let lock_pos = body
+                .find("cloud_files_lock().await")
+                .expect("缺锁调用");
+            assert!(
+                lock_pos < body.find("build_client()").unwrap_or(body.len()),
+                "{fn_name} 锁获取必须先于 build_client(锁在临界区开头)"
+            );
+        }
+    }
 }
