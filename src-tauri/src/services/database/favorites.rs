@@ -731,6 +731,21 @@ pub fn add_clipboard_to_favorites(clipboard_id: i64, group_name: Option<String>)
             // 目标组)。此时把收藏迁移到目标分组——同一条收藏可归属新分组,
             // 保持单条语义(不复制出第二条同源收藏)。
             let target_group = group_name.clone();
+            // 与 move_favorite_to_group 同对称:目标分组必须真实存在才迁移,
+            // 否则整条拒绝,不留下孤儿分组名(「全部」哨兵由前端 UI 构造,
+            // 不在此迁移路径内——迁移必然来自用户选择的分组菜单,均为真实组)。
+            if target_group != "全部" {
+                let group_exists = conn.query_row(
+                    "SELECT 1 FROM groups WHERE name = ?",
+                    params![&target_group], // X
+                    |_| Ok(()),
+                ).optional()?.is_some();
+                if !group_exists {
+                    return Err(rusqlite::Error::InvalidParameterName(
+                        "目标分组不存在".to_string(),
+                    ));
+                }
+            }
             if existing.group_name != target_group {
                 conn.execute(
                     "UPDATE favorites SET group_name = ?1, updated_at = ?2 WHERE id = ?3",
@@ -1319,7 +1334,18 @@ mod content_type_like_tests {
             tail.contains("UPDATE favorites SET group_name"),
             "迁移必须写 UPDATE favorites 改 group_name"
         );
-        let update_pos = body.find("UPDATE favorites SET group_name").unwrap();
+        // 迁移前必须校验目标分组存在(与 move_favorite_to_group 同对称):
+        // 不存在的分组名会留下孤儿分组(UI 不可见但在库/同步),整条拒绝。
+        let select_pos = tail
+            .find("SELECT 1 FROM groups WHERE name = ?")
+            .expect("迁移前必须查询目标分组存在");
+        let update_pos = tail
+            .find("UPDATE favorites SET group_name")
+            .expect("迁移必须写 UPDATE");
+        assert!(
+            select_pos < update_pos,
+            "目标分组存在性校验必须先于迁移 UPDATE"
+        );
         let insert_pos = body
             .find("INSERT INTO favorites")
             .unwrap_or(usize::MAX);
