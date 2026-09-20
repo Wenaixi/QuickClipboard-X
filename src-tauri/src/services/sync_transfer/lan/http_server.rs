@@ -180,7 +180,7 @@ async fn handle_client(mut stream: tokio::net::TcpStream, remote_addr: std::net:
     let response = if request.method == "PUT" && request.path.starts_with(TRANSFER_FILES_PREFIX) {
         // 直传路径同样受 512MB 上限约束(与普通 PUT 的 read_request_body 一致)
         if request.content_length > MAX_REQUEST_BODY_SIZE {
-            json_response(413, serde_json::json!({ "message": "请求体超过 512MB，第一版直传暂不支持超大文件" }))
+            json_response(413, serde_json::json!({ "message": format!("请求体超过 {} 字节上限，第一版直传暂不支持超大文件", MAX_REQUEST_BODY_SIZE) }))
         } else {
             receive_transfer_file_stream(&request, &mut stream, &app).await
         }
@@ -707,7 +707,9 @@ async fn read_request_body(
     max_size: usize,
 ) -> Result<(), String> {
     if request.content_length > max_size || request.body.len() > max_size {
-        return Err("请求体超过 512MB，第一版直传暂不支持超大文件".to_string());
+        // 图片 PUT 上限 64MB / 直传 512MB,错误文案必须用实际 max_size 拼装,
+        // 写死"512MB"会让对端收到与真实拒绝上限不符的误导信息。
+        return Err(format!("请求体超过 {} 字节上限，第一版直传暂不支持超大文件", max_size));
     }
     if request.content_length > request.body.len() {
         let remaining = request.content_length - request.body.len();

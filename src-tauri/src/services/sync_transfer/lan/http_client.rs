@@ -189,6 +189,9 @@ pub async fn push_peer_tombstones(
 }
 
 pub async fn fetch_peer_image(peer: &super::peer_store::PairedPeer, image_id: &str) -> Result<Option<Vec<u8>>, String> {
+    if !super::files::is_valid_image_id(image_id) {
+        return Err("无效的图片 ID".to_string());
+    }
     let client = build_transfer_client();
     let config = LanHttpClientConfig {
         base_url: peer.base_url.clone(),
@@ -253,6 +256,9 @@ pub async fn fetch_peer_image(peer: &super::peer_store::PairedPeer, image_id: &s
 }
 
 pub async fn push_peer_image(peer: &super::peer_store::PairedPeer, image_id: &str, bytes: Vec<u8>) -> Result<(), String> {
+    if !super::files::is_valid_image_id(image_id) {
+        return Err("无效的图片 ID".to_string());
+    }
     let client = build_transfer_client();
     let config = LanHttpClientConfig {
         base_url: peer.base_url.clone(),
@@ -509,6 +515,9 @@ fn encode_path_segment(raw: &str) -> String {
 // 探测对端是否已有指定图片(差量推送前问一次,避免每次都全量推)
 // 服务端 GET /qc-sync/files/<id>.png 存在=200 / 不存在=404。
 pub async fn peer_image_exists(peer: &super::peer_store::PairedPeer, image_id: &str) -> Result<bool, String> {
+    if !super::files::is_valid_image_id(image_id) {
+        return Err("无效的图片 ID".to_string());
+    }
     let client = build_transfer_client();
     let config = LanHttpClientConfig {
         base_url: peer.base_url.clone(),

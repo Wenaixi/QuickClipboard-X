@@ -115,9 +115,9 @@ async fn scan_and_fetch_missing_images(peer: &super::peer_store::PairedPeer) {
         }
     }
     for image_id in image_ids {
-        match super::files::read_image_file(&image_id) {
-            Ok(Some(_)) => continue,
-            Ok(None) => {}
+        match super::files::image_exists(&image_id) {
+            Ok(true) => continue,
+            Ok(false) => {}
             Err(e) => {
                 eprintln!("[局域网同步] 检查本地图片失败 image_id={} 错误={}", image_id, e);
                 continue;
@@ -140,9 +140,9 @@ async fn fetch_missing_images_best_effort(
     records: &[crate::services::webdav_sync::types::CloudRecord],
 ) {
     for image_id in super::files::collect_record_image_ids(records) {
-        match super::files::read_image_file(&image_id) {
-            Ok(Some(_)) => continue,
-            Ok(None) => {}
+        match super::files::image_exists(&image_id) {
+            Ok(true) => continue,
+            Ok(false) => {}
             Err(e) => {
                 eprintln!("[局域网同步] 检查本地图片失败 image_id={} 错误={}", image_id, e);
                 continue;

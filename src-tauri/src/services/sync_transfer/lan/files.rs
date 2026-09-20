@@ -53,11 +53,22 @@ pub fn collect_record_image_ids(records: &[CloudRecord]) -> Vec<String> {
 }
 
 pub fn read_image_file(image_id: &str) -> Result<Option<Vec<u8>>, String> {
-    let path = image_path(image_id)?;
-    if !path.exists() {
+    if !image_exists(image_id)? {
         return Ok(None);
     }
+    let path = image_path(image_id)?;
     std::fs::read(path).map(Some).map_err(|e| format!("读取局域网同步图片失败: {}", e))
+}
+
+// 仅判断图片文件是否存在，读取元数据即可，避免每次全量读图进内存
+// （拉取前检查本地 100 张 5MB 图若逐个 read 会多读 ~500MB 磁盘 IO）。
+pub fn image_exists(image_id: &str) -> Result<bool, String> {
+    let path = image_path(image_id)?;
+    match std::fs::metadata(path) {
+        Ok(meta) => Ok(meta.is_file()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(format!("检查局域网同步图片文件失败: {}", e)),
+    }
 }
 
 pub fn save_image_file(image_id: &str, bytes: &[u8]) -> Result<(), String> {
@@ -288,6 +299,12 @@ fn sanitize_file_name(raw: &str) -> Result<String, String> {
     if name.is_empty() || name == "." || name == ".." {
         return Err("文件名无效".to_string());
     }
+    // 拒绝点开头文件名(.env/.hidden 等):系统内部文件(index.json/.qcpart)由
+    // 代码自建不走本函数,收件盒内以点开头一律视为内部文件,放行会造成"落盘
+    // 可见但全部操作被拒"的幽灵文件(对端可控触发)。
+    if name.starts_with('.') {
+        return Err("文件名无效".to_string());
+    }
     if name.contains('/') || name.contains('\\') || name.contains(':') {
         return Err("文件名包含非法字符".to_string());
     }
@@ -383,7 +400,8 @@ mod tests {
         );
     }
 
-    // 护栏:http_server::start 必须在监听前调用清扫函数。
+    // 护栏:start 必须绑定监听前清扫残留 .qcpart,防止旧会话半写文件
+    // 在下次接收时被当作正常文件进入收件盒。
     #[test]
     fn http_server_start_sweeps_orphan_qcpart_first() {
         let source = std::fs::read_to_string(format!(
@@ -415,6 +433,74 @@ mod tests {
         assert!(
             sweep_pos < listen_pos,
             "清扫必须早于监听,否则新会话接收期间残留文件仍在"
+        );
+    }
+
+    // 护栏:判断图片存在必须走元数据(image_exists),不得在拉取前把整图
+    // 读进内存(read_image_file)——LAN 全表重扫时逐张全量读会多出百 MB
+    // 级磁盘 IO。拉取路径改回 read 判存在即见红。
+    #[test]
+    fn image_existence_check_uses_metadata_not_full_read() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/sync_transfer/lan/pull.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读 pull.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let body_start = stripped
+            .find("fn scan_and_fetch_missing_images")
+            .or_else(|| stripped.find("pub async fn scan_and_fetch_missing_images"))
+            .expect("缺拉取扫描函数");
+        let rest = &stripped[body_start..];
+        let body_end = rest
+            .find("\nfn ")
+            .map(|i| body_start + i)
+            .unwrap_or(stripped.len());
+        let body = &stripped[body_start..body_end];
+        assert!(
+            body.contains("files::image_exists(&image_id)") || body.contains("files::image_exists(image_id)"),
+            "拉取前判存在必须走 image_exists 元数据判断"
+        );
+        assert!(
+            !body.contains("files::read_image_file(&image_id)"),
+            "拉取判存在不得全量读图进内存"
+        );
+    }
+
+    // 护栏:文件名净化必须拒绝点开头(与收件盒内部文件命名空间隔离)——
+    // 放行会让 .env 等落盘可见但操作全拒,呈"幽灵文件"。删该守卫即见红。
+    #[test]
+    fn sanitize_rejects_dot_prefixed_file_names() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/sync_transfer/lan/files.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读 files.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = stripped
+            .find("fn sanitize_file_name")
+            .expect("缺文件名净化函数");
+        let rest = &stripped[start..];
+        let end = rest
+            .find("\nfn ")
+            .map(|i| start + i)
+            .unwrap_or(stripped.len());
+        let body = &stripped[start..end];
+        assert!(
+            body.contains("name.starts_with('.')"),
+            "净化必须拒绝点开头文件名"
+        );
+        assert!(
+            !body.contains("name.contains('/')") || body.contains("name.contains('/') || name.contains('\\\\')"),
+            "净化必须保留分隔符拒绝"
         );
     }
 }
