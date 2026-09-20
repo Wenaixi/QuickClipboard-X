@@ -174,21 +174,26 @@ const TitleBar = forwardRef(
       event.preventDefault();
       event.stopPropagation();
       const previousValue = Boolean(settingsStore.edgeHideEnabled);
+      const previousHover = Boolean(settingsStore.edgeHoverPopupEnabled);
       const nextValue = !previousValue;
       try {
         // 关闭贴边隐藏必须连带关闭悬浮弹出,对齐 §5.6 设置页语义——
         // 后端 save_settings 归一化(hide=false⇒hover=false)只压后端,
         // 前端 emit 原始 payload 会把 hover 弹回 true,store 层出现
         // hide=false/hover=true 违规组合且持续,设置页开关显示开启。
-        const result = await settingsStore.saveSettings({
-          edgeHideEnabled: nextValue,
-          edgeHoverPopupEnabled: nextValue,
-        });
+        // 开启分支只写 hide、绝不强制打开 hover(反向不蕴含,保留用户
+        // 上次偏好,对齐后端锁死决策 enabling_edge_hide_keeps_hover_off)。
+        const patch = nextValue
+          ? { edgeHideEnabled: true }
+          : { edgeHideEnabled: false, edgeHoverPopupEnabled: false };
+        const result = await settingsStore.saveSettings(patch);
         if (result?.success === false) {
           settingsStore.edgeHideEnabled = previousValue;
+          settingsStore.edgeHoverPopupEnabled = previousHover;
         }
       } catch (error) {
         settingsStore.edgeHideEnabled = previousValue;
+        settingsStore.edgeHoverPopupEnabled = previousHover;
         console.error("标题栏切换贴边隐藏失败:", error);
       }
     };
