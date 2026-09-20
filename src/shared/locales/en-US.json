@@ -209,6 +209,7 @@
     "unpin": "Unpin",
     "confirmDelete": "Are you sure you want to delete group \"{{name}}\"? Items in this group will be moved to \"All\".",
     "deleteFailed": "Failed to delete group, please try again",
+    "saveFailed": "Failed to save group, check if the name is duplicated",
     "modal": {
       "titleNew": "New Group",
       "titleEdit": "Edit Group",

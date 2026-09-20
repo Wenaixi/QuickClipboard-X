@@ -196,8 +196,9 @@ function endDraw(event) {
 
 // 绘制中断兜底(指针移出窗口/系统打断/多点触控切换):与 endDraw 同一
 // 收口语义——完成当前一笔或丢弃空笔,重置 drawing 防永久卡死。
-function cancelDraw() {
-  endDraw();
+// 必须透传事件,让 endDraw 的首指守卫生效(第二指中断不误收首指当前笔)。
+function cancelDraw(event) {
+  endDraw(event);
 }
 
 async function save() {

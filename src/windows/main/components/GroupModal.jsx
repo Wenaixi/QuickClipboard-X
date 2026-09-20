@@ -90,7 +90,9 @@ function GroupModal({
       onSave?.();
     } catch (error) {
       console.error('保存分组失败:', error);
-      await showError(t('groups.deleteFailed'), t('common.confirm'));
+      // 保存/新建分组失败(重名、改"全部"被拒等)必须用保存文案,
+      // 不能用删除文案——此前误用 groups.deleteFailed 显示"删除分组失败"。
+      await showError(t('groups.saveFailed'), t('common.confirm'));
     } finally {
       setSaving(false);
     }

@@ -91,10 +91,11 @@ test('白板绘制中断必须兜底 endDraw(防 drawing 卡死)', () => {
     bare.includes('pointercancel'),
     '必须监听 pointercancel（绘制中断兜底入口）',
   );
-  const cancel = bodyOf('function cancelDraw', 'function start');
+  // cancelDraw 在 start() 之后(函数声明靠后),bodyOf 用 save 作终点
+  const cancel = bodyOf('function cancelDraw', 'async function save');
   assert.ok(
-    cancel.includes('endDraw()'),
-    'cancelDraw 必须委托 endDraw 收口（重置 drawing 防永久卡死）',
+    cancel.includes('endDraw(event)'),
+    'cancelDraw 必须透传事件给 endDraw(否则第二指中断会误收首指当前笔)',
   );
 });
 
