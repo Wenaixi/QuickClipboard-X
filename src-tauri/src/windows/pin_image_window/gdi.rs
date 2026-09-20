@@ -434,8 +434,11 @@ unsafe extern "system" fn pin_image_window_proc(
                     // 自定义透明度经 input_dialog 数字输入框异步等待用户输入,
                     // 动作分发在异步任务中执行,不阻塞消息泵。
                     if let Some(app) = app_handle() {
+                        // HWND 裸指针非 Send,转 isize 跨线程传递后在任务内还原。
+                        let hwnd_raw = hwnd.0 as isize;
                         let label = label.clone();
                         let _ = tauri::async_runtime::spawn(async move {
+                            let hwnd = HWND(hwnd_raw as *mut core::ffi::c_void);
                             let _ = super::menu::handle_pin_menu_action(&label, hwnd, id).await;
                         });
                     }
