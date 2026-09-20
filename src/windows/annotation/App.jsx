@@ -312,10 +312,12 @@ function AnnotationApp() {
     if (!image) return;
     const dpr = window.devicePixelRatio || 1;
     const out = document.createElement('canvas');
-    out.width = image.naturalWidth * dpr;
-    out.height = image.naturalHeight * dpr;
+    // 导出画布必须与原图像素尺寸一致——不能乘 dpr,否则高分屏上产物被
+    // 放大 dpr 倍(1920×1080@2x → 3840×2160,体积 2-4 倍+重采样损质)。
+    // 显示 DPI 只影响屏幕显示,不应烤进输出位图。
+    out.width = image.naturalWidth;
+    out.height = image.naturalHeight;
     const octx = out.getContext('2d');
-    octx.setTransform(dpr, 0, 0, dpr, 0, 0);
     octx.fillStyle = '#ffffff';
     octx.fillRect(0, 0, image.naturalWidth, image.naturalHeight);
     octx.drawImage(image, 0, 0, image.naturalWidth, image.naturalHeight);
@@ -323,7 +325,7 @@ function AnnotationApp() {
     // 原图像素：图像坐标 = (显示坐标 - 居中偏移) / scale，设备像素再乘 dpr，
     // 故平移项符号为负（加号会让标注向右下漂移 offset/scale 像素）。
     const { scale, offsetX, offsetY } = displayTransformRef.current;
-    octx.setTransform(dpr / scale, 0, 0, dpr / scale, -offsetX * (dpr / scale), -offsetY * (dpr / scale));
+    octx.setTransform(1 / scale, 0, 0, 1 / scale, -offsetX / scale, -offsetY / scale);
     drawLayersToContext(octx, layers, image.naturalWidth, image.naturalHeight);
     const base64 = out.toDataURL('image/png').split(',')[1];
     try {

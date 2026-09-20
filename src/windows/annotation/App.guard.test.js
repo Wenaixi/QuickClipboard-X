@@ -31,10 +31,32 @@ test('编辑器保存逆映射平移项必须为负(居中偏移漂移符号)', 
   // 见红。
   const transformLine = appSource
     .split('\n')
-    .find((line) => line.includes('setTransform(dpr / scale'));
+    .find((line) => line.includes('setTransform(1 / scale'));
   assert.ok(transformLine, '必须存在逆映射 setTransform 行');
   assert.ok(transformLine.includes('-offsetX'), 'X 平移项必须带负号');
   assert.ok(transformLine.includes('-offsetY'), 'Y 平移项必须带负号');
+});
+
+test('编辑器保存导出画布必须为原图像素尺寸(不得乘 dpr 超采样放大)', () => {
+  // D-新1:r3 起 out.width = naturalWidth * dpr 把显示 DPI 烤进输出,
+  // 高分屏标注产物被放大 dpr² 倍(体积 2-4 倍+重采样损质)。护栏锁死
+  // 导出尺寸必须与原图一致,防 dpr 乘法复活。
+  assert.ok(
+    appSource.includes('out.width = image.naturalWidth;'),
+    '导出画布宽必须等于原图宽(乘 dpr 会让产物放大)',
+  );
+  assert.ok(
+    appSource.includes('out.height = image.naturalHeight;'),
+    '导出画布高必须等于原图高',
+  );
+  const exportSeg = appSource.slice(
+    appSource.indexOf('out.width = image.naturalWidth;'),
+    appSource.indexOf('drawLayersToContext'),
+  );
+  assert.ok(
+    !exportSeg.includes('naturalWidth * dpr') && !exportSeg.includes('naturalHeight * dpr'),
+    '导出尺寸不得出现 ×dpr(超采样放大复活)',
+  );
 });
 
 test('编辑器保存失败必须提示并保持窗口打开,不得无条件关窗', () => {
