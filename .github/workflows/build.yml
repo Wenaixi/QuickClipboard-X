@@ -52,6 +52,12 @@ jobs:
       - name: Run mouse-guard tests
         run: npm run test:mouse-guard
 
+      - name: Run text-editor tests
+        run: npm run test:text-editor
+
+      - name: Run clipboard-content tests
+        run: npm run test:clipboard-content
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
