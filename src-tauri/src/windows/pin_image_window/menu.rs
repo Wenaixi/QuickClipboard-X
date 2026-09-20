@@ -166,7 +166,7 @@ pub(crate) fn show_pin_menu(hwnd: HWND, label: &str) -> Result<usize, String> {
 /// 处理菜单选中的动作。label 为贴图窗口标签。透明度档与开关切换写回
 /// 每窗口状态(GDI 状态表),同时落盘共享偏好设置文件(跨窗口一致)。
 /// 由 WM_RBUTTONUP 在 UI 线程调用,状态写入轻量无阻塞。
-pub(crate) fn handle_pin_menu_action(label: &str, hwnd: HWND, id: usize) -> Result<(), String> {
+pub(crate) async fn handle_pin_menu_action(label: &str, hwnd: HWND, id: usize) -> Result<(), String> {
     if let Some(opacity) = opacity_from_id(id) {
         let mut state = gdi::pin_state(label);
         state.opacity = opacity as u8;

@@ -33,7 +33,7 @@ pub fn open_annotation_window(app: &AppHandle, image_path: &str) -> Result<(), S
             .map_err(|error| format!("推送编辑器加载事件失败: {error}"))?;
         return Ok(());
     }
-    let window = WebviewWindowBuilder::new(app, ANNOTATION_WINDOW_LABEL, WebviewUrl::App("windows/annotation/index.html".into()))
+    let _window = WebviewWindowBuilder::new(app, ANNOTATION_WINDOW_LABEL, WebviewUrl::App("windows/annotation/index.html".into()))
         .title("图像编辑器")
         .decorations(false)
         .transparent(true)

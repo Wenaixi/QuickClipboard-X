@@ -431,7 +431,14 @@ unsafe extern "system" fn pin_image_window_proc(
             };
             if let Ok(id) = super::menu::show_pin_menu(hwnd, &label) {
                 if id != 0 {
-                    let _ = super::menu::handle_pin_menu_action(&label, hwnd, id);
+                    // 自定义透明度经 input_dialog 数字输入框异步等待用户输入,
+                    // 动作分发在异步任务中执行,不阻塞消息泵。
+                    if let Some(app) = super::menu::gdi::app_handle() {
+                        let label = label.clone();
+                        let _ = tauri::async_runtime::spawn(async move {
+                            let _ = super::menu::handle_pin_menu_action(&label, hwnd, id).await;
+                        });
+                    }
                 }
             }
             LRESULT(0)
@@ -551,7 +558,7 @@ mod tests {
         let fail_pos = body.find("if ok.is_err()").expect("缺少坐标失败分支");
         let ulw_end = {
             let u = body.find("ULW_ALPHA").expect("缺少 UpdateLayeredWindow");
-            body.find("};", u).expect("缺少 ULW 调用结束")
+            body[u..].find("};").map(|i| u + i).expect("缺少 ULW 调用结束")
         };
         let fail_seg = &body[fail_pos..ulw_end];
         assert!(
