@@ -21,6 +21,17 @@ pub async fn lan_stop_http_server() {
     lan::http_server::stop().await
 }
 
+// 拉取落库后触发主窗口刷新:与对端下推(http_server)同款 mark+emit,
+// 保证用户看到 pulled N 条时历史/收藏/分组侧栏同步变化。
+pub fn mark_pull_refresh(app: &tauri::AppHandle) {
+    crate::windows::main_window::mark_clipboard_refresh_pending();
+    crate::windows::main_window::mark_favorites_refresh_pending();
+    crate::windows::main_window::mark_groups_refresh_pending();
+    if crate::windows::main_window::is_main_window_visible_for_updates() {
+        let _ = crate::commands::window::emit_main_window_refresh_needed_event(app);
+    }
+}
+
 pub fn lan_refresh_pairing_code() -> lan::PairingCodeView {
     lan::runtime::refresh_pairing_code()
 }

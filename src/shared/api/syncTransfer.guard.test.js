@@ -39,3 +39,14 @@ test('后端命令必须成对注册(pull/push 均在 invoke_handler)', () => {
   assert.ok(lib.includes('commands::sync_transfer_lan_push_to_peer'), '缺 push 注册');
   assert.ok(lib.includes('commands::sync_transfer_lan_pull_to_peer'), '缺 pull 注册（命令未挂进 handler）');
 });
+
+test('pull 拉回数据后必须触发主窗口刷新(mark+emit 成对)', () => {
+  const cmd = bare(`${root}/src-tauri/src/commands/sync_transfer.rs`);
+  assert.ok(cmd.includes('mark_pull_refresh'), 'pull 命令必须调用 mark_pull_refresh(拉回数据后刷主窗口)');
+  assert.ok(cmd.includes('report.pulled > 0'), '拉回空数据不得触发刷新');
+  const svc = bare(`${root}/src-tauri/src/services/sync_transfer/mod.rs`);
+  assert.ok(svc.includes('mark_clipboard_refresh_pending'), 'mark_pull_refresh 必须 mark 剪贴板刷新');
+  assert.ok(svc.includes('mark_favorites_refresh_pending'), 'mark_pull_refresh 必须 mark 收藏刷新');
+  assert.ok(svc.includes('mark_groups_refresh_pending'), 'mark_pull_refresh 必须 mark 分组刷新');
+  assert.ok(svc.includes('emit_main_window_refresh_needed_event'), 'mark_pull_refresh 必须 emit 主窗口刷新事件');
+});

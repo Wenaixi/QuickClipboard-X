@@ -79,6 +79,13 @@ pub async fn sync_transfer_lan_push_to_peer(device_id: String) -> Result<service
 // pull.rs 实现完整(增量 since + 全表补图 + tombstone),此前仅有服务层
 // 定义而无命令/前端入口,属"实现完成待接线"。
 #[tauri::command]
-pub async fn sync_transfer_lan_pull_to_peer(device_id: String) -> Result<services::webdav_sync::SyncReport, String> {
-    services::sync_transfer::lan_pull_from_peer(&device_id).await
+pub async fn sync_transfer_lan_pull_to_peer(device_id: String, app: tauri::AppHandle) -> Result<services::webdav_sync::SyncReport, String> {
+    let report = services::sync_transfer::lan_pull_from_peer(&device_id).await?;
+    // 拉回的数据已落库,主窗口必须刷新——否则用户在设置面板看到 pulled N 条
+    // 但历史/收藏/分组侧栏零变化(对称面:对端下推/WebDAV 下载都会 mark+emit,
+    // 唯独手动拉取此前不刷新)。拉回空数据无需触发。
+    if report.pulled > 0 {
+        services::sync_transfer::mark_pull_refresh(&app);
+    }
+    Ok(report)
 }
