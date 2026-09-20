@@ -185,7 +185,16 @@ async fn handle_client(mut stream: tokio::net::TcpStream, remote_addr: std::net:
             receive_transfer_file_stream(&request, &mut stream, &app).await
         }
     } else {
-        if let Err(message) = read_request_body(&mut request, &mut stream, MAX_REQUEST_BODY_SIZE).await {
+        // 图片 PUT 与 fetch 侧对称限流:save_file 已有 64MB 上限但那是写盘前
+        // 检查,晚于读请求体——先按 64MB 限量读入,超限即在读阶段拒绝,
+        // 不占满内存再拒写(与 http_client 流式限量对称,防对端下推大图
+        // 占满本机内存)。其余接口(records/groups/tombstones)仍走 512MB。
+        let body_limit = if request.method == "PUT" && request.path.starts_with(FILES_PREFIX) {
+            MAX_PEER_IMAGE_BODY_BYTES
+        } else {
+            MAX_REQUEST_BODY_SIZE
+        };
+        if let Err(message) = read_request_body(&mut request, &mut stream, body_limit).await {
             // 读请求体失败(超时/超限/断线)也要写错误响应,对端才能
             // 明确收到 400/413 而非只看到连接被直接关闭。
             return write_response(
@@ -774,8 +783,8 @@ mod read_body_error_response_guard {
         let src = strip_line_comments(&source_file("src/services/sync_transfer/lan/http_server.rs"));
         let body = fn_body(&src, "handle_client");
         let read_pos = body
-            .find("read_request_body(&mut request, &mut stream, MAX_REQUEST_BODY_SIZE)")
-            .unwrap_or_else(|| panic!("handle_client 必须先读请求体"));
+            .find("read_request_body(&mut request, &mut stream, body_limit)")
+            .unwrap_or_else(|| panic!("handle_client 必须先读请求体(body_limit)"));
         let tail = &body[read_pos..];
         let match_pos = tail
             .find("match (request.method.as_str()")
@@ -812,6 +821,25 @@ mod save_file_image_limit_guard {
         assert!(
             limit_pos < write_pos,
             "64MB 上限检查必须先于 save_image_file 写盘"
+        );
+    }
+
+    // 图片 PUT 读请求体阶段限流护栏:handle_client 对 FILES_PREFIX PUT
+    // 必须按 MAX_PEER_IMAGE_BODY_BYTES 限量读入(而非 512MB)——否则对端
+    // 下推 100MB 图先占满本机内存再拒写,与 http_client 流式限量不对称。
+    #[test]
+    fn read_request_body_uses_peer_image_limit_for_image_puts() {
+        let src = strip_line_comments(&source_file("src/services/sync_transfer/lan/http_server.rs"));
+        let body = fn_body(&src, "handle_client");
+        let limit_var_pos = body
+            .find("MAX_PEER_IMAGE_BODY_BYTES")
+            .expect("handle_client 必须按 MAX_PEER_IMAGE_BODY_BYTES 限量读请求体");
+        let read_pos = body
+            .find("read_request_body(&mut request, &mut stream, body_limit)")
+            .expect("读请求体必须用 body_limit 分支限量");
+        assert!(
+            limit_var_pos < read_pos,
+            "FILES_PREFIX PUT 必须先用 MAX_PEER_IMAGE_BODY_BYTES 选定 body_limit 再读请求体"
         );
     }
 }
