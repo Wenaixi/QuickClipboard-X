@@ -758,6 +758,22 @@ pub fn add_clipboard_to_favorites(clipboard_id: i64, group_name: Option<String>)
             return Ok((existing, false));
         }
 
+        // 新收藏分支:目标分组必须真实存在(「全部」哨兵豁免,与迁移分支
+        // 同对称)——否则 INSERT 会落孤儿分组(UI 不可见但在库/同步)。
+        let new_target = group_name.clone();
+        if new_target != "全部" {
+            let group_exists = conn.query_row(
+                "SELECT 1 FROM groups WHERE name = ?",
+                params![&new_target],
+                |_| Ok(()),
+            ).optional()?.is_some();
+            if !group_exists {
+                return Err(rusqlite::Error::InvalidParameterName(
+                    "目标分组不存在".to_string(),
+                ));
+            }
+        }
+
         let (content, html_content, content_type, image_id, char_count) = conn.query_row(
             "SELECT content, html_content, content_type, image_id, char_count FROM clipboard WHERE id = ?",
             params![clipboard_id],
@@ -995,8 +1011,25 @@ pub fn delete_favorites(ids: &[String]) -> Result<(), String> {
 // 添加收藏项
 pub fn add_favorite(title: String, content: String, group_name: Option<String>) -> Result<FavoriteItem, String> {
     use uuid::Uuid;
-    
+
     let group_name = group_name.unwrap_or_else(|| "全部".to_string());
+    // 目标分组必须真实存在(「全部」哨兵由前端 UI 构造、不在 groups 表,
+    // 豁免;其余分组名校验与 move_favorite_to_group 同对称)——收藏不得
+    // 落入不存在的分组(UI 不可见但在库/同步的数据孤儿)。
+    if group_name != "全部" {
+        let exists = with_connection(|conn| {
+            conn.query_row(
+                "SELECT 1 FROM groups WHERE name = ?",
+                params![&group_name],
+                |_| Ok(()),
+            ).optional().map(|o| o.is_some())
+        })??;
+        if !exists {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "目标分组不存在".to_string(),
+            ));
+        }
+    }
     let (id, now) = (Uuid::new_v4().to_string(), chrono::Local::now().timestamp());
 
     let char_count = Some(content.chars().count() as i64);
@@ -1032,7 +1065,23 @@ pub fn update_favorite(
     html_content: Option<String>,
 ) -> Result<FavoriteItem, String> {
     let group_name = group_name.unwrap_or_else(|| "全部".to_string());
-    
+    // 目标分组必须真实存在(「全部」哨兵豁免,其余校验与 add_favorite/
+    // move_favorite_to_group 同对称)——收藏不得落入不存在的分组。
+    if group_name != "全部" {
+        let exists = with_connection(|conn| {
+            conn.query_row(
+                "SELECT 1 FROM groups WHERE name = ?",
+                params![&group_name],
+                |_| Ok(()),
+            ).optional().map(|o| o.is_some())
+        })??;
+        if !exists {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "目标分组不存在".to_string(),
+            ));
+        }
+    }
+
     with_connection(|conn| {
         // UPDATE + 旧格式 DELETE 必须在同一事务——旧实现在闭包外另起
         // 连接 delete_clipboard_data_items,第二步失败时 content 已更新而旧 raw
@@ -1353,6 +1402,37 @@ mod content_type_like_tests {
             update_pos < insert_pos,
             "迁移 UPDATE 必须先于新收藏 INSERT 分支(避免重复收藏)"
         );
+        // 新收藏分支也必须校验目标分组存在(INSERT 在 SELECT 之后)
+        let new_target_pos = tail
+            .find("let new_target = group_name.clone()")
+            .expect("新收藏分支必须声明 new_target 并校验分组");
+        let insert2_pos = tail
+            .find("INSERT INTO favorites")
+            .expect("新收藏分支必须有 INSERT");
+        assert!(
+            new_target_pos < insert2_pos,
+            "新收藏分支分组校验必须先于 INSERT(否则落孤儿分组)"
+        );
+    }
+
+    // add_favorite/update_favorite 手动添加/更新收藏:目标分组必须存在
+    // (「全部」豁免,与 move/add_clipboard_to_favorites 同对称)。
+    #[test]
+    fn add_and_update_favorite_validate_target_group_exists() {
+        use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+        let src = strip_line_comments(&source_file("src/services/database/favorites.rs"));
+        // add_favorite:校验先于 INSERT
+        let add = fn_body(&src, "fn add_favorite");
+        let add_select = add.find("SELECT 1 FROM groups WHERE name = ?").expect("add_favorite 必须校验分组");
+        let add_insert = add.find("INSERT INTO favorites").expect("add_favorite 必须有 INSERT");
+        assert!(add_select < add_insert, "add_favorite 分组校验必须先于 INSERT");
+        assert!(add.contains("group_name != \"全部\""), "add_favorite 必须豁免「全部」哨兵");
+        // update_favorite:校验先于 UPDATE
+        let upd = fn_body(&src, "fn update_favorite");
+        let upd_select = upd.find("SELECT 1 FROM groups WHERE name = ?").expect("update_favorite 必须校验分组");
+        let upd_update = upd.find("UPDATE favorites").expect("update_favorite 必须有 UPDATE");
+        assert!(upd_select < upd_update, "update_favorite 分组校验必须先于 UPDATE");
+        assert!(upd.contains("group_name != \"全部\""), "update_favorite 必须豁免「全部」哨兵");
     }
 
     // move_favorite_to_group 必须校验目标分组存在:收藏不得落入不存在的
