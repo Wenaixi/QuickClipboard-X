@@ -426,21 +426,34 @@ pub fn import_data_zip(zip_path: PathBuf, mode: &str) -> Result<String, String> 
             backup_full_zip(&target_dir).map_err(|e| format!("目标目录备份失败,已中止替换: {}", e))?;
             close_database();
             let result = (|| -> Result<(), String> {
+                // 四目录"先删后拷"必须收进"导入包存在该目录"守卫内:替换导入
+                // 的包可能不含某目录(旧版本导出只含 db+settings,或导出时该目录
+                // 为空导致 add_dir_to_zip 不写条目),此时无条件删目标目录会让
+                // 现有数据凭空消失(备份在 backups/ 但 UI 无提示)。缺条目时保留
+                // 目标侧既有数据,只补导入包里确实有的内容。
                 let target_images = target_dir.join("clipboard_images");
-                if target_images.exists() { fs::remove_dir_all(&target_images).map_err(|e| e.to_string())?; }
-                if imported_images.exists() { copy_dir_all(&imported_images, &target_images)?; }
+                if imported_images.exists() {
+                    if target_images.exists() { fs::remove_dir_all(&target_images).map_err(|e| e.to_string())?; }
+                    copy_dir_all(&imported_images, &target_images)?;
+                }
                 let target_image_library = target_dir.join("image_library");
-                if target_image_library.exists() { fs::remove_dir_all(&target_image_library).map_err(|e| e.to_string())?; }
-                if imported_image_library.exists() { copy_dir_all(&imported_image_library, &target_image_library)?; }
+                if imported_image_library.exists() {
+                    if target_image_library.exists() { fs::remove_dir_all(&target_image_library).map_err(|e| e.to_string())?; }
+                    copy_dir_all(&imported_image_library, &target_image_library)?;
+                }
                 let target_app_icons = target_dir.join("app_icons");
-                if target_app_icons.exists() { fs::remove_dir_all(&target_app_icons).map_err(|e| e.to_string())?; }
-                if imported_app_icons.exists() { copy_dir_all(&imported_app_icons, &target_app_icons)?; }
+                if imported_app_icons.exists() {
+                    if target_app_icons.exists() { fs::remove_dir_all(&target_app_icons).map_err(|e| e.to_string())?; }
+                    copy_dir_all(&imported_app_icons, &target_app_icons)?;
+                }
                 // pin_images 与 clipboard_images/image_library 同列——导出已收,
                 // 替换导入漏收会让贴图文件成为"数据要清但备份没有"的孤儿(类比
                 // 备份目录清单),必须与目标库同清同补。
                 let target_pin_images = target_dir.join("pin_images");
-                if target_pin_images.exists() { fs::remove_dir_all(&target_pin_images).map_err(|e| e.to_string())?; }
-                if imported_pin_images.exists() { copy_dir_all(&imported_pin_images, &target_pin_images)?; }
+                if imported_pin_images.exists() {
+                    if target_pin_images.exists() { fs::remove_dir_all(&target_pin_images).map_err(|e| e.to_string())?; }
+                    copy_dir_all(&imported_pin_images, &target_pin_images)?;
+                }
 
                 let src_db = temp_root.join("quickclipboard.db");
                 let dst_db = target_dir.join("quickclipboard.db");
@@ -1448,6 +1461,35 @@ mod tests {
             !close_to_finish.contains("init_database"),
             "init_database 必须位于闭包之后(错误路径也能执行到)"
         );
+    }
+
+    // 替换导入缺目录不清空:import_data_zip 的 replace 分支"先删后拷"必须收进
+    // "导入包存在该目录"守卫内——导入包可能不含某目录(旧版本导出只含 db+
+    // settings,或导出时该目录为空导致 add_dir_to_zip 不写条目),此时无条件删
+    // 目标目录会让现有数据凭空消失(备份有但 UI 无提示)。缺条目时保留既有数据。
+    #[test]
+    fn import_replace_skips_dir_cleanup_when_zip_lacks_it() {
+        let src = strip_line_comments(&source_file("src/services/data_management/mod.rs"));
+        let import = fn_body(&src, "import_data_zip");
+        // 四目录:删除目标目录必须发生在"导入包存在该目录"检查之后。
+        // 变量名以 imported_ 为前缀接目录变量后缀(images/image_library/...)。
+        for (dir_var, target) in [
+            ("images", "target_images"),
+            ("image_library", "target_image_library"),
+            ("app_icons", "target_app_icons"),
+            ("pin_images", "target_pin_images"),
+        ] {
+            let guard_pos = import
+                .find(&format!("imported_{dir_var}.exists()"))
+                .unwrap_or_else(|| panic!("replace 分支必须检查 imported_{dir_var}"));
+            let remove_pos = import
+                .find(&format!("remove_dir_all(&{target})"))
+                .unwrap_or_else(|| panic!("replace 分支必须有 {target} 的删除"));
+            assert!(
+                guard_pos < remove_pos,
+                "replace 分支删除 {target} 前必须确认导入包含 {dir_var},缺条目时不得清空现有数据"
+            );
+        }
     }
 
     // 换存储目录关库早返不重开:change_storage_dir_internal close_database 后
