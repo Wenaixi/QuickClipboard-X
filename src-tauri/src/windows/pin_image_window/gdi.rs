@@ -24,7 +24,7 @@ use std::sync::Mutex;
 use once_cell::sync::OnceCell;
 
 use windows::core::PCWSTR;
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM};
+use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, DIB_RGB_COLORS, GetDC,
     ReleaseDC, SelectObject, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION, AC_SRC_ALPHA,
@@ -43,9 +43,9 @@ pub(crate) const PIN_IMAGE_WINDOW_CLASS: &str = "QuickClipboardPinImageWindow";
 
 /// 窗口句柄 ↔ 标签映射:GDI 窗口不经 tauri Manager,查找贴图窗口一律走此表。
 /// 与 PIN_IMAGE_DATA_MAP(数据表)并存:本表只存 HWND,数据仍在数据表。
-static PIN_IMAGE_HWND_MAP: OnceCell<Mutex<HashMap<String, HWND>>> = OnceCell::new();
+static PIN_IMAGE_HWND_MAP: OnceCell<Mutex<HashMap<String, isize>>> = OnceCell::new();
 
-fn lock_hwnd_map() -> std::sync::MutexGuard<'static, HashMap<String, HWND>> {
+fn lock_hwnd_map() -> std::sync::MutexGuard<'static, HashMap<String, isize>> {
     PIN_IMAGE_HWND_MAP
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
@@ -168,7 +168,7 @@ pub(crate) fn register_window_class() -> Result<(), String> {
         let class_name: Vec<u16> = PIN_IMAGE_WINDOW_CLASS.encode_utf16().collect();
         let wc = WNDCLASSW {
             lpfnWndProc: Some(pin_image_window_proc),
-            hInstance: instance,
+            hInstance: HINSTANCE(instance.0),
             lpszClassName: PCWSTR(class_name.as_ptr()),
             ..Default::default()
         };
@@ -215,6 +215,11 @@ pub(crate) fn create_gdi_window(
         .or_insert_with(|| pin_state(label));
 
     let hwnd = unsafe {
+        // GetModuleHandleW 返回 HMODULE,CreateWindowExW 需要 HINSTANCE
+        // (两者底层都是 *mut c_void 但属不同新类型,故需显式取 .0 再构造)
+        let instance = GetModuleHandleW(None)
+            .map_err(|e| format!("获取模块句柄失败: {}", e))?;
+        // HWND 参数:CreateWindowExW 期望 Option<HWND>,句柄 0 表示不用父窗
         CreateWindowExW(
             ex_style,
             PCWSTR(class_name.as_ptr()),
@@ -224,15 +229,15 @@ pub(crate) fn create_gdi_window(
             y,
             width as i32,
             height as i32,
-            HWND::default(),
             None,
-            Some(GetModuleHandleW(None).map_err(|e| format!("获取模块句柄失败: {}", e))?),
+            None,
+            Some(HINSTANCE(instance.0)),
             Some(std::ptr::null()),
         )
         .map_err(|e| format!("创建贴图窗口失败: {}", e))?
     };
 
-    lock_hwnd_map().insert(label.to_string(), hwnd);
+    lock_hwnd_map().insert(label.to_string(), hwnd.0 as isize);
     Ok(hwnd)
 }
 
@@ -260,15 +265,9 @@ pub(crate) fn render_image(
         return Err("贴图尺寸无效".to_string());
     }
 
-    let screen_dc = unsafe { GetDC(None) };
-    if screen_dc.is_invalid() {
-        return Err("获取屏幕 DC 失败".to_string());
-    }
-    let mem_dc = unsafe { CreateCompatibleDC(Some(screen_dc)) };
-    if mem_dc.is_invalid() {
-        unsafe { ReleaseDC(None, screen_dc) };
-        return Err("创建内存 DC 失败".to_string());
-    }
+    let screen_dc = unsafe { GetDC(None) }.map_err(|e| format!("获取屏幕 DC 失败: {}", e))?;
+    let mem_dc = unsafe { CreateCompatibleDC(Some(screen_dc)) }
+        .map_err(|e| format!("创建内存 DC 失败: {}", e))?;
 
     // 32bpp 自顶向下 DIB(负高度 = 顶行在内存首行,与 RGBA 行序一致)
     let mut bmi = BITMAPINFO::default();
@@ -283,22 +282,14 @@ pub(crate) fn render_image(
     };
 
     let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
-    let dib = unsafe {
-        CreateDIBSection(
-            Some(mem_dc),
-            &bmi,
-            DIB_RGB_COLORS,
-            &mut bits,
-            None,
-            0,
-        )
-    };
-    if dib.is_invalid() || bits.is_null() {
+    let dib = unsafe { CreateDIBSection(Some(mem_dc), &bmi, DIB_RGB_COLORS, &mut bits, None, 0) }
+        .map_err(|e| format!("创建 DIB 位图失败: {}", e))?;
+    if bits.is_null() {
         unsafe {
             DeleteDC(mem_dc);
             ReleaseDC(None, screen_dc);
         }
-        return Err("创建 DIB 位图失败".to_string());
+        return Err("创建 DIB 位图失败: DIB 数据指针为空".to_string());
     }
 
     // 非预乘 RGBA → 预乘 BGRA,逐像素写入 DIB
@@ -317,8 +308,20 @@ pub(crate) fn render_image(
         *d = (a << 24) | (pr << 16) | (pg << 8) | pb;
     }
 
-    let old = unsafe { SelectObject(mem_dc, HGDIOBJ(dib.0)) };
+    let old = unsafe { SelectObject(mem_dc, HGDIOBJ(dib)) };
 
+    // 渲染目标位置取当前窗口在屏幕上的坐标:渲染需以窗口物理原点为准
+    let window_rect = {
+        let mut rect = windows::Win32::UI::WindowsAndMessaging::RECT::default();
+        let ok = unsafe {
+            windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut rect)
+        };
+        if ok.is_err() {
+            return Err("读取贴图窗口坐标失败".to_string());
+        }
+        rect
+    };
+    let (x, y) = (window_rect.left, window_rect.top);
     let mut dst_pos = POINT { x, y };
     let mut size = SIZE { cx: w, cy: h };
     let mut src_pos = POINT { x: 0, y: 0 };
@@ -345,8 +348,8 @@ pub(crate) fn render_image(
 
     // 句柄进出必须成对:恢复旧位图 → 删 DIB → 删内存 DC → 释放屏幕 DC
     unsafe {
-        SelectObject(mem_dc, old);
-        DeleteObject(dib);
+        SelectObject(mem_dc, old).map_err(|e| format!("恢复旧位图失败: {}", e))?;
+        DeleteObject(HGDIOBJ(dib)).map_err(|e| format!("删除 DIB 位图失败: {}", e))?;
         DeleteDC(mem_dc);
         ReleaseDC(None, screen_dc);
     }
@@ -386,6 +389,8 @@ pub(crate) fn toggle_topmost(hwnd: HWND) -> Result<(), String> {
 /// 查询窗口是否置顶
 pub(crate) fn is_topmost(hwnd: HWND) -> bool {
     use windows::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW, GWL_EXSTYLE, WS_EX_TOPMOST};
+    // 置顶查询:GetWindowLongPtrW 失败(0 返回 + last_error)按 false 处理,
+    // 不 panic 不误报置顶
     let ex = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) };
     ex & (WS_EX_TOPMOST.0 as isize) != 0
 }
@@ -420,7 +425,8 @@ unsafe extern "system" fn pin_image_window_proc(
             LRESULT(0)
         }
         WM_DESTROY => {
-            lock_hwnd_map().retain(|_, h| *h != hwnd);
+            let hwnd_val = hwnd.0 as isize;
+            lock_hwnd_map().retain(|_, h| *h != hwnd_val);
             // 窗口销毁时按标签移除状态(能反查则精确移除)
             if let Some(label) = label_for_hwnd(hwnd) {
                 lock_state_map().remove(&label);
@@ -433,23 +439,25 @@ unsafe extern "system" fn pin_image_window_proc(
 
 /// 按窗口句柄反查标签
 fn label_for_hwnd(hwnd: HWND) -> Option<String> {
+    let hwnd_val = hwnd.0 as isize;
     lock_hwnd_map()
         .iter()
-        .find(|(_, h)| **h == hwnd)
+        .find(|(_, h)| **h == hwnd_val)
         .map(|(label, _)| label.clone())
 }
 
 /// 供外部按标签查询窗口句柄(close/save/动画共用)
 pub(crate) fn find_gdi_window(label: &str) -> Option<HWND> {
-    lock_hwnd_map().get(label).copied()
+    lock_hwnd_map()
+        .get(label)
+        .map(|hwnd| HWND(hwnd.clone() as usize as *mut core::ffi::c_void))
 }
 
 /// 收集全部贴图窗口句柄(focus.rs 排除表用——GDI 窗口不进 tauri webview_windows)
 pub fn collect_pin_image_hwnds() -> Vec<isize> {
     lock_hwnd_map()
         .values()
-        .filter(|hwnd| !hwnd.is_invalid())
-        .map(|hwnd| hwnd.0 as isize)
+        .map(|hwnd| *hwnd)
         .collect()
 }
 

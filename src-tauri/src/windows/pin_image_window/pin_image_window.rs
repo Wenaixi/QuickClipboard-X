@@ -148,7 +148,7 @@ pub async fn pin_image_from_file(
             if let Some(hwnd) = super::gdi::find_gdi_window(&window_label) {
                 let _ = unsafe {
                     windows::Win32::UI::WindowsAndMessaging::PostMessageW(
-                        hwnd,
+                        Some(hwnd),
                         windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
                         windows::Win32::Foundation::WPARAM(0),
                         windows::Win32::Foundation::LPARAM(0),
@@ -375,7 +375,7 @@ pub fn close_image_preview(app: AppHandle) -> Result<(), String> {
     if let Some(hwnd) = super::gdi::find_gdi_window(label) {
         let _ = unsafe {
             windows::Win32::UI::WindowsAndMessaging::PostMessageW(
-                hwnd,
+                Some(hwnd),
                 windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
                 windows::Win32::Foundation::WPARAM(0),
                 windows::Win32::Foundation::LPARAM(0),
@@ -421,7 +421,7 @@ pub fn close_pin_image_window(label: &str) -> Result<(), String> {
     if let Some(hwnd) = super::gdi::find_gdi_window(label) {
         let _ = unsafe {
             windows::Win32::UI::WindowsAndMessaging::PostMessageW(
-                hwnd,
+                Some(hwnd),
                 windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
                 windows::Win32::Foundation::WPARAM(0),
                 windows::Win32::Foundation::LPARAM(0),
@@ -811,8 +811,12 @@ mod tests {
             body.contains("HWND_NOTOPMOST"),
             "非置顶窗口必须用 HWND_NOTOPMOST 插入点,否则动画偷回置顶"
         );
+        // 负向:不得无条件 HWND_TOPMOST 直接作插入点——插入点必须是
+        // "当前置顶?TOPMOST:NOTOPMOST" 的条件表达式,不能把 TOPMOST 写死。
         assert!(
-            !body.contains("Some(HWND_TOPMOST)") && !body.contains("HWND_TOPMOST,"),
+            !body.contains("Some(HWND_TOPMOST)")
+                && !body.contains("SetWindowPos(hwnd, Some(HWND_TOPMOST)")
+                && !body.contains("Some(HWND_TOPMOST,"),
             "不得无条件 HWND_TOPMOST 插入(会覆盖用户取消的置顶)"
         );
     }

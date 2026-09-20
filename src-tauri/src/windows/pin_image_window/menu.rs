@@ -13,10 +13,10 @@
 // 两者与 lock_position/restore_mode/opacity 同进每窗口状态,由全局设置
 // 文件持久化(gdi_settings)。
 
-use windows::Win32::Foundation::{HMENU, HWND, POINT};
+use windows::Win32::Foundation::{HWND, POINT};
 use windows::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, MF_CHECKED, MF_POPUP, MF_SEPARATOR,
-    MF_STRING, MENU_ITEM_FLAGS, TrackPopupMenu, TPM_RETURNCMD,
+    AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, HMENU, MF_CHECKED, MF_POPUP,
+    MF_SEPARATOR, MF_STRING, MENU_ITEM_FLAGS, TrackPopupMenu, TPM_RETURNCMD,
 };
 
 use super::{gdi, pin_image_window};
@@ -59,7 +59,7 @@ fn opacity_from_id(id: usize) -> Option<u32> {
 fn append(menu: HMENU, flags: MENU_ITEM_FLAGS, id: usize, label: &str) -> Result<(), String> {
     let mut wide: Vec<u16> = label.encode_utf16().collect();
     wide.push(0);
-    unsafe { AppendMenuW(menu, flags, id, wide.as_ptr()) }
+    unsafe { AppendMenuW(menu, flags, id, PCWSTR(wide.as_ptr())) }
         .map_err(|e| format!("追加菜单项失败: {}", e))
 }
 
@@ -178,26 +178,26 @@ pub(crate) fn handle_pin_menu_action(label: &str, hwnd: HWND, id: usize) -> Resu
     }
 
     match id {
-        PinMenuId::ToggleTop as usize => {
+        PinMenuId::ToggleTop => {
             gdi::toggle_topmost(hwnd)?;
             Ok(())
         }
-        PinMenuId::ToggleShadow as usize => {
+        PinMenuId::ToggleShadow => {
             gdi::toggle_state_bool(label, gdi::PinStateFlag::Shadow)?;
             persist_state_preferences(label);
             Ok(())
         }
-        PinMenuId::ToggleLockPosition as usize => {
+        PinMenuId::ToggleLockPosition => {
             gdi::toggle_state_bool(label, gdi::PinStateFlag::LockPosition)?;
             persist_state_preferences(label);
             Ok(())
         }
-        PinMenuId::TogglePixelRender as usize => {
+        PinMenuId::TogglePixelRender => {
             gdi::toggle_state_bool(label, gdi::PinStateFlag::PixelRender)?;
             persist_state_preferences(label);
             Ok(())
         }
-        PinMenuId::ToggleThumbnail as usize => {
+        PinMenuId::ToggleThumbnail => {
             // 缩略图切换:窗口缩放动画到 50x50。完整恢复语义(记录原尺寸/
             // 位置/恢复模式)由交互任务接入,此处保留菜单入口的行为占位。
             let _ = pin_image_window::animate_window_resize(
@@ -205,25 +205,25 @@ pub(crate) fn handle_pin_menu_action(label: &str, hwnd: HWND, id: usize) -> Resu
             );
             Ok(())
         }
-        PinMenuId::RestoreModeFollow as usize => {
+        PinMenuId::RestoreModeFollow => {
             gdi::set_state_str(label, gdi::PinStateFlag::RestoreMode, "follow")?;
             persist_state_preferences(label);
             Ok(())
         }
-        PinMenuId::RestoreModeKeep as usize => {
+        PinMenuId::RestoreModeKeep => {
             gdi::set_state_str(label, gdi::PinStateFlag::RestoreMode, "keep")?;
             persist_state_preferences(label);
             Ok(())
         }
-        PinMenuId::OpacityCustom as usize => {
+        PinMenuId::OpacityCustom => {
             // 自定义透明度经 input_dialog 命令输入;接线持久化前保留占位
             Err("自定义透明度待接线".to_string())
         }
-        PinMenuId::Copy as usize => {
+        PinMenuId::Copy => {
             let path = pin_image_window::pin_image_file_path(label)?;
             crate::commands::copy_image_to_clipboard(path)
         }
-        PinMenuId::SaveAs as usize => {
+        PinMenuId::SaveAs => {
             if let Some(app) = gdi::app_handle() {
                 let label = label.to_string();
                 tauri::async_runtime::spawn(async move {
@@ -234,7 +234,7 @@ pub(crate) fn handle_pin_menu_action(label: &str, hwnd: HWND, id: usize) -> Resu
                 Err("AppHandle 未初始化".to_string())
             }
         }
-        PinMenuId::Close as usize => pin_image_window::close_pin_image_window(label),
+        PinMenuId::Close => pin_image_window::close_pin_image_window(label),
         _ => Err("未知菜单项".to_string()),
     }
 }
