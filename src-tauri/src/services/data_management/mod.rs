@@ -1308,10 +1308,21 @@ pub fn export_data_zip(target_path: PathBuf) -> Result<PathBuf, String> {
         // 清空这些目录,导出若缺它们,换机恢复时图片数据永久丢失(备份里有,
         // 但用户主动导出迁移时备份不随 zip 走)。统一走 add_dir_to_zip 递归,
         // 禁止回归成顶层 read_dir 平铺(图库按分组子目录存储)。
-        add_dir_to_zip(&images_dir, &images_dir, "clipboard_images", &mut zip, options)?;
-        add_dir_to_zip(&image_library_dir, &image_library_dir, "image_library", &mut zip, options)?;
-        add_dir_to_zip(&pin_images_dir, &pin_images_dir, "pin_images", &mut zip, options)?;
-        add_dir_to_zip(&app_icons_dir, &app_icons_dir, "app_icons", &mut zip, options)?;
+        // 各目录可能尚未创建(全新安装用户从未复制过图片/贴图/图库/图标,
+        // 懒创建只在各自首次使用方发生),read_dir 对不存在目录返回 Err 会
+        // 让导出整体失败——与 backup_full_zip 同构,逐个 exists() 守卫。
+        if images_dir.exists() {
+            add_dir_to_zip(&images_dir, &images_dir, "clipboard_images", &mut zip, options)?;
+        }
+        if image_library_dir.exists() {
+            add_dir_to_zip(&image_library_dir, &image_library_dir, "image_library", &mut zip, options)?;
+        }
+        if pin_images_dir.exists() {
+            add_dir_to_zip(&pin_images_dir, &pin_images_dir, "pin_images", &mut zip, options)?;
+        }
+        if app_icons_dir.exists() {
+            add_dir_to_zip(&app_icons_dir, &app_icons_dir, "app_icons", &mut zip, options)?;
+        }
 
         zip.finish().map_err(|e| e.to_string())?;
         Ok(())
@@ -1402,6 +1413,16 @@ mod tests {
             .find("close_database()")
             .expect("export 必须先关库");
         let after_close = &body[close_pos..];
+        // 四目录必须先 exists() 守卫再 add_dir_to_zip:全新用户从未产生过
+        // 图片/图库/贴图/图标时目录不存在,read_dir 返回 Err 会让导出整体
+        // 失败。与 backup_full_zip 同构,禁止无条件调用。
+        for dir in ["images_dir", "image_library_dir", "pin_images_dir", "app_icons_dir"] {
+            assert!(
+                after_close.contains(&format!("if {dir}.exists()")),
+                "导出闭包内 {} 必须先 exists() 守卫再 add_dir_to_zip",
+                dir
+            );
+        }
         // 闭包收敛:关库后必须出现闭包启动
         let closure_pos = after_close
             .find("(|| -> Result<(), String> {")
