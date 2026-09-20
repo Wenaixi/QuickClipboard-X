@@ -931,7 +931,7 @@
       "testDesc": "测试当前翻译配置是否正常工作",
       "testButton": "测试翻译",
       "testSuccess": "AI 翻译配置测试成功",
-      "testFailed": "AI 翻译配置测试失败:{error}"
+      "testFailed": "AI 翻译配置测试失败:{{error}}"
     },
     "quickpaste": {
       "title": "便捷粘贴",

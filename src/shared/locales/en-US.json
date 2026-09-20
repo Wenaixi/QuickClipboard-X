@@ -931,7 +931,7 @@
       "testDesc": "Test if current translation configuration works",
       "testButton": "Test Translation",
       "testSuccess": "AI translation configuration test succeeded",
-      "testFailed": "AI translation configuration test failed:{error}"
+      "testFailed": "AI translation configuration test failed:{{error}}"
     },
     "quickpaste": {
       "title": "Quick Paste",
