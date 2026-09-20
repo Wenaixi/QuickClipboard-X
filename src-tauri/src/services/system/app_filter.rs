@@ -167,6 +167,11 @@ mod windows_impl {
         use windows::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT};
 
         SOURCE_MONITOR_RUNNING.store(false, Ordering::SeqCst);
+        // 停止监控后清空来源缓存:监控线程退出后 WM_CLIPBOARDUPDATE 不再
+        // 回调,若不清缓存,get_clipboard_source 会一直命中旧缓存(应用
+        // 过滤按过期来源判断,过滤失效或误判),直至下次 start 首个回调
+        // 覆盖。清空后 get_clipboard_source 走实时读取兜底。
+        *CLIPBOARD_SOURCE_CACHE.lock() = None;
         let thread_id = SOURCE_MONITOR_THREAD_ID.load(Ordering::SeqCst);
         if thread_id != 0 {
             unsafe {
@@ -620,6 +625,13 @@ mod tests {
         assert!(
             stop_body.contains("SOURCE_MONITOR_THREAD_ID"),
             "停止来源监控必须读取记录的线程 ID 以投递 WM_QUIT"
+        );
+        // 断言目标拼接避免自命中(本测试读整个文件源码,测试自身的断言
+        // 字面也会被扫到——若直接写整串,生产行被删后测试仍假通过)。
+        let cache_clear_literal = ["CLIPBOARD_SOURCE_CACHE", ".lock() = None"].join("");
+        assert!(
+            stop_body.contains(&cache_clear_literal),
+            "停止来源监控必须清空来源缓存,否则停监听期间应用过滤按过期来源误判"
         );
         let start_pos = stripped
             .find("pub fn start_clipboard_source_monitor")
