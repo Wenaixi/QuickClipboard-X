@@ -5,8 +5,17 @@
 
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
+use std::sync::Mutex;
+use once_cell::sync::Lazy;
+
 pub const ANNOTATION_WINDOW_LABEL: &str = "annotation";
 const ANNOTATION_LOAD_EVENT: &str = "annotation:load";
+
+// 待编辑器页面就绪后重放的加载事件缓存:窗口首次创建时页面脚本尚未来
+// 得及注册监听,直接 emit 会因投递即弃而丢失(首开白屏)。照抄截图窗口的
+// window_ready + pending 握手模式:新建窗口缓存 image_path,页面 listen
+// 成功后 invoke annotation_window_ready 触发重放。
+static PENDING_LOAD: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
 
 // 打开编辑器并加载图片文件：窗口已存在则复用并推送加载事件（数据
 // 驱动，不重建 WebView），不存在则新建；文件不存在/非图片时报错。
@@ -18,6 +27,7 @@ pub fn open_annotation_window(app: &AppHandle, image_path: &str) -> Result<(), S
     if let Some(window) = app.get_webview_window(ANNOTATION_WINDOW_LABEL) {
         let _ = window.show();
         let _ = window.set_focus();
+        // 复用路径:窗口页面已就绪(上次已触发 ready),直接 emit。
         window
             .emit(ANNOTATION_LOAD_EVENT, image_path)
             .map_err(|error| format!("推送编辑器加载事件失败: {error}"))?;
@@ -39,9 +49,23 @@ pub fn open_annotation_window(app: &AppHandle, image_path: &str) -> Result<(), S
     // 则聚焦编辑器会被记为 LAST_FOCUS_HWND,恢复焦点把焦点设回编辑器自身。
     #[cfg(windows)]
     crate::services::system::focus::refresh_excluded_hwnds(app);
-    window
-        .emit(ANNOTATION_LOAD_EVENT, image_path)
-        .map_err(|error| format!("推送编辑器初始加载事件失败: {error}"))?;
+    // 首次创建:页面未就绪,先缓存路径等页面 ready 后重放,避免事件丢弃。
+    *PENDING_LOAD.lock().unwrap() = Some(image_path.to_string());
+    Ok(())
+}
+
+// 编辑器页面就绪回调:置位就绪并重放缓存的首开加载事件(若有)。
+#[tauri::command]
+pub fn annotation_window_ready(app: AppHandle) -> Result<(), String> {
+    let pending = { PENDING_LOAD.lock().unwrap().take() };
+    if let Some(image_path) = pending {
+        let window = app
+            .get_webview_window(ANNOTATION_WINDOW_LABEL)
+            .ok_or_else(|| "编辑器窗口尚未创建".to_string())?;
+        window
+            .emit(ANNOTATION_LOAD_EVENT, &image_path)
+            .map_err(|error| format!("重放编辑器加载事件失败: {error}"))?;
+    }
     Ok(())
 }
 
@@ -109,6 +133,34 @@ mod tests {
         assert!(source.contains("close_annotation_window(&app)"), "命令必须关闭窗口");
         assert!(source.contains("annotation_finished"), "必须提供完成命令");
         assert!(source.contains("annotation_cancelled"), "必须提供取消命令");
+    }
+
+    // 首开竞态防护:新建窗口不得直接 emit(页面未就绪事件丢弃),必须先把
+    // 待加载路径缓存进 pending,等页面 ready 命令触发重放。
+    #[test]
+    fn first_open_buffers_load_event_until_window_ready() {
+        let source = source();
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        // 新建路径不再裸 emit,而是写 pending 缓存。
+        let build_start = stripped
+            .find("WebviewWindowBuilder::new")
+            .expect("必须新建编辑器窗口");
+        let new_path_seg = &stripped[build_start..];
+        assert!(
+            new_path_seg.contains("PENDING_LOAD.lock().unwrap() = Some(image_path.to_string())"),
+            "新建窗口必须把待加载路径缓存进 pending 等待重放"
+        );
+        assert!(
+            !new_path_seg[..new_path_seg.find("annotation_window_ready").unwrap_or(new_path_seg.len())].contains("emit(ANNOTATION_LOAD_EVENT"),
+            "新建路径不得在页面就绪前直接 emit 加载事件"
+        );
+        // 复用路径仍直接 emit(页面已就绪),ready 命令负责重放。
+        assert!(source.contains("pub fn annotation_window_ready"), "必须提供就绪命令");
+        assert!(source.contains("PENDING_LOAD.lock().unwrap().take()"), "就绪命令必须取走缓存并重放");
     }
 
     // 新窗口必须加入自身窗口排除列表——编辑器窗透明置顶 focused 建窗,

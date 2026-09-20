@@ -213,6 +213,10 @@ function AnnotationApp() {
       };
       // 截图存储路径走 asset 协议前缀（与贴图/预览同款）。
       img.src = convertFileSrc(path);
+    }).then(() => {
+      // 监听就绪后通知后端:首开时窗口新建早于页面加载,后端把待编辑路径
+      // 缓存在 pending,此调用触发重放,避免事件在页面就绪前被丢弃(白屏)。
+      void invoke('annotation_window_ready').catch(() => {});
     });
     return () => {
       unlistenPromise?.then((unlisten) => unlisten()).catch(() => {});

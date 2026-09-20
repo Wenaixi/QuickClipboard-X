@@ -314,6 +314,7 @@ pub fn run() {
                 commands::screenshot::open_whiteboard,
                 windows::annotation::annotation_finished,
                 windows::annotation::annotation_cancelled,
+                windows::annotation::annotation_window_ready,
                 commands::copy_text_to_clipboard,
                 commands::prompt_disable_win_v_hotkey_if_needed,
                 commands::prompt_enable_win_v_hotkey,
