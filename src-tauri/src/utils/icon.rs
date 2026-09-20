@@ -67,7 +67,9 @@ pub fn save_app_icon(exe_path: &str) -> Option<String> {
     }
 
     let icon_path = icons_dir.join(format!("{}.png", hash));
-    if !icon_path.exists() {
+    // 已存在且非零字节才跳过:半写/损坏残留会被 exists() 误判为"已有"而
+    // 永久复用坏图标,存在性判断需同时校验文件大小。
+    if !icon_path.exists() || icon_path.metadata().map(|m| m.len()).unwrap_or(0) == 0 {
         if let Err(e) = std::fs::write(&icon_path, &png_data) {
             eprintln!("写入应用图标失败: {}", e);
             return None;
