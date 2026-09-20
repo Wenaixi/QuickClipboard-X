@@ -97,3 +97,34 @@ test('白板绘制中断必须兜底 endDraw(防 drawing 卡死)', () => {
     'cancelDraw 必须委托 endDraw 收口（重置 drawing 防永久卡死）',
   );
 });
+
+test('白板多指针触控只认第一根指针(防双指串线/误收笔)', () => {
+  const start = bare.indexOf('function startDraw');
+  assert.ok(start >= 0, '缺 startDraw');
+  assert.ok(
+    bare.includes('let activePointerId = null;'),
+    '必须声明当前笔指针 id 状态(否则无法过滤第二指)',
+  );
+  assert.ok(
+    bare.includes('activePointerId = event.pointerId ?? null;'),
+    'startDraw 必须记录首指 pointerId',
+  );
+  const move = bodyOf('function moveDraw', 'function endDraw');
+  assert.ok(
+    move.includes('event.pointerId !== activePointerId'),
+    'moveDraw 必须忽略非当前笔指针的移动(否则第二指混入 path/end)',
+  );
+  const end = bodyOf('function endDraw', 'function cancelDraw');
+  assert.ok(
+    end.includes('event.pointerId !== activePointerId'),
+    'endDraw 必须忽略非当前笔指针的抬起(否则第二指松手即结束这一笔)',
+  );
+});
+
+test('白板非笔工具最小尺寸判定(防 pointerleave 收口留微距噪点)', () => {
+  const end = bodyOf('function endDraw', 'function cancelDraw');
+  assert.ok(
+    end.includes('Math.abs(end.x - anchor.x) + Math.abs(end.y - anchor.y) >= 3'),
+    'endDraw 必须对非笔工具做最小尺寸判定(两点曼哈顿距离 < 3px 视为误触空笔丢弃)',
+  );
+});

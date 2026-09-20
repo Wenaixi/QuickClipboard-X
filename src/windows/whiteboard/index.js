@@ -128,6 +128,11 @@ function setupToolButtons() {
   });
 }
 
+// 当前进行中一笔的指针 id:多指/多指针触控下只认第一根落下的指针,
+// 其余指针的移动/抬起一律忽略——否则第二根手指的 move 点会混进当前
+// 笔的 path/end,且任意一根抬起就触发 endDraw 把混合路径入栈(串线)。
+let activePointerId = null;
+
 function startDraw(event) {
   event.preventDefault();
   // 指针捕获:不捕获时绘制中指针滑到工具栏(fixed 悬浮层)释放,pointerup
@@ -142,6 +147,7 @@ function startDraw(event) {
   }
   if (!drawing) {
     drawing = true;
+    activePointerId = event.pointerId ?? null;
     anchor = localPoint(event);
     end = anchor === null ? null : { ...anchor };
     path = [anchor];
@@ -150,6 +156,8 @@ function startDraw(event) {
 
 function moveDraw(event) {
   if (!drawing) return;
+  // 只处理当前笔对应的指针,忽略第二根及以后的手指
+  if (event.pointerId !== undefined && activePointerId !== null && event.pointerId !== activePointerId) return;
   if (tool === 'pen') path.push(localPoint(event));
   else end = localPoint(event);
   renderPreview();
@@ -157,6 +165,8 @@ function moveDraw(event) {
 
 function endDraw(event) {
   if (!drawing) return;
+  // 只收口当前笔对应的指针;第二根手指抬起不结束这一笔
+  if (event && event.pointerId !== undefined && activePointerId !== null && event.pointerId !== activePointerId) return;
   if (event && event.pointerId !== undefined) {
     try {
       canvas.releasePointerCapture(event.pointerId);
@@ -170,9 +180,14 @@ function endDraw(event) {
       shapes.push({ tool, color, lineWidth, anchor, end: null, path: [...path] });
     }
   } else if (anchor && end) {
-    shapes.push({ tool, color, lineWidth, anchor, end: { ...end }, path: [] });
+    // 最小尺寸判定:两点曼哈顿距离 < 3px 视为误触空笔丢弃,
+    // 否则 pointerleave 收口时拖出 1px 的微距形状也入栈留噪点。
+    if (Math.abs(end.x - anchor.x) + Math.abs(end.y - anchor.y) >= 3) {
+      shapes.push({ tool, color, lineWidth, anchor, end: { ...end }, path: [] });
+    }
   }
   drawing = false;
+  activePointerId = null;
   anchor = null;
   end = null;
   path = [];
