@@ -51,7 +51,7 @@ test('编辑器保存导出画布必须为原图像素尺寸(不得乘 dpr 超�
   );
   const exportSeg = appSource.slice(
     appSource.indexOf('out.width = image.naturalWidth;'),
-    appSource.indexOf('drawLayersToContext'),
+    appSource.indexOf('const base64 = out.toDataURL'),
   );
   assert.ok(
     !exportSeg.includes('naturalWidth * dpr') && !exportSeg.includes('naturalHeight * dpr'),

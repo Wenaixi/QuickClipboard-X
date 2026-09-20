@@ -546,8 +546,14 @@ mod tests {
         );
         // G-2 early-return 清理护栏:GetWindowRect 失败分支必须重复同一套
         // 清理序列(否则 DIB 仍被选入 mem_dc 即返回,GDI 句柄泄漏 4 个/次)。
+        // 截断点用 ULW_ALPHA 调用结束(尾清理在 ULW 之后)——否则失败分支与
+        // 尾清理同段,断言会被"尾清理保底"命中,失去反证力(自命中性)。
         let fail_pos = body.find("if ok.is_err()").expect("缺少坐标失败分支");
-        let fail_seg = &body[fail_pos..];
+        let ulw_end = {
+            let u = body.find("ULW_ALPHA").expect("缺少 UpdateLayeredWindow");
+            body.find("};", u).expect("缺少 ULW 调用结束")
+        };
+        let fail_seg = &body[fail_pos..ulw_end];
         assert!(
             fail_seg.contains("SelectObject(mem_dc, old)") &&
             fail_seg.contains("DeleteObject(HGDIOBJ(dib.0))") &&

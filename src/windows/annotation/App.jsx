@@ -310,7 +310,6 @@ function AnnotationApp() {
     // 保存：以图像原始尺寸重绘（等比放大到原图），含全部标注层 → PNG。
     const image = imageRef.current;
     if (!image) return;
-    const dpr = window.devicePixelRatio || 1;
     const out = document.createElement('canvas');
     // 导出画布必须与原图像素尺寸一致——不能乘 dpr,否则高分屏上产物被
     // 放大 dpr 倍(1920×1080@2x → 3840×2160,体积 2-4 倍+重采样损质)。
