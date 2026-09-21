@@ -101,3 +101,28 @@ test('编辑器绘制必须捕获指针并随窗口尺寸重绘', () => {
   assert.ok(appSource.includes('.onResized(redraw)'), '窗口尺寸变化必须重绘');
   assert.ok(appSource.includes("matchMedia('(resolution: ' + window.devicePixelRatio + 'dppx)')"), '跨 DPI 变化必须重绘');
 });
+
+test('编辑器多指针只认首指,undo 先清草稿', () => {
+  // 多指针守卫(白板同款):第二根手指/手掌误触落下不得覆盖首笔草稿,
+  // move/up 只处理本笔指针;撤销重做前先丢弃进行中草稿,避免撤销后
+  // 残留半截笔画悬浮不可撤销。
+  assert.ok(
+    appSource.includes('pointerId: event.pointerId'),
+    '草稿必须携带指针 id',
+  );
+  assert.ok(
+    appSource.includes('if (draftRef.current && event.pointerId !== draftRef.current.pointerId) return;'),
+    '第二指落下必须忽略',
+  );
+  assert.ok(
+    appSource.includes('if (event.pointerId !== draft.pointerId) return;'),
+    '移动/抬起必须忽略非本笔指针',
+  );
+  const undoPos = appSource.indexOf('const handleUndo = () =>');
+  assert.ok(undoPos !== -1, '撤销处理必须存在');
+  const undoBody = appSource.slice(undoPos, appSource.indexOf('const handleRedo', undoPos));
+  const clearPos = undoBody.indexOf('draftRef.current = null');
+  const popPos = undoBody.indexOf('undoSnapshot(history, redoStack)');
+  assert.ok(clearPos !== -1 && popPos !== -1, '撤销必须先清草稿再弹栈');
+  assert.ok(clearPos < popPos, '清草稿必须早于弹栈');
+});

@@ -261,6 +261,9 @@ function AnnotationApp() {
   const handlePointerDown = (event) => {
     event.preventDefault();
     if (!imageRef.current) return;
+    // 多指针守卫:第二根手指(或手掌误触)落下不得覆盖首笔草稿,只认
+    // 首指 pointerId(与白板 activePointerId 同款保护)。
+    if (draftRef.current && event.pointerId !== draftRef.current.pointerId) return;
     // 捕获指针:绘制中把笔划拖出画布边界时仍能收到 pointerup 收口,
     // 否则指针滑到工具栏上方释放时画布收不到抬起事件,提交半截笔画
     // (与白板同款保护)。
@@ -272,15 +275,17 @@ function AnnotationApp() {
     const rect = canvasRef.current.getBoundingClientRect();
     const start = pointFromEvent(event, rect);
     if (tool === 'pen') {
-      draftRef.current = { type: tool, start, end: start, points: [start] };
+      draftRef.current = { pointerId: event.pointerId, type: tool, start, end: start, points: [start] };
     } else {
-      draftRef.current = { type: tool, start, end: start, points: [] };
+      draftRef.current = { pointerId: event.pointerId, type: tool, start, end: start, points: [] };
     }
   };
 
   const handlePointerMove = (event) => {
     const draft = draftRef.current;
     if (!draft) return;
+    // 只处理本笔指针的移动,第二指移动点不得混入当前笔。
+    if (event.pointerId !== draft.pointerId) return;
     const rect = canvasRef.current.getBoundingClientRect();
     const point = pointFromEvent(event, rect);
     if (draft.type === 'pen') {
@@ -291,10 +296,12 @@ function AnnotationApp() {
     draw();
   };
 
-  const handlePointerUp = () => {
+  const handlePointerUp = (event) => {
     const draft = draftRef.current;
-    draftRef.current = null;
     if (!draft) return;
+    // 只收口本笔指针,第二指抬起(含 pointerleave 兜底)不得提交混入笔。
+    if (event?.pointerId !== undefined && event.pointerId !== draft.pointerId) return;
+    draftRef.current = null;
     // 文本工具：弹输入框取文本。
     if (draft.type === 'text') {
       const label = window.prompt('输入标注文本', '');
@@ -317,6 +324,8 @@ function AnnotationApp() {
   };
 
   const handleUndo = () => {
+    // 先丢弃进行中草稿(不入栈),避免撤销后残留半截笔画悬浮不可撤销。
+    draftRef.current = null;
     const result = undoSnapshot(history, redoStack);
     if (!result) return;
     setHistory(result.history);
@@ -325,6 +334,8 @@ function AnnotationApp() {
   };
 
   const handleRedo = () => {
+    // 同 undo:先清草稿再弹栈,保证画布与历史栈一致。
+    draftRef.current = null;
     const result = redoSnapshot(history, redoStack);
     if (!result) return;
     setHistory(result.history);
