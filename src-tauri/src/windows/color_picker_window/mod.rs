@@ -10,7 +10,6 @@ use crate::services::screenshot::actions::copy_screenshot_text;
 
 pub const COLOR_PICKER_WINDOW_LABEL: &str = "color-picker";
 const COLOR_PICKER_EVENT: &str = "color-picker:update";
-const COLOR_PICKER_PICK_EVENT: &str = "color-picker:pick";
 
 // 取全局 AppHandle（setup 阶段由 store::init 注册；未注册即尚未就绪）。
 fn app_handle() -> Result<tauri::AppHandle, String> {
@@ -72,7 +71,6 @@ pub fn pick_color(x: i32, y: i32) -> Result<(), String> {
     let hex = format!("{:06x}", rgb);
     copy_screenshot_text(&hex).map_err(|error| error.to_string())?;
     let app = app_handle()?;
-    let _ = app.emit(COLOR_PICKER_PICK_EVENT, &serde_json::json!({ "hex": hex }));
     if let Some(window) = app.get_webview_window(COLOR_PICKER_WINDOW_LABEL) {
         let _ = window.close();
     }

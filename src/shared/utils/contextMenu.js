@@ -553,9 +553,6 @@ export async function showClipboardItemContextMenu(event, item, index) {
   const menuItems = [];
   const contentType = item.content_type || "text";
   const plainText = typeof item.content === "string" ? item.content.trim() : "";
-  const ct = String(contentType || "")
-    .trim()
-    .toLowerCase();
   const pasteOptions = await getClipboardItemPasteOptions(item.id).catch(
     () => [],
   );
@@ -710,11 +707,6 @@ export async function showClipboardItemContextMenu(event, item, index) {
 export async function showFavoriteItemContextMenu(event, item, index) {
   const menuItems = [];
   const contentType = item.content_type || "text";
-  const ct = String(contentType || "")
-    .trim()
-    .toLowerCase();
-  const isFileType = ct === "file" || ct.startsWith("file/");
-  const isImageType = ct === "image" || ct.startsWith("image/");
   const pasteOptions = await getFavoriteItemPasteOptions(item.id).catch(
     () => [],
   );
