@@ -133,7 +133,11 @@ pub(crate) fn toggle_state_bool(label: &str, flag: PinStateFlag) -> Result<(), S
         PinStateFlag::Shadow => state.shadow = !state.shadow,
         PinStateFlag::LockPosition => state.lock_position = !state.lock_position,
         PinStateFlag::PixelRender => state.pixel_render = !state.pixel_render,
-        PinStateFlag::RestoreMode => unreachable!("RestoreMode 走 set_state_str"),
+        // 恢复模式是字符串状态,必须走 set_state_str;这里误调属调用方缺陷,
+        // 返回可观测错误而非 panic——panic 会 abort 动作分发任务,无上下文。
+        PinStateFlag::RestoreMode => {
+            return Err("恢复模式请走 set_state_str".to_string());
+        }
     }
     set_pin_state(label, state);
     Ok(())
@@ -659,6 +663,31 @@ mod tests {
         assert!(
             label_pos < retain_pos && retain_pos < remove_pos,
             "WM_DESTROY 清理顺序必须为 反查标签 → retain 删句柄 → 删状态,否则 state 永不删除"
+        );
+    }
+
+    // 恢复模式是字符串状态,toggle_state_bool 按布尔位翻转,误调属调用方
+    // 缺陷——必须返回可观测错误而非 panic(panic 会 abort 动作任务无上下文,
+    // 未来同步路径还会崩消息循环)。剥注释后断言函数体走 Err 分支。
+    #[test]
+    fn toggle_state_bool_rejects_restore_mode_with_err_not_panic() {
+        let stripped: String = gdi_source()
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let body = &stripped[stripped.find("fn toggle_state_bool").expect("缺 toggle_state_bool")..];
+        assert!(
+            body.contains("RestoreMode =>"),
+            "RestoreMode 分支必须存在(match 穷尽)"
+        );
+        assert!(
+            body.contains("恢复模式请走 set_state_str"),
+            "RestoreMode 误调必须返回明确错误文案"
+        );
+        assert!(
+            !body.contains("unreachable!("),
+            "RestoreMode 分支不得再用 panic 宏,Rust 崩溃不可被调用方观测"
         );
     }
 
