@@ -786,6 +786,40 @@ mod tests {
             "停止监听必须从 MonitorState 取出关闭通道"
         );
     }
+
+    // 源码护栏:文件/图片自粘贴 fast-path 依赖捕获侧简哈希与预置侧哈希
+    // 完全一致。R115 只修了 capture 侧,专职预置函数两处若缺分隔字节,
+    // 预置 sha256(path) 与捕获侧 sha256(path+[0u8]) 永远不等,单图粘贴与
+    // 多文件合并粘贴都落 find_duplicate 兜底无条件置顶(违背 pasteToTop=false)。
+    // 护栏断言两函数体各含一次 update([0u8])。
+    #[test]
+    fn preset_hash_functions_use_zero_byte_separators_like_capture_side() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/clipboard/monitor.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 monitor.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        for name in ["set_last_hash_files", "set_last_hash_file"] {
+            let start = stripped
+                .find(&format!("pub fn {name}("))
+                .unwrap_or_else(|| panic!("缺 {name}"));
+            let end = stripped[start + 1..]
+                .find("\npub fn ")
+                .map(|i| start + 1 + i)
+                .unwrap_or(stripped.len());
+            let body = &stripped[start..end];
+            assert!(
+                body.contains("hasher.update([0u8])"),
+                "{name} 每段路径后必须插入分隔字节(与捕获侧 files_hash 同口径),否则自粘贴失配无条件置顶"
+            );
+        }
+    }
 }
 
 // 预设哈希缓存（文件类型）
@@ -801,6 +835,11 @@ pub fn set_last_hash_files(content: &str) {
                     if let Some(path) = file["path"].as_str() {
                         let normalized = crate::services::normalize_path_for_hash(path);
                         hasher.update(normalized.as_bytes());
+                        // 与捕获侧同口径:每段路径后必须插入分隔字节,否则
+                        // 多文件集合哈希含糊且自粘贴预置哈希与捕获哈希
+                        // 永远不等,fast-path 失配落 find_duplicate 兜底
+                        // 无条件置顶,违背 pasteToTop=false。
+                        hasher.update([0u8]);
                     }
                 }
             }
@@ -819,6 +858,10 @@ pub fn set_last_hash_file(file_path: &str) {
     let mut hasher = Sha256::new();
     let normalized = crate::services::normalize_path_for_hash(file_path);
     hasher.update(normalized.as_bytes());
+    // 单文件场景与捕获侧 Files 分支同口径:路径后必须补分隔字节,
+    // 否则 sha256(path) 与捕获侧 sha256(path+[0u8]) 不等,图片单粘贴
+    // 自粘贴永远落 find_duplicate 兜底无条件置顶(违背 pasteToTop=false)。
+    hasher.update([0u8]);
 
     let hash = format!("{:x}", hasher.finalize());
     let mut last_hashes = LAST_CONTENT_HASHES.lock();
