@@ -19,7 +19,7 @@ static PENDING_LOAD: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None)
 
 // 打开编辑器并加载图片文件：窗口已存在则复用并推送加载事件（数据
 // 驱动，不重建 WebView），不存在则新建；文件不存在/非图片时报错。
-pub fn open_annotation_window(app: &AppHandle, image_path: &str) -> Result<(), String> {
+pub fn open_annotation_window(app: &AppHandle, image_path: &str, current_session_id: &str) -> Result<(), String> {
     let path = std::path::Path::new(image_path);
     if !path.is_file() {
         return Err(format!("要编辑的图片文件不存在: {image_path}"));
@@ -27,10 +27,11 @@ pub fn open_annotation_window(app: &AppHandle, image_path: &str) -> Result<(), S
     if let Some(window) = app.get_webview_window(ANNOTATION_WINDOW_LABEL) {
         let _ = window.show();
         let _ = window.set_focus();
-        // 复用路径:上次编辑器未保存直接关窗时,截图会话仍停留在处理中终态,
-        // 下次截图会被 Existing 守卫拒绝重入。复用前先尝试把残留会话按失败
-        // 收口(会话不存在时静默跳过),保证编辑-取消-再截图链路不吞截图。
-        crate::windows::screenshot_window::abandon_stale_edit_session(app);
+        // 复用路径:上次编辑器未保存直接关窗时,截图会话可能残留处理中终态
+        // 阻塞后续编辑。复用前把**陈旧**残留会话按失败收口(传递触发本次编辑
+        // 的会话 id,命中即本次会话在途、跳过——否则会删掉编辑器正要加载的
+        // 源图临时文件导致加载失败关窗)。
+        crate::windows::screenshot_window::abandon_stale_edit_session(app, current_session_id);
         // 复用路径:窗口页面已就绪(上次已触发 ready),直接 emit。
         window
             .emit(ANNOTATION_LOAD_EVENT, image_path)
@@ -136,9 +137,10 @@ mod tests {
         );
     }
 
-    // 复用路径必须先清理遗留截图会话:编辑器未保存直接关窗时会话停留
-    // Processing,下次截图被 Existing 守卫拒绝重入(吞截图)。复用前必须
-    // 调用 abandon_stale_edit_session 按失败收口残留会话。
+    // 复用路径必须先清理**陈旧**遗留截图会话:编辑器未保存直接关窗时会话
+    // 停留 Processing 阻塞后续编辑。复用前调用 abandon_stale_edit_session
+    // 并传入触发本次编辑的会话 id——命中即本次会话在途,跳过收口,否则
+    // 会删掉编辑器正要加载的源图临时文件(加载失败关窗)。
     #[test]
     fn editor_reuse_abandons_stale_screenshot_session() {
         let source = source();
@@ -147,8 +149,8 @@ mod tests {
             .expect("必须尝试复用现有窗口");
         let reuse_seg = &source[reuse_pos..];
         assert!(
-            reuse_seg.contains("abandon_stale_edit_session(app)"),
-            "复用路径必须先清理遗留截图会话,否则编辑-取消-再截图被吞"
+            reuse_seg.contains("abandon_stale_edit_session(app, current_session_id)"),
+            "复用路径必须清理陈旧遗留会话且传入触发会话 id(命中即跳过,防杀源图)"
         );
     }
 }

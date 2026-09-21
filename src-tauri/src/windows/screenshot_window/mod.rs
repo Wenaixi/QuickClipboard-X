@@ -907,13 +907,16 @@ pub fn is_screenshot_active() -> bool {
 }
 
 /// 编辑器复用前清理遗留的"处理中"截图会话：编辑器未保存直接关窗时
-/// 会话停留在 Processing 终态,下次 start_screenshot 会被 Existing 守卫
-/// 拒绝重入(吞掉用户下一次截图)。此处把任一处理中会话按失败收口,
-/// 无会话时静默跳过(与 cancel 幂等语义一致)。
-pub fn abandon_stale_edit_session(app: &AppHandle) {
+/// 会话停留在 Processing 终态,下次编辑会因残留会话占用而受影响。此处
+/// 把任一**陈旧**处理中会话按失败收口——current 会话恰好是本次编辑触发
+/// 的会话(编辑动作保留 Processing 供编辑后继续)时不得收口,否则会删掉
+/// 编辑器正在加载的源图临时文件;无会话或即当前会话时静默跳过。
+pub fn abandon_stale_edit_session(app: &AppHandle, current_session_id: &str) {
     let session_id = STATE.lock().sessions.current().map(|s| s.session_id().to_string());
     if let Some(session_id) = session_id {
-        finish_failed_screenshot(app, &session_id);
+        if session_id != current_session_id {
+            finish_failed_screenshot(app, &session_id);
+        }
     }
 }
 

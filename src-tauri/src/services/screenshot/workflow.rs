@@ -228,7 +228,10 @@ async fn run_edit_action(
         return Err("截图会话已取消".to_string());
     }
     let image_path = stored.absolute_path.to_string_lossy().to_string();
-    crate::windows::annotation::open_annotation_window(app, &image_path)?;
+    // 传入触发本次编辑的会话 id:复用编辑器窗口时须确认残留会话是"陈旧"
+    // 而非本会话——否则把在途 Processing 会话按失败收口会删掉编辑器正要
+    // 加载的源图临时文件,编辑器加载失败关窗。
+    crate::windows::annotation::open_annotation_window(app, &image_path, session_id)?;
     Ok("已打开图像编辑器".to_string())
 }
 
