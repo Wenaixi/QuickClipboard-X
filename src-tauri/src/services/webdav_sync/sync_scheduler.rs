@@ -201,7 +201,12 @@ async fn run_auto_push(app: AppHandle, reason: &'static str) {
         Ok(Some(report)) => store_report("push", report, true),
         Ok(None) => {}
         Err(e) => {
-            eprintln!("[WebDAV同步] 自动推送失败 reason={} 错误={}", reason, e);
+            // 自动推送失败不能静默:LAST_REPORT 停留在上次成功残留,前端无法
+            // 感知自动同步停滞。与自动拉取失败上报对称,构造含失败原因的报告
+            // 走同一 store_report,使 LAST_REPORT 反映最近一次同步真实结果。
+            let mut report = SyncReport::default();
+            report.errors.push(format!("自动推送失败: {e}"));
+            store_report("push", report, true);
         }
     }
 
