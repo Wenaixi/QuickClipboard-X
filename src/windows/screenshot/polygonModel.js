@@ -8,7 +8,12 @@ function assertPoints(points) {
     throw new TypeError('顶点数组缺失');
   }
   for (const point of points) {
-    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+    // 顶点可能是 {x,y}(锚点集/命中测试)或 {left,top}(多边形路径存储,
+    // 与 CSS --selection-polygon 同构);两者取其一校验即可,缺 x/y 时
+    // 回退读 left/top,否则空对象/错误形状会被误判为合法顶点。
+    const px = point && point.x !== undefined ? point.x : point && point.left;
+    const py = point && point.y !== undefined ? point.y : point && point.top;
+    if (!point || !Number.isFinite(px) || !Number.isFinite(py)) {
       throw new TypeError('顶点坐标必须是有限数字');
     }
   }
