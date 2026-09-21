@@ -1273,6 +1273,29 @@
     "qrGeneratedTitle": "QR Code",
     "hashCopied": "File SHA-256 copied"
   },
+  "whiteboard": {
+    "tool": {
+      "pen": "Pen",
+      "line": "Line",
+      "arrow": "Arrow",
+      "rect": "Rectangle",
+      "ellipse": "Ellipse"
+    },
+    "color": {
+      "black": "Black",
+      "red": "Red",
+      "blue": "Blue",
+      "green": "Green"
+    },
+    "action": {
+      "undo": "Undo",
+      "clear": "Clear",
+      "save": "Save"
+    },
+    "confirmDiscardTitle": "Discard Drawing",
+    "confirmDiscardMessage": "The whiteboard has unsaved drawing. Discard it?",
+    "saveFailed": "Save failed, please retry: {error}"
+  },
   "floatingToolbar": {
     "scrollToTop": "Scroll to Top",
     "addFavorite": "Add Favorite",

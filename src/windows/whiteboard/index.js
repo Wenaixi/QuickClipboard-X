@@ -8,7 +8,8 @@
 
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
-import { showError } from '@shared/utils/dialog';
+import { showError, showConfirm } from '@shared/utils/dialog';
+import i18n from '@shared/i18n';
 
 const TOOLS = ['pen', 'line', 'arrow', 'rect', 'ellipse'];
 const COLORS = ['#1f2937', '#ef4444', '#3b82f6', '#22c55e'];
@@ -106,6 +107,7 @@ function setupToolButtons() {
   TOOLS.forEach((id) => {
     const btn = document.getElementById(`tool-${id}`);
     if (btn) {
+      btn.title = i18n.t(`whiteboard.tool.${id}`);
       btn.addEventListener('click', () => {
         tool = id;
         anchor = null;
@@ -119,6 +121,7 @@ function setupToolButtons() {
     const btn = document.getElementById(`color-${i}`);
     if (btn) {
       btn.style.background = c;
+      btn.title = i18n.t(`whiteboard.color.${['black', 'red', 'blue', 'green'][i]}`);
       btn.addEventListener('click', () => {
         color = c;
         document.querySelectorAll('.color').forEach((b) => b.classList.toggle('active'));
@@ -126,6 +129,12 @@ function setupToolButtons() {
       });
     }
   });
+  const undoBtn = document.getElementById('undo');
+  if (undoBtn) undoBtn.textContent = i18n.t('whiteboard.action.undo');
+  const clearBtn = document.getElementById('clear');
+  if (clearBtn) clearBtn.textContent = i18n.t('whiteboard.action.clear');
+  const saveBtn = document.getElementById('save');
+  if (saveBtn) saveBtn.textContent = i18n.t('whiteboard.action.save');
 }
 
 // 当前进行中一笔的指针 id:多指/多指针触控下只认第一根落下的指针,
@@ -221,7 +230,7 @@ async function save() {
     // 保存失败必须提示并保持窗口打开——无条件关窗让用户误以为保存成功,
     // 白板绘制成果静默丢失。
     console.error('保存白板失败:', error);
-    await showError('保存失败,请重试:' + String(error?.message || error));
+    await showError(i18n.t('whiteboard.saveFailed', { error: String(error?.message || error) }));
     return;
   }
   getCurrentWindow().close().catch(() => {});
@@ -265,7 +274,22 @@ function start() {
   canvas.addEventListener('pointerleave', cancelDraw);
   document.addEventListener('pointerup', endDraw);
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') window.close().catch(() => {});
+    if (event.key === 'Escape') {
+      // 有未保存形状或正在绘制时,先经确认再关窗——绘制多笔后误按 Esc
+      // 直接丢全部成果,与工具栏关闭路径的确认语义对齐(避免静默丢弃)。
+      if (shapes.length > 0 || drawing) {
+        event.preventDefault();
+        showConfirm(
+          i18n.t('whiteboard.confirmDiscardMessage'),
+          i18n.t('whiteboard.confirmDiscardTitle'),
+        ).then((confirmed) => {
+          if (confirmed) window.close().catch(() => {});
+        });
+        return;
+      }
+      window.close().catch(() => {});
+      return;
+    }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
       event.preventDefault();
       undo();

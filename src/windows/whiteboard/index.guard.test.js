@@ -153,3 +153,52 @@ test('白板保存必须读画布物理尺寸(与 DPR 解耦)', () => {
     '输出尺寸不得再用 innerWidth*dpr(与画布物理尺寸解耦)',
   );
 });
+
+// 白板 Esc 与工具按钮语言护栏：Esc 在有未保存形状/绘制中时必须先经
+// showConfirm 确认（shapes.length>0 || drawing 判定），否则误按 Esc 直接
+// 丢全部成果；工具按钮 title/撤销/清空/保存文本不得再是静态中文（走
+// i18n.t），保存失败文案走 whiteboard.saveFailed 键。
+test('白板 Esc 有未保存内容必须先确认再关窗', () => {
+  const start = bare.indexOf('document.addEventListener(\'keydown\'');
+  const body = bare.slice(start, start + 900);
+  assert.ok(
+    body.includes('shapes.length > 0 || drawing'),
+    'Esc 分支必须判定有未保存形状或正在绘制',
+  );
+  assert.ok(
+    body.includes('showConfirm('),
+    '有未保存内容时 Esc 必须走 showConfirm 确认',
+  );
+  assert.ok(
+    body.includes('window.close().catch(() => {});'),
+    '确认后必须关窗',
+  );
+});
+
+test('白板工具按钮文本走语言包(i18n.t)不再静态中文', () => {
+  const setup = bodyOf('function setupToolButtons', 'function startDraw');
+  assert.ok(
+    setup.includes('btn.title = i18n.t(`whiteboard.tool.${id}`)'),
+    '工具按钮 title 必须走语言包',
+  );
+  assert.ok(
+    setup.includes('i18n.t(`whiteboard.color.'),
+    '颜色按钮 title 必须走语言包',
+  );
+  assert.ok(
+    setup.includes("i18n.t('whiteboard.action.undo')")
+      && setup.includes("i18n.t('whiteboard.action.clear')")
+      && setup.includes("i18n.t('whiteboard.action.save')"),
+    '撤销/清空/保存按钮文本必须走语言包',
+  );
+  const save = bodyOf('async function save', 'function undo');
+  assert.ok(
+    save.includes('i18n.t(\'whiteboard.saveFailed\'')
+      || save.includes('i18n.t(`whiteboard.saveFailed`'),
+    '保存失败文案必须走语言包',
+  );
+  assert.ok(
+    !save.includes('保存失败,请重试'),
+    '保存失败不得再是裸中文字面',
+  );
+});

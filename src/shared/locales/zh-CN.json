@@ -1273,6 +1273,29 @@
     "qrGeneratedTitle": "二维码",
     "hashCopied": "文件 SHA-256 已复制"
   },
+  "whiteboard": {
+    "tool": {
+      "pen": "钢笔",
+      "line": "直线",
+      "arrow": "箭头",
+      "rect": "矩形",
+      "ellipse": "椭圆"
+    },
+    "color": {
+      "black": "黑",
+      "red": "红",
+      "blue": "蓝",
+      "green": "绿"
+    },
+    "action": {
+      "undo": "撤销",
+      "clear": "清空",
+      "save": "保存"
+    },
+    "confirmDiscardTitle": "放弃绘制",
+    "confirmDiscardMessage": "当前白板有未保存的绘制内容，确定放弃吗？",
+    "saveFailed": "保存失败,请重试:{error}"
+  },
   "floatingToolbar": {
     "scrollToTop": "返回顶部",
     "addFavorite": "添加收藏项",
