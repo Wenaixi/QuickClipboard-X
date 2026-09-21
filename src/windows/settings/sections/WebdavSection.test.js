@@ -30,3 +30,16 @@ test('WebDAV 设置节既有字段通过 update 保存', () => {
     );
   }
 });
+
+test('同步报告必须渲染失败原因(errors 列表)', () => {
+  // 自动拉取/推送失败的报告计数全为 0,只显示"无变化"会让失败静默吞掉——
+  // renderReportDetail 必须对 result.errors 非空渲染错误列表(用户可见失败原因)。
+  assert.ok(
+    source.includes('const errors = Array.isArray(result.errors) ? result.errors : [];'),
+    'renderReportDetail 必须提取 result.errors 数组',
+  );
+  assert.ok(
+    source.includes('errors.map((error, index) =>'),
+    'errors 非空必须逐条渲染错误列表',
+  );
+});

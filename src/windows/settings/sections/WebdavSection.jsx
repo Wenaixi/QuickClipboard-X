@@ -251,6 +251,7 @@ function WebdavSection({ settings, onSettingChange }) {
 
     const result = lastReport.result;
     const total = lastReport.mode === 'push' ? result.pushed || 0 : result.pulled || 0;
+    const errors = Array.isArray(result.errors) ? result.errors : [];
 
     return (
       <div className="mt-3 rounded-xl border border-qc-border bg-qc-surface/60 p-3 text-sm text-qc-fg">
@@ -261,6 +262,15 @@ function WebdavSection({ settings, onSettingChange }) {
           </span>
           <span className="text-xs text-qc-fg-muted">{formatReport(result, lastReport.mode)}</span>
         </div>
+        {errors.length > 0 && (
+          <div className="mt-2 space-y-1">
+            {errors.map((error, index) => (
+              <div key={index} className="rounded-md bg-qc-danger/10 px-2 py-1 text-xs text-qc-danger">
+                {error}
+              </div>
+            ))}
+          </div>
+        )}
         {total === 0 ? (
           <div className="text-qc-fg-muted">{t('settings.webdav.noChanges')}</div>
         ) : (
