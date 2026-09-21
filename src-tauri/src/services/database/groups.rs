@@ -302,9 +302,11 @@ pub fn add_group(name: String, icon: String, color: String) -> Result<GroupInfo,
 // 更新分组
 pub fn update_group(old_name: String, new_name: String, new_icon: String, new_color: String) -> Result<GroupInfo, String> {
     with_connection(|conn| {
-        // "全部"是收藏分组结构的哨兵行(前端按此筛选所有分组),禁止改名——
-        // 改名会让"全部"语义丢失、前端过滤条件失效。与 delete_group 同款拒绝。
-        if old_name == "全部" {
+        // "全部"是收藏分组结构的哨兵行(前端按此筛选所有分组),禁止改名也
+        // 禁止改名为它——改名会让"全部"语义丢失、前端过滤条件失效;改名成
+        // "全部"则产生与哨兵同名的实数据行,重名检查因表内无哨兵行恒 0,
+        // 落库不可删改的脏行并随同步/备份扩散。与 delete_group 同款拒绝。
+        if old_name == "全部" || new_name == "全部" {
             return Err(rusqlite::Error::InvalidParameterName(
                 "不能修改'全部'分组".to_string()
             ));
@@ -569,13 +571,18 @@ mod tests {
         let reject_pos = body
             .find("old_name == \"全部\"")
             .expect("update_group 必须拒绝把'全部'改名");
-        // 拒绝必须发生在任何 UPDATE 之前(函数体顶部)
         let insert_pos = body
             .find("SELECT COUNT(*) FROM groups WHERE name = ?1")
             .expect("缺分组存在性检查");
         assert!(
             reject_pos < insert_pos,
             "'全部'拒绝必须早于分组存在性检查与 UPDATE"
+        );
+        // 改名为'全部'同样必须拒绝:表内无哨兵行致重名检查 COUNT 恒 0,
+        // 不拒绝会落库与哨兵同名的不可删改脏行并随同步/备份扩散。
+        assert!(
+            body.contains("|| new_name == \"全部\""),
+            "update_group 必须同时拒绝把其他分组改名为'全部'"
         );
         let delete_src = strip_line_comments(&source_file("src/services/database/groups.rs"));
         let delete_body = fn_body(&delete_src, "delete_group");
