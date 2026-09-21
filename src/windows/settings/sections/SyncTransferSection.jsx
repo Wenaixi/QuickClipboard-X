@@ -114,6 +114,27 @@ function SyncTransferSection({ settings, onSettingChange }) {
 
   useEffect(() => {
     if (activeMode !== 'lan') return;
+    let disposed = false;
+    // 自动同步失败经后端 store_report 上报后 emit,此处监听让失败实时可见
+    // (宿于 LoadLanState 的 getSyncTransferLanAutoSyncStatus 只在挂载/手动刷新
+    // 时拉到,推送失败不会触发 peers-changed,不加监听就只剩下次重进面板才可见)。
+    let unlisten = null;
+    listen('sync-transfer-lan-report', () => {
+      if (!disposed) {
+        loadLanState().catch(() => {});
+      }
+    }).then(fn => {
+      unlisten = fn;
+      if (disposed) fn();
+    });
+    return () => {
+      disposed = true;
+      if (unlisten) unlisten();
+    };
+  }, [activeMode]);
+
+  useEffect(() => {
+    if (activeMode !== 'lan') return;
     let cancelled = false;
     const discover = async () => {
       try {

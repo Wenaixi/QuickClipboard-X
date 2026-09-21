@@ -166,6 +166,13 @@ fn schedule_peer_sync(app: AppHandle, reason: &'static str, peer: super::peer_st
                         started.elapsed().as_millis(),
                         e
                     );
+                    // 失败经同一 store_report 上报,与成功侧对称——LAST_REPORT 反映
+                    // 最近一次同步真实结果(含失败),用户在前端面板可感知推送停滞,
+                    // 不再只落日志静默。报告构造须先于 LAN_UNAUTHORIZED 判断,
+                    // 配对移除分支也会发出失败报告,语义一致。
+                    let mut report = SyncReport::default();
+                    report.errors.push(format!("局域网自动推送失败: {e}"));
+                    store_report(&app, reason, device_id.clone(), report);
                     if e == super::http_client::LAN_UNAUTHORIZED {
                         let _ = super::peer_store::remove_peer(&device_id);
                         PEER_SYNC_STATES.lock().remove(&device_id);
@@ -288,6 +295,30 @@ mod retry_guard {
         assert!(
             tail.contains("can_send()"),
             "重试唤醒必须校验自动推送开关,否则关闭后到点仍会推送"
+        );
+    }
+
+    // 自动推送失败必须经同一 store_report 上报(与 WebDAV 侧对称)——
+    // 若失败只落日志静默,LAST_REPORT 停留上次成功残留,用户零感知推送停滞。
+    // 顺序断言:失败报告构造必须先于 LAN_UNAUTHORIZED 判断,配对移除分支
+    // 也不能漏报(remove_peer 前已发出失败报告)。
+    #[test]
+    fn lan_push_failure_is_reported_not_silent() {
+        let src = strip_line_comments(&source_file("src/services/sync_transfer/lan/auto_sync.rs"));
+        let body = fn_body(&src, "schedule_peer_sync");
+        assert!(
+            body.contains("report.errors.push(format!(\"局域网自动推送失败: {e}\"))"),
+            "失败分支必须构造含失败原因的报告"
+        );
+        let store_pos = body
+            .find("store_report(&app, reason, device_id.clone(), report)")
+            .unwrap_or_else(|| panic!("失败分支必须走同一 store_report"));
+        let unauthorized_pos = body
+            .find("if e == super::http_client::LAN_UNAUTHORIZED")
+            .unwrap_or_else(|| panic!("LAN_UNAUTHORIZED 配对移除分支必须存在"));
+        assert!(
+            store_pos < unauthorized_pos,
+            "失败报告构造必须先于 LAN_UNAUTHORIZED 判断(配对移除分支也不能漏报)"
         );
     }
 }
