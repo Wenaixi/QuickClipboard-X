@@ -32,7 +32,7 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, RegisterClassW, UpdateLayeredWindow, ULW_ALPHA,
+    CreateWindowExW, DefWindowProcW, RegisterClassW, ShowWindow, SW_SHOWNOACTIVATE, UpdateLayeredWindow, ULW_ALPHA,
     WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT,
     WM_ACTIVATE, WM_CREATE, WM_DESTROY, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEWHEEL,
     WM_MOUSEMOVE, WM_NCHITTEST, WM_RBUTTONUP, WS_POPUP,
@@ -245,6 +245,13 @@ pub(crate) fn create_gdi_window(
     };
 
     lock_hwnd_map().insert(label.to_string(), hwnd.0 as isize);
+
+    // CreateWindowExW 未带 WS_VISIBLE 风格,建窗默认隐藏;UpdateLayeredWindow
+    // 只更新分层内容缓存、不改变窗口可见性。不显示则贴图窗口(含预览拼图)
+    // 建后永不可见。窗口已是 WS_EX_NOACTIVATE,用 SW_SHOWNOACTIVATE 显示不抢
+    // 焦点也不激活,与"贴图不打断用户当前应用输入"语义一致。
+    let _ = unsafe { ShowWindow(hwnd, SW_SHOWNOACTIVATE) };
+
     Ok(hwnd)
 }
 
@@ -617,6 +624,14 @@ mod tests {
         assert!(
             entry_seg.contains("default_pin_state"),
             "建窗登记必须用 default_pin_state 注入持久化默认"
+        );
+        // CreateWindowExW 未带 WS_VISIBLE 时建窗默认隐藏,UpdateLayeredWindow
+        // 只更新内容缓存不改变可见性——必须显式 ShowWindow 显示,否则贴图窗口
+        // (含预览拼图)建后永不可见。窗口 WS_EX_NOACTIVATE,SW_SHOWNOACTIVATE
+        // 显示不抢焦点不激活,与"贴图不打断当前应用输入"语义一致。
+        assert!(
+            body.contains("ShowWindow(hwnd, SW_SHOWNOACTIVATE)"),
+            "建窗后必须显式 ShowWindow(SW_SHOWNOACTIVATE)显示分层窗口"
         );
     }
 
