@@ -332,6 +332,12 @@ fn destroy_all_webviews(app: &AppHandle) {
             let _ = window.destroy();
         }
     }
+
+    // quickpaste 被 window.destroy() 销毁时不经过 hide_quickpaste_window
+    // (唯一 set_visible(false) 入口),可见性静态标记会残留 true——退出低占用
+    // 重建后自动低占用检测把它当可见窗口永久阻断空闲计时、快捷键唤出误走
+    // next 分支。销毁即复位,与上面文件盒清记录/贴图清数据同对称口径。
+    crate::windows::quickpaste::set_visible(false);
 }
 
 // 确保主窗口可用：窗口对象还在但句柄失效时先销毁再重建。
@@ -731,6 +737,26 @@ mod tests {
         assert!(
             !body.contains("starts_with(\"pin-image-\")"),
             "GDI 贴图不在 webview_windows 枚举内,销毁循环不得再按 pin-image- 前缀销毁"
+        );
+    }
+
+    // 源码护栏:销毁 quickpaste 窗口后必须复位可见性静态标记——destroy 不走
+    // hide_quickpaste_window(唯一 set_visible(false) 入口),残留 true 会让退出
+    // 低占用后的自动检测把不存在的窗口当可见、永久阻断空闲计时,快捷键唤出
+    // 也误走 next 分支。销毁循环之后的复位断言锁死对称语义。
+    #[test]
+    fn destroy_all_webviews_resets_quickpaste_visibility_after_destroy() {
+        let src = strip_line_comments(&manager_source());
+        let body = crate::services::system::hotkey::test_utils::fn_body(&src, "destroy_all_webviews");
+        let destroy_pos = body
+            .find("window.destroy()")
+            .expect("destroy_all_webviews 必须销毁窗口");
+        let reset_pos = body
+            .find("quickpaste::set_visible(false)")
+            .expect("销毁 quickpaste 后必须复位可见性静态标记");
+        assert!(
+            destroy_pos < reset_pos,
+            "quickpaste 可见性复位必须发生在窗口销毁之后"
         );
     }
 
