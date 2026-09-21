@@ -394,6 +394,15 @@ pub fn import_data_zip(zip_path: PathBuf, mode: &str) -> Result<String, String> 
             // 守不变量:导入的 settings.json 可能带 hide=false/hover=true 违规组合,
             // 落地前统一归一化,防止下次开启 hide 时意外弹出触发条
             new_settings.normalize_edge_hover_invariant();
+            // 与 save_settings 同口径补齐其余归一化:app_filter 迁移与
+            // update_check_interval 权威值,否则导入包绕过既有归一化入口
+            // 直接落盘违规组合(与后端唯一收敛入口不对称)。
+            new_settings.normalize_app_filter_blocklist();
+            new_settings.update_check_interval =
+                crate::services::AppSettings::normalize_update_check_interval(
+                    &new_settings.update_check_interval,
+                )
+                .to_string();
             if crate::services::is_portable_runtime() {
                 new_settings.use_custom_storage = false;
                 new_settings.custom_storage_path = None;
@@ -1676,6 +1685,28 @@ mod tests {
         assert!(
             drop_impl.contains("fs::remove_dir_all"),
             "Drop 必须无条件清理解压目录"
+        );
+    }
+
+    // 导入 replace 的 settings 落地必须补齐既有归一化:除贴边悬浮蕴含外用
+    // 例之外,app_filter 迁移与 update_check_interval 权威值也必须统一——
+    // 导入包绕过 save_settings 收敛入口直接落盘违规组合,会造成与后端
+    // 唯一收敛入口不对称(用户导入包后过滤名单/更新频率行为被旧格式劫持)。
+    #[test]
+    fn import_replace_normalizes_app_filter_and_update_interval() {
+        let src = strip_line_comments(&source_file("src/services/data_management/mod.rs"));
+        let body = fn_body(&src, "import_data_zip");
+        let replace_start = body
+            .find("\"replace\" =>")
+            .expect("replace 分支必须存在");
+        let replace_seg = &body[replace_start..];
+        assert!(
+            replace_seg.contains("normalize_app_filter_blocklist()"),
+            "replace 落地前必须做 app_filter 迁移归一化"
+        );
+        assert!(
+            replace_seg.contains("normalize_update_check_interval("),
+            "replace 落地前必须做 update_check_interval 权威归一化"
         );
     }
 
