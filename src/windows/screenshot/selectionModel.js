@@ -186,6 +186,22 @@ export function hitSelectionEdge(point, selection, tolerance = 4) {
   return edges.join('');
 }
 
+// 带形状遮罩的选区变换后路径顶点跟随包围盒:无路径时原样返回(不加键),
+// 有路径时按新旧包围盒相对位置比例映射——调整/缩放后形状在框内的相对
+// 占位不变。keepAspectRatio / 纯中心缩放 / 普通调整三分支共用。
+function withShapePath(geometry, current, polygonPath) {
+  if (!Array.isArray(polygonPath) || polygonPath.length < 3) return geometry;
+  const originalWidth = Math.max(current.right - current.left, 1);
+  const originalHeight = Math.max(current.bottom - current.top, 1);
+  const scaleX = geometry.width / originalWidth;
+  const scaleY = geometry.height / originalHeight;
+  geometry.polygonPath = polygonPath.map((point) => ({
+    left: geometry.left + ((point?.left ?? 0) - current.left) * scaleX,
+    top: geometry.top + ((point?.top ?? 0) - current.top) * scaleY,
+  }));
+  return geometry;
+}
+
 export function resizeSelection(selection, edge, point, bounds, options = {}) {
   if (!bounds || !Number.isFinite(bounds.width) || !Number.isFinite(bounds.height) || bounds.width <= 0 || bounds.height <= 0) {
     throw new RangeError('边界尺寸必须为正数');
@@ -234,7 +250,7 @@ export function resizeSelection(selection, edge, point, bounds, options = {}) {
       left = clamp(edge.includes('w') ? current.right - width : current.left, 0, maxLeft);
       top = clamp(edge.includes('n') ? current.bottom - height : current.top, 0, maxTop);
     }
-    return { left, top, right: left + width, bottom: top + height, width, height, polygonPath: selection.polygonPath };
+    return withShapePath({ left, top, right: left + width, bottom: top + height, width, height }, current, selection.polygonPath);
   }
 
   // 从中心缩放（ShareX 公开行为：按住 Ctrl 时以选区中心为锚点，拖动的边与对边对称移动）。
@@ -255,20 +271,7 @@ export function resizeSelection(selection, edge, point, bounds, options = {}) {
     const maxTop = Math.max(0, bounds.height - height);
     const left = clamp(Math.round(centerX - width / 2), 0, maxLeft);
     const top = clamp(Math.round(centerY - height / 2), 0, maxTop);
-    const centered = { left, top, right: left + width, bottom: top + height, width, height };
-    // 从中心缩放改变包围盒尺寸:带形状遮罩的选区路径顶点按新旧包围盒
-    // 比例映射,保持形状在框内的相对占位(中心点偏移同步计入)。
-    if (Array.isArray(selection.polygonPath) && selection.polygonPath.length >= 3) {
-      const originalWidth = Math.max(current.right - current.left, 1);
-      const originalHeight = Math.max(current.bottom - current.top, 1);
-      const scaleX = scaledWidth / originalWidth;
-      const scaleY = scaledHeight / originalHeight;
-      centered.polygonPath = selection.polygonPath.map((point) => ({
-        left: left + ((point?.left ?? 0) - current.left) * scaleX,
-        top: top + ((point?.top ?? 0) - current.top) * scaleY,
-      }));
-    }
-    return centered;
+    return withShapePath({ left, top, right: left + width, bottom: top + height, width, height }, current, selection.polygonPath);
   }
 
   let left = current.left;
@@ -287,20 +290,7 @@ export function resizeSelection(selection, edge, point, bounds, options = {}) {
   if (edge.includes('n')) top = clamp(top, 0, Math.max(0, bottom - 1));
   if (edge.includes('s')) bottom = clamp(bottom, top + 1, bounds.height);
 
-  const resized = { left, top, right, bottom, width: right - left, height: bottom - top };
-  // 带形状遮罩的选区调整大小后路径顶点按新旧包围盒比例映射，保持形状
-  // 在框内的相对占位；无路径时结果与改造前完全一致。
-  if (Array.isArray(selection.polygonPath) && selection.polygonPath.length >= 3) {
-    const originalWidth = Math.max(current.right - current.left, 1);
-    const originalHeight = Math.max(current.bottom - current.top, 1);
-    const scaleX = resized.width / originalWidth;
-    const scaleY = resized.height / originalHeight;
-    resized.polygonPath = selection.polygonPath.map((point) => ({
-      left: resized.left + ((point?.left ?? 0) - current.left) * scaleX,
-      top: resized.top + ((point?.top ?? 0) - current.top) * scaleY,
-    }));
-  }
-  return resized;
+  return withShapePath({ left, top, right, bottom, width: right - left, height: bottom - top }, current, selection.polygonPath);
 }
 
 export function nudgeSelection(selection, dx, dy, bounds) {

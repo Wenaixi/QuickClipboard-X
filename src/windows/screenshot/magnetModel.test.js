@@ -259,19 +259,19 @@ test('magnetSelection 拒绝无效输入', () => {
 test('magnetSelection 带形状遮罩吸附保留 polygonPath 且顶点跟随包围盒', () => {
   // 带 polygonPath 的选区（多边形/手绘）被磁吸后路径不得被吞：整体平移吸附
   // 时顶点同移，边缘吸附时按新旧包围盒比例映射（形状相对占位不变）。
-  const polygon = { left: 100, top: 100, right: 400, bottom: 300, width: 300, height: 200, polygonPath: [{ left: 120, top: 120 }, { left: 380, top: 200 }, { left: 240, top: 280 }] };
-  // 平移吸附到左缘：整体位移 dx=-100，顶点必须随包围盒同移。
-  const moved = magnetSelection({ left: 3, top: 100, right: 303, bottom: 300, polygonPath: polygon.polygonPath });
-  assert.deepEqual(moved.polygonPath, [{ left: 20, top: 120 }, { left: 280, top: 200 }, { left: 140, top: 280 } ], '平移吸附后路径顶点必须同移');
-  // 边缘吸附（edge=e）：按新旧宽度比例 x 轴映射，y 轴保持原相对偏移。
-  const resized = magnetSelection({ left: 100, top: 100, right: 1915, bottom: 300, polygonPath: polygon.polygonPath }, bounds, { edge: 'e' });
+  const path = [{ left: 120, top: 120 }, { left: 380, top: 200 }, { left: 240, top: 280 }];
+  const moved = magnetSelection({ left: 3, top: 100, right: 303, bottom: 300, polygonPath: path }, bounds);
+  // 输入 (3,100)-(303,300) 距左缘 3px 吸附到 0，整体位移 dx=-3：顶点必须同移。
+  assert.equal(moved.left, 0, '平移吸附必须落左缘');
+  assert.deepEqual(moved.polygonPath, [{ left: 117, top: 120 }, { left: 377, top: 200 }, { left: 237, top: 280 }], '平移吸附后路径顶点必须同移');
+  // 边缘吸附（edge=e）：旧盒 (100,100)-(1915,300) 宽 1815，吸附后右缘 1920 新宽 1820，
+  // 首顶点 x = newLeft + (120-originalLeft)*(1820/1815)，高度不变则 y 相对偏移不变。
+  const resized = magnetSelection({ left: 100, top: 100, right: 1915, bottom: 300, polygonPath: path }, bounds, { edge: 'e' });
   assert.equal(resized.left, 100, '拖 e 不得改变 left');
   assert.equal(resized.right, 1920, 'e 边必须吸附到右缘');
   assert.equal(resized.polygonPath.length, 3, '路径顶点数不得丢失');
-  // 原始形状位于 (120,120)/(380,200)/(240,280)，旧宽 300 新宽 1820：
-  // x = 100 + (px-100) * (1820/300)，y = 100 + (py-100)（高度不变则 y 相对偏移不变）。
-  assert.equal(resized.polygonPath[0].left, Math.round(100 + 20 * (1820 / 300)), '首顶点 x 必须按新宽比例映射');
-  assert.equal(resized.polygonPath[0].top, 120, '高度不变时 y 必须保持原相对偏移');
+  assert.equal(resized.polygonPath[0].left, Math.round(100 + 20 * (1820 / 1815)), '首顶点 x 必须按新旧宽比例映射');
+  assert.equal(resized.polygonPath[0].top, 120, '高度不变时路径顶点 y 必须保持原相对偏移');
   // 源码护栏：magnetSelection 主体必须保留 polygonPath 重建逻辑（顶点随左/上 + 比例映射）。
   const source = readSource('./magnetModel.js');
   const start = source.indexOf('export function magnetSelection');
