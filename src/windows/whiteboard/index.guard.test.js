@@ -86,8 +86,7 @@ test('白板支持撤销(弹出栈顶并重绘)', () => {
   );
 });
 
-test('白板绘制中断必须兜底 endDraw(防 drawing 卡死)', () => {
-  const start = bare.indexOf('function startDraw');
+test('白板绘制中断必须兜底 endDraw(防 drawing 卡死)', () => {  const start = bare.indexOf('function startDraw');
   assert.ok(start >= 0, '缺 startDraw');
   assert.ok(
     bare.includes('setPointerCapture('),
@@ -133,5 +132,24 @@ test('白板非笔工具最小尺寸判定(防 pointerleave 收口留微距噪�
   assert.ok(
     end.includes('Math.abs(end.x - anchor.x) + Math.abs(end.y - anchor.y) >= 3'),
     'endDraw 必须对非笔工具做最小尺寸判定(两点曼哈顿距离 < 3px 视为误触空笔丢弃)',
+  );
+});
+
+// 保存输出尺寸必须直读画布物理尺寸而非 innerWidth*dpr:白板窗口禁缩放全屏,
+// DPR 变化未触发 onResized 时 innerWidth*dpr 与 canvas.width 会不一致,
+// 输出按旧值会拉伸/留边,读画布与 resizeCanvas 维护的物理尺寸天然同步。
+test('白板保存必须读画布物理尺寸(与 DPR 解耦)', () => {
+  const save = bodyOf('async function save', 'function undo');
+  assert.ok(
+    save.includes('out.width = canvas.width'),
+    '保存输出宽度必须直读画布物理尺寸(resizeCanvas 维护)',
+  );
+  assert.ok(
+    save.includes('out.height = canvas.height'),
+    '保存输出高度必须直读画布物理尺寸',
+  );
+  assert.ok(
+    !save.includes('window.innerWidth * dpr'),
+    '输出尺寸不得再用 innerWidth*dpr(与画布物理尺寸解耦)',
   );
 });

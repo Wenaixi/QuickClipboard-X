@@ -204,10 +204,12 @@ function cancelDraw(event) {
 async function save() {
   // 白板画布透明 → 合成白底再转 PNG（PNG 不支持透明画布预览，白底保证
   // 保存产物可见）。canvas 此刻已是全栈形状重绘结果，保存即所见。
-  const dpr = window.devicePixelRatio || 1;
+  // 输出尺寸直接读画布物理尺寸,与 devicePixelRatio/innerWidth 解耦——
+  // 画布尺寸由 resizeCanvas 在 onResized 时维护,DPR 变化未触发 resize
+  // 时 innerWidth*dpr 与 canvas.width 可能不一致,读画布可避免拉伸/留边。
   const out = document.createElement('canvas');
-  out.width = window.innerWidth * dpr;
-  out.height = window.innerHeight * dpr;
+  out.width = canvas.width;
+  out.height = canvas.height;
   const octx = out.getContext('2d');
   octx.fillStyle = '#ffffff';
   octx.fillRect(0, 0, out.width, out.height);
