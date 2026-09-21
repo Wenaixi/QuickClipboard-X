@@ -69,39 +69,6 @@ pub fn annotation_window_ready(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-// 关闭编辑器窗口（完成/取消后销毁，释放 WebView renderer 常驻）。
-pub fn close_annotation_window(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window(ANNOTATION_WINDOW_LABEL) {
-        let _ = window.destroy();
-    }
-}
-
-// 校验编辑器加载事件权限来源：只接受编辑器窗口自身事件。
-pub fn require_annotation_window(window: &tauri::WebviewWindow) -> Result<(), String> {
-    if window.label() == ANNOTATION_WINDOW_LABEL {
-        Ok(())
-    } else {
-        Err("该命令只能由编辑器窗口调用".to_string())
-    }
-}
-
-// 编辑器完成路径：编辑后图片已由前端编码落盘到指定路径，此命令只做
-// 结果确认（复制/贴图等由动作链后续接管），并关闭编辑器窗口。
-#[tauri::command]
-pub fn annotation_finished(app: AppHandle, window: tauri::WebviewWindow, _result_path: String) -> Result<(), String> {
-    require_annotation_window(&window)?;
-    close_annotation_window(&app);
-    Ok(())
-}
-
-// 编辑器取消路径：关闭窗口不保存。
-#[tauri::command]
-pub fn annotation_cancelled(app: AppHandle, window: tauri::WebviewWindow) -> Result<(), String> {
-    require_annotation_window(&window)?;
-    close_annotation_window(&app);
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,16 +90,6 @@ mod tests {
         // 已存在窗口走复用（show + 推送加载事件），不重建 WebView。
         assert!(source.contains("get_webview_window(ANNOTATION_WINDOW_LABEL)"), "必须尝试复用现有窗口");
         assert!(source.contains("ANNOTATION_LOAD_EVENT, image_path"), "必须推送加载事件");
-    }
-
-    #[test]
-    fn editor_commands_require_annotation_window_origin() {
-        let source = source();
-        // 完成/取消命令必须校验窗口来源（只接受编辑器窗口），关闭窗口释放资源。
-        assert!(source.contains("require_annotation_window(&window)"), "命令必须校验窗口来源");
-        assert!(source.contains("close_annotation_window(&app)"), "命令必须关闭窗口");
-        assert!(source.contains("annotation_finished"), "必须提供完成命令");
-        assert!(source.contains("annotation_cancelled"), "必须提供取消命令");
     }
 
     // 首开竞态防护:新建窗口不得直接 emit(页面未就绪事件丢弃),必须先把
