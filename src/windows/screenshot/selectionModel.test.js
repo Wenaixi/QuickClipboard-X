@@ -853,6 +853,23 @@ test('nudgeSelection 拒绝无效边界或非有限位移', () => {
   );
 });
 
+test('nudgeSelection/resizeSelection 带形状遮罩平移与缩放保留 polygonPath', () => {
+  const polygon = { left: 100, top: 80, right: 300, bottom: 240, width: 200, height: 160, polygonPath: [{ left: 120, top: 90 }, { left: 280, top: 160 }, { left: 200, top: 230 }] };
+  // 微调平移：包围盒位移 dx/dy，路径顶点必须同移（形状相对占位不变）。
+  const nudged = nudgeSelection(polygon, 1, 1, bounds);
+  assert.deepEqual(nudged.polygonPath, [{ left: 121, top: 91 }, { left: 281, top: 161 }, { left: 201, top: 231 }], '微调后路径顶点必须同移');
+  assert.equal(nudged.left, 101, '微调后包围盒必须位移');
+  assert.equal(nudged.width, 200, '微调不得改变尺寸');
+  // 调整大小（拖 e 边到 x=400）：新宽 300，路径 x 按 300/200 比例映射，y 相对偏移不变。
+  const resized = resizeSelection(polygon, 'e', { x: 400, y: 160 }, bounds);
+  assert.equal(resized.polygonPath.length, 3, '调整后路径顶点数不得丢失');
+  // 首顶点 (120,90)：x = 100 + (120-100)*(300/200) = 130，y 保持 90（高度不变 y 相对偏移不变）。
+  assert.equal(resized.polygonPath[0].left, 130, '调整后路径顶点 x 必须按新宽比例映射');
+  assert.equal(resized.polygonPath[0].top, 90, '高度不变时路径顶点 y 必须保持原相对偏移');
+  // 无 polygonPath 的普通选区结果与既有契约完全一致（selectionValues 只取几何字段）。
+  assert.deepEqual(selectionValues(resized), { left: 100, top: 80, right: 400, bottom: 240, width: 300, height: 160 });
+});
+
 test('全部选区变换函数必须夹紧到显示器边界内', () => {
   const source = readSource('./selectionModel.js');
   // 拖拽/调整/移动/方形四种变换都必须以边界为约束，禁止裸输出越界矩形。

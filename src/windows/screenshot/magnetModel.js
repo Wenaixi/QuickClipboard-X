@@ -102,5 +102,23 @@ export function magnetSelection(selection, bounds, options = {}) {
     }
   }
 
+  // 带形状遮罩的选区（多边形/手绘）吸附后路径顶点须跟随包围盒，否则
+  // polygonPath 被吞、遮罩退化为矩形（捕获内容无差，纯视觉退化）。
+  // 整体平移（edge 空串）时顶点同移；边缘吸附时按新旧包围盒比例映射，
+  // 形状在框内的相对占位不变。
+  if (Array.isArray(selection.polygonPath) && selection.polygonPath.length >= 3) {
+    const original = { left: selection.left, top: selection.top, right: selection.right, bottom: selection.bottom };
+    const originalWidth = Math.max(original.right - original.left, 1);
+    const originalHeight = Math.max(original.bottom - original.top, 1);
+    const next = { left, top, right, bottom, width: right - left, height: bottom - top };
+    const scaleX = edge === '' ? 1 : next.width / originalWidth;
+    const scaleY = edge === '' ? 1 : next.height / originalHeight;
+    next.polygonPath = selection.polygonPath.map((point) => ({
+      left: next.left + ((point?.left ?? 0) - original.left) * scaleX,
+      top: next.top + ((point?.top ?? 0) - original.top) * scaleY,
+    }));
+    return next;
+  }
+
   return { left, top, right, bottom, width: right - left, height: bottom - top };
 }
