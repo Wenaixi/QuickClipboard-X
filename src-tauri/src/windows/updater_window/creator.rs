@@ -110,8 +110,14 @@ async fn check_updates_if_due(app: &AppHandle) -> Result<bool, String> {
         return Ok(false);
     }
 
-    crate::services::store::set(LAST_AUTO_CHECK_AT_KEY, &now)?;
-    check_updates(app, !settings.disable_update_popup).await
+    // 检查成功(含无更新)才推进时间戳——失败(网络/服务器抖动)不推进,
+    // 让 60s tick 成为天然重试节拍,抖动期最多 1 分钟重试一次,恢复感知
+    // 延迟 ≤ 60s;若先推进时间戳,失败后要等满 24h/72h 才重试(整周期空转)。
+    let result = check_updates(app, !settings.disable_update_popup).await;
+    if result.is_ok() {
+        crate::services::store::set(LAST_AUTO_CHECK_AT_KEY, &now)?;
+    }
+    result
 }
 
 // 检测当前运行的程序是否为安装版
@@ -486,6 +492,31 @@ mod tests {
                 "windows::updater_window::start_update_checker(app.handle().clone());"
             ),
             "主入口必须挂载自动更新定时检查"
+        );
+    }
+
+    // 自动更新失败重试护栏:上次检查时间戳必须只在检查成功后推进。
+    // 若先推进时间戳再检查,失败(网络/服务器抖动)后要等满整个间隔
+    // (24h/72h)才重试,自动更新整周期空转;成功才推进让 60s tick
+    // 成为天然重试节拍。顺序断言:store::set(LAST_AUTO_CHECK_AT_KEY
+    // 必须位于 check_updates 调用之后(仅 contains 无法表达顺序,
+    // 见 §10.3 顺序类不变量用 find 下标比较)。
+    #[test]
+    fn update_check_timestamp_advances_only_after_success() {
+        let src = stripped_source();
+        let body = src
+            .find("async fn check_updates_if_due")
+            .map(|start| src[start..].to_string())
+            .unwrap_or_default();
+        let check_pos = body
+            .find("check_updates(app, !settings.disable_update_popup).await")
+            .unwrap_or_else(|| panic!("缺 check_updates 调用"));
+        let set_pos = body
+            .find("crate::services::store::set(LAST_AUTO_CHECK_AT_KEY, &now)")
+            .unwrap_or_else(|| panic!("缺时间戳推进写入"));
+        assert!(
+            set_pos > check_pos,
+            "时间戳推进必须位于 check_updates 之后(失败不推进,60s tick 重试)"
         );
     }
 }
