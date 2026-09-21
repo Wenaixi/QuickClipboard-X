@@ -420,6 +420,14 @@ pub fn cleanup_all_pin_images() {
     }
 }
 
+// 全部贴图窗口显式关闭:低占用模式进入时调用,逐个走 close_pin_image_window
+// (cleanup 数据 + WM_CLOSE 关 GDI 窗口)→ 防"数据已清但窗口残留屏上"的撕裂。
+pub fn close_all_pin_image_windows() {
+    for label in lock_pin_data().keys().cloned().collect::<Vec<String>>() {
+        let _ = close_pin_image_window(&label);
+    }
+}
+
 // 关闭贴图窗口
 /// 关闭贴图窗口:由 GDI 双键/菜单"关闭"直接调用(命令壳已删,服务函数保留)。
 /// 走 cleanup_pin_image_data 统一清理语义(移除数据 + 删除不再被引用的临时文件),

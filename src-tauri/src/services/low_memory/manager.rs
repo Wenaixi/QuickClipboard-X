@@ -327,6 +327,12 @@ fn destroy_all_webviews(app: &AppHandle) {
     // 数据记录仍在"的漏网场景,保证退出低占用后数据与临时文件全部归零。
     crate::windows::pin_image_window::cleanup_all_pin_images();
 
+    // GDI 贴图窗口逐个显式关闭:cleanup_all_pin_images 只清数据表与临时文件,
+    // 不关 GDI 窗口(WM_CLOSE → WM_DESTROY 走清理 HWND 表)——不关则贴图窗
+    // 残留屏上,数据已删后点击移动/缩放/保存全查 nil 失败,形成"窗口残屏+
+    // 数据已删"撕裂;且退出低占用后残留窗仍可交互。
+    crate::windows::pin_image_window::close_all_pin_image_windows();
+
     for label in WEBVIEW_LABELS {
         if let Some(window) = app.get_webview_window(label) {
             let _ = window.destroy();
@@ -757,6 +763,30 @@ mod tests {
         assert!(
             destroy_pos < reset_pos,
             "quickpaste 可见性复位必须发生在窗口销毁之后"
+        );
+    }
+
+    // 源码护栏:低占用进入必须显式关闭全部 GDI 贴图窗口——cleanup_all_pin_images
+    // 只清数据表与临时文件、不关 GDI 窗,残留窗上操作(移动/缩放/保存)查数据
+    // nil 失败,形成"窗口残屏+数据已删"撕裂;close_all_pin_image_windows 逐个
+    // 走 close(cleanup 数据 + WM_CLOSE 关窗)闭环。
+    #[test]
+    fn destroy_all_webviews_closes_all_gdi_pin_image_windows() {
+        let src = strip_line_comments(&manager_source());
+        let body = crate::services::system::hotkey::test_utils::fn_body(&src, "destroy_all_webviews");
+        assert!(
+            body.contains("close_all_pin_image_windows()"),
+            "低占用进入必须显式关闭全部 GDI 贴图窗口(防数据已删窗口残留)"
+        );
+        let cleanup_pos = body
+            .find("cleanup_all_pin_images()")
+            .expect("缺 cleanup_all_pin_images 调用");
+        let close_pos = body
+            .find("close_all_pin_image_windows()")
+            .expect("缺 close_all_pin_image_windows 调用");
+        assert!(
+            cleanup_pos < close_pos,
+            "先清数据再关窗口,close 内部复用 cleanup 语义幂等"
         );
     }
 
