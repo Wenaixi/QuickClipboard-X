@@ -75,7 +75,6 @@ test('编辑器保存失败必须提示并保持窗口打开,不得无条件关�
 });
 
 test('编辑器必须实接三 model（非仅摆设）', () => {
-  // 三 model 导出必须被 App.jsx 真实消费。
   for (const layerExport of ['createLayer', 'addLayer', 'updateLayer', 'removeLayer', 'reorderLayer']) {
     assert.ok(layerSource.includes(`export function ${layerExport}`) || layerSource.includes(`export const ${layerExport}`), `layerModel 缺导出 ${layerExport}`);
   }
@@ -100,6 +99,33 @@ test('编辑器绘制必须捕获指针并随窗口尺寸重绘', () => {
   // 窗口尺寸/跨 DPI 变化必须重跑 draw,否则位图被 CSS 拉伸显示模糊。
   assert.ok(appSource.includes('.onResized(redraw)'), '窗口尺寸变化必须重绘');
   assert.ok(appSource.includes("matchMedia('(resolution: ' + window.devicePixelRatio + 'dppx)')"), '跨 DPI 变化必须重绘');
+});
+
+test('编辑器画布必须兜底 pointercancel(与白板/截图同款),防残稿卡死', () => {
+  // 系统打断(快捷键弹窗/UAC/任务切换/笔尖脱落)触发 pointercancel 替代
+  // pointerup:草稿残留+系统自动释放指针捕获,下一笔被首指守卫吞掉,
+  // 用户只能撤销/清空/关窗恢复。canvas 必须挂 onPointerCancel 走与
+  // pointerup 相同的收口(白板 index.js/截图 App.jsx 均有兜底,唯编辑器缺)。
+  assert.ok(
+    appSource.includes('onPointerCancel={handlePointerUp}'),
+    '画布必须监听 pointercancel 并复用 pointerup 收口(否则残稿卡死画不出新笔)',
+  );
+});
+
+test('编辑器跨图加载必须先清进行中草稿,再清图层(防旧草稿渲染+吞首笔)', () => {
+  // 窗口复用路径:编辑器开着再编辑另一张图,onload 触发重绘,若旧草稿
+  // 残留会被 draw 渲染到新图(坐标错位)且首指守卫吞掉新图第一笔。
+  // 顺序断言:清草稿必须早于 setLayers(newEmptyLayers())。
+  const loadEventPos = appSource.indexOf("listen(ANNOTATION_LOAD_EVENT");
+  assert.ok(loadEventPos !== -1, '必须监听加载事件');
+  const onloadPos = appSource.indexOf('img.onload = () =>', loadEventPos);
+  assert.ok(onloadPos !== -1, 'onload 回调必须存在');
+  const onloadBody = appSource.slice(onloadPos, onloadPos + 400);
+  const clearDraftPos = onloadBody.indexOf('draftRef.current = null;');
+  const clearLayersPos = onloadBody.indexOf('setLayers(newEmptyLayers())');
+  assert.ok(clearDraftPos !== -1, 'onload 必须先清进行中草稿');
+  assert.ok(clearLayersPos !== -1, 'onload 必须清空图层(跨图不累积)');
+  assert.ok(clearDraftPos < clearLayersPos, '清草稿必须早于清图层(避免 draw 渲染旧草稿)');
 });
 
 test('编辑器多指针只认首指,undo 先清草稿', () => {

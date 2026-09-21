@@ -228,6 +228,9 @@ function AnnotationApp() {
       img.onload = () => {
         imageRef.current = img;
         setImageSize({ width: img.naturalWidth, height: img.naturalHeight });
+        // 加载新图前先丢弃进行中草稿,否则旧草稿残留会被新图画布 draw 渲染
+        // (坐标错位)+首指守卫吞掉新图第一笔(与撤销/清空/删除同款兜底)。
+        draftRef.current = null;
         // 加载新图时清空历史与标注，避免跨图累积。
         setLayers(newEmptyLayers());
         setHistory([]);
@@ -422,7 +425,7 @@ function AnnotationApp() {
         </div>
       </div>
       <div className="relative min-h-0 flex-1 overflow-hidden bg-qc-panel-2">
-        <canvas ref={canvasRef} className="h-full w-full touch-none" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerLeave={handlePointerUp} />
+        <canvas ref={canvasRef} className="h-full w-full touch-none" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerLeave={handlePointerUp} onPointerCancel={handlePointerUp} />
       </div>
       <div className="pointer-events-none absolute right-2 top-1 text-xs text-qc-fg-muted">
         {imageSize.width > 0 ? `${imageSize.width} × ${imageSize.height}` : '等待加载截图…'}
