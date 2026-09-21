@@ -251,6 +251,15 @@ pub fn get_all_groups() -> Result<Vec<GroupInfo>, String> {
 // 添加分组
 pub fn add_group(name: String, icon: String, color: String) -> Result<GroupInfo, String> {
     with_connection(|conn| {
+        // "全部"是收藏分组结构的哨兵行(前端按此筛选所有分组),禁止创建——
+        // 与 update_group/delete_group 同款拒绝。否则会落库一个不可删改的
+        // "全部"实数据行(delete/update 双向拒绝),污染本地结构并随同步/备份扩散。
+        if name == "全部" {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "不能创建'全部'分组".to_string()
+            ));
+        }
+
         let exists: i64 = conn.query_row(
             "SELECT COUNT(*) FROM groups WHERE name = ?1",
             params![&name],
@@ -560,6 +569,25 @@ mod tests {
         assert!(
             delete_body.contains("name == \"全部\""),
             "delete_group 必须保留对'全部'的拒绝"
+        );
+    }
+
+    // "全部"哨兵名同样禁止在 add_group 落库:新增分组入口无重名检查兜底
+    // (groups 表无哨兵行,COUNT 恒 0),不拒绝会把"全部"落成不可删改的实数据
+    // 行并随同步/备份扩散。拒绝必须发生在任何 SELECT/INSERT 之前。
+    #[test]
+    fn add_group_rejects_creating_all_group() {
+        let src = strip_line_comments(&source_file("src/services/database/groups.rs"));
+        let body = fn_body(&src, "add_group");
+        let reject_pos = body
+            .find("name == \"全部\"")
+            .expect("add_group 必须拒绝创建'全部'分组");
+        let insert_pos = body
+            .find("SELECT COUNT(*) FROM groups WHERE name = ?1")
+            .expect("缺分组存在性检查");
+        assert!(
+            reject_pos < insert_pos,
+            "'全部'拒绝必须早于分组存在性检查与 INSERT"
         );
     }
 

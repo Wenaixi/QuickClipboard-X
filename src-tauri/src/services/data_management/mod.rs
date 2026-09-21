@@ -735,7 +735,8 @@ fn merge_groups_from_importdb(conn: &rusqlite::Connection) -> rusqlite::Result<(
     let sql = format!(
         "INSERT OR IGNORE INTO groups (name, icon, color, order_index, created_at, updated_at)
          SELECT name, {icon}, {color}, {order_index}, {created_at}, {updated_at}
-         FROM importdb.groups",
+         FROM importdb.groups
+         WHERE name <> '全部'",
         icon = icon_expr,
         color = color_expr,
         order_index = order_expr,
@@ -1723,6 +1724,19 @@ mod tests {
         assert!(
             tx_pos < tombstone_pos && tombstone_pos < commit_pos,
             "墓碑合并必须在事务内、且先于提交(否则导入后删除复活)"
+        );
+    }
+
+    // "全部"哨兵名禁止经导入进入本地 groups 表:前端按哨兵行筛选所有分组,
+    // 导入包若含"全部"实数据行会落库成不可删改(delete/update 双向拒绝)的脏行
+    // 并随同步/备份扩散。merge_groups_from_importdb 的 SELECT 必须排除它。
+    #[test]
+    fn merge_groups_skips_all_sentinel_group() {
+        let src = strip_line_comments(&source_file("src/services/data_management/mod.rs"));
+        let body = fn_body(&src, "merge_groups_from_importdb");
+        assert!(
+            body.contains("WHERE name <> '全部'"),
+            "导入合并必须排除'全部'哨兵行"
         );
     }
 
