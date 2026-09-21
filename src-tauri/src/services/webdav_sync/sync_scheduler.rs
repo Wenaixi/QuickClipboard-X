@@ -89,8 +89,17 @@ pub fn start() {
                 // 数累加,间隔会成比例放大导致拉取频率失真,这里以距上次
                 // 拉取的实时流逝时间决定是否到点,拉取完成后重置计时。
                 if last_pull_at.elapsed() >= interval {
-                    if let Ok(report) = super::download_raw(false).await {
-                        store_report("pull", report, true);
+                    match super::download_raw(false).await {
+                        Ok(report) => store_report("pull", report, true),
+                        // 自动拉取失败不能静默:LAST_REPORT 停留在上次成功残留,
+                        // 前端无法感知自动同步停滞(手动拉取会上抛、窗口显示拉取
+                        // 有错误事件,此处是唯一静默路径)。失败同样进报告,前端
+                        // 可读上次同步结果含失败原因。
+                        Err(error) => {
+                            let mut report = SyncReport::default();
+                            report.errors.push(format!("自动拉取失败: {error}"));
+                            store_report("pull", report, true);
+                        }
                     }
                     last_pull_at = std::time::Instant::now();
                 }
@@ -439,6 +448,44 @@ mod tests {
         assert!(
             !body.contains("seconds_since_pull"),
             "不得再用循环迭代计数作为间隔依据"
+        );
+    }
+
+    // 护栏:自动拉取失败不得静默——Err 分支沿用 store_report 上报失败原因,
+    // 使 LAST_REPORT 反映最近一次同步的真实结果(含失败),前端可感知自动
+    // 同步停滞;静默丢弃会让 LAST_REPORT 停留在上次成功残留,用户误以为
+    // 同步正常而实际已停滞。
+    #[test]
+    fn auto_pull_failure_is_reported_not_silent() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/webdav_sync/sync_scheduler.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读 sync_scheduler.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = stripped
+            .find("last_pull_at.elapsed() >= interval")
+            .expect("缺自动拉取到点判定");
+        let rest = &stripped[start..];
+        let end = rest
+            .find("tokio::time::sleep")
+            .expect("缺自动拉取循环体结束");
+        let body = &stripped[start..end];
+        assert!(
+            !body.contains("if let Ok(report)"),
+            "自动拉取不得再用 if let Ok 静默丢弃失败(Err 分支必须上报)"
+        );
+        assert!(
+            body.contains("Err(error)") && body.contains("store_report(\"pull\""),
+            "自动拉取 Err 分支必须经 store_report 上报失败原因"
+        );
+        assert!(
+            body.contains("report.errors.push"),
+            "失败原因必须进 report.errors,前端可读"
         );
     }
 }
