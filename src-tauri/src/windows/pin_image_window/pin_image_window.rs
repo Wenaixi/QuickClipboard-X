@@ -1,4 +1,3 @@
-use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::collections::HashMap;
@@ -296,23 +295,7 @@ fn is_preview_label(label: &str) -> bool {
 
 // 图片数据查询:由 GDI 菜单/另存/清理按标签读 PIN_IMAGE_DATA_MAP。
 // 原命令壳 get_pin_image_data(WebviewWindow 版)随前端删除后无调用者,
-// 按 R37 同标准删除命令注册,服务逻辑保留在 close/save 内部。
-fn pin_image_data(label: &str) -> Result<serde_json::Value, String> {
-    let map = lock_pin_data();
-    if let Some(data) = map.get(label) {
-        return Ok(json!({
-            "file_path": data.file_path,
-            "width": data.width,
-            "height": data.height,
-            "preview_mode": data.preview_mode,
-            "image_physical_x": data.image_physical_x,
-            "image_physical_y": data.image_physical_y,
-            "original_image_path": data.original_image_path,
-            "edit_data": data.edit_data
-        }));
-    }
-    Err("未找到图片数据".to_string())
-}
+// 服务逻辑保留在 close/save 内部按标签直接读数据表。
 
 // 按标签取贴图文件路径(菜单复制/另存/透明度重渲染共用)
 pub fn pin_image_file_path(label: &str) -> Result<String, String> {
@@ -594,7 +577,7 @@ mod tests {
 
     #[test]
     fn pin_image_update_functions_are_not_reintroduced() {
-        // 死功能链：后端的两个零调用更新函数与前端无发射端的刷新监听
+        // 死功能链：后端的两个零调用更新函数与已删除的前端刷新监听
         // 一并删除后不得回归。注释不得出现被断言标识符（§10.4 自命中陷阱）。
         let read_self = || {
             std::fs::read_to_string(format!(
@@ -618,12 +601,8 @@ mod tests {
             "后端零调用更新函数不得重新引入"
         );
         assert!(!code.contains(&dead_event), "后端不得重新引入刷新事件发射");
-        let front = std::fs::read_to_string(format!(
-            "{}/../src/windows/pinImage/index.js",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .expect("读取贴图前端源码失败");
-        assert!(!front.contains(&dead_event), "前端死监听不得重新引入");
+        // 贴图前端窗口目录已随 pinImage 窗口整体删除,前端文件不再存在,
+        // 无刷新监听可断言;若前端窗口重新引入必须先接真实数据源。
     }
 
     #[test]

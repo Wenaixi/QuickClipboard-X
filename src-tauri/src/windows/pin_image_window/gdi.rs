@@ -15,8 +15,8 @@
 //     → ReleaseDC),任一缺失即 GDI 泄漏。
 //   - 窗口类 RegisterClassW 只注册一次(static Once 守卫)。
 //
-// 本文件只立骨架(注册/渲染/消息入口/HWND 表),交互分支(拖窗/缩放/平移/
-// 缩略图/右键菜单)在后续任务接入;护栏测试同时落地,CI 上可反证见红。
+// 本文件从骨架逐步接入交互分支(拖窗/右键菜单已接入;缩放/平移/缩略图
+// 在后续任务接入);护栏测试同时落地,CI 上可反证见红。
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -35,7 +35,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, RegisterClassW, ShowWindow, SW_SHOWNOACTIVATE, UpdateLayeredWindow, ULW_ALPHA,
     WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT,
     WM_ACTIVATE, WM_CREATE, WM_DESTROY, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEWHEEL,
-    WM_MOUSEMOVE, WM_NCHITTEST, WM_RBUTTONUP, WS_POPUP,
+    WM_MOUSEMOVE, WM_NCHITTEST, WM_RBUTTONUP, WS_POPUP, HTCLIENT, HTCAPTION,
 };
 use windows::Win32::Foundation::RECT;
 
@@ -435,7 +435,20 @@ unsafe extern "system" fn pin_image_window_proc(
 ) -> LRESULT {
     match msg {
         WM_CREATE => LRESULT(0),
-        WM_ACTIVATE | WM_NCHITTEST | WM_LBUTTONDOWN | WM_LBUTTONUP | WM_LBUTTONDBLCLK
+        // 命中测试:整窗按标题栏处理(HTCAPTION 2),Windows 原生拖动窗口——
+        // 贴图窗口无边框,默认 HTCLIENT 点任意像素只聚焦不拖。锁定位置时
+        // 回到 HTCLIENT 禁止拖动。
+        WM_NCHITTEST => {
+            let Some(label) = label_for_hwnd(hwnd) else {
+                return LRESULT(HTCAPTION as isize);
+            };
+            if pin_state(&label).lock_position {
+                LRESULT(HTCLIENT as isize)
+            } else {
+                LRESULT(HTCAPTION as isize)
+            }
+        }
+        WM_ACTIVATE | WM_LBUTTONDOWN | WM_LBUTTONUP | WM_LBUTTONDBLCLK
         | WM_MOUSEMOVE | WM_MOUSEWHEEL => DefWindowProcW(hwnd, msg, wparam, lparam),
         // 右键菜单:在光标处弹出原生菜单,选中后分发动作再返回 0
         WM_RBUTTONUP => {
@@ -651,6 +664,7 @@ mod tests {
             "WM_MOUSEWHEEL",
             "WM_RBUTTONUP",
             "WM_DESTROY",
+            "WM_NCHITTEST",
         ] {
             assert!(
                 stripped.contains(msg),
@@ -678,6 +692,37 @@ mod tests {
         assert!(
             label_pos < retain_pos && retain_pos < remove_pos,
             "WM_DESTROY 清理顺序必须为 反查标签 → retain 删句柄 → 删状态,否则 state 永不删除"
+        );
+    }
+
+    // 无边框贴图窗口整窗可拖:WM_NCHITTEST 必须返回 HTCAPTION(Windows 原生
+    // 拖动),锁定位置时回到 HTCLIENT 禁拖。find 下标顺序断言:
+    // 先取 lock_position 再分支返回 HTCAPTION/HTCLIENT。
+    #[test]
+    fn nchittest_returns_htcaption_unless_position_locked() {
+        let stripped: String = gdi_source()
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let pos = stripped.find("WM_NCHITTEST").expect("缺 WM_NCHITTEST 分支");
+        let seg = &stripped[pos..];
+        assert!(
+            seg.contains("LRESULT(HTCAPTION as isize)"),
+            "默认必须返回 HTCAPTION 使整窗可拖(Windows 原生拖动)"
+        );
+        assert!(
+            seg.contains("LRESULT(HTCLIENT as isize)"),
+            "锁定位置必须返回 HTCLIENT 禁拖"
+        );
+        let lock_pos = seg.find(".lock_position").expect("必须读 lock_position 判断锁定");
+        // HTCAPTION 返回可能出现在两处:标签反查失败提前返回、锁定检查后
+        // else 分支。顺序断言只看锁定检查之后的返回——提前返回不代表
+        // 锁定检查被跳过,若从文件头找会命中提前返回而误判失败。
+        let after_lock = &seg[lock_pos..];
+        assert!(
+            after_lock.contains("LRESULT(HTCAPTION as isize)"),
+            "锁定检查通过后必须返回 HTCAPTION(未锁定时整窗可拖)"
         );
     }
 
