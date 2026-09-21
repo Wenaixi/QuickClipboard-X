@@ -243,6 +243,11 @@ function start() {
   window.onResized(() => resizeCanvas());
   setupToolButtons();
   document.getElementById('clear').addEventListener('click', () => {
+    // 清空前先收口进行中一笔(与撤销同构):否则 drawing 残留使清空后的
+    // 画布仍渲染半笔,松手又把半笔补回已清空的形状栈(松手诈尸)。
+    if (drawing) {
+      endDraw({ pointerId: activePointerId });
+    }
     shapes.length = 0;
     renderPreview();
   });

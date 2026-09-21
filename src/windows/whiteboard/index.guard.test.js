@@ -61,7 +61,7 @@ test('白板 renderPreview 必须全量重绘形状栈', () => {
 test('白板清空必须清栈并走全量重绘', () => {
   const start = bare.indexOf('document.getElementById(\'clear\')');
   assert.ok(start >= 0, '缺少 clear 按钮绑定');
-  const clearSeg = bare.slice(start, start + 220);
+  const clearSeg = bare.slice(start, start + 300);
   assert.ok(
     clearSeg.includes('shapes.length = 0'),
     '清空必须重置形状栈（只 clearRect 会留下无法撤销/保存的形状）',
@@ -69,6 +69,12 @@ test('白板清空必须清栈并走全量重绘', () => {
   assert.ok(
     clearSeg.includes('renderPreview()'),
     '清空必须走全量重绘入口（保证画布与栈一致）',
+  );
+  // 绘制中清空必须先收口当前一笔:否则 drawing 残留让清空后的画布仍画
+  // 半笔,松手 endDraw 又把半笔补回已清空的栈(松手诈尸)。与 undo 同构。
+  assert.ok(
+    clearSeg.includes('endDraw({ pointerId: activePointerId })'),
+    '清空必须先收口进行中一笔(与撤销同构,防松手诈尸)',
   );
 });
 
