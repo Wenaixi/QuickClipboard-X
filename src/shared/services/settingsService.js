@@ -220,10 +220,17 @@ export async function loadSettingsFromBackend() {
     const savedSettings = await reloadSettings()
 
     const mergedSettings = { ...defaultSettings, ...savedSettings }
-    
+
     return mergedSettings
   } catch (error) {
     console.error('加载设置失败:', error)
+    // 加载失败静默回退默认值会让用户设置异常时无任何感知(与保存失败
+    // 已 toast 的路径不对称),必须显式提示已回退默认。
+    try {
+      toast.error(i18n.t('settings.loadFailed'))
+    } catch {
+      // toast/i18n 初始化失败时不阻塞返回默认值
+    }
     return { ...defaultSettings }
   }
 }

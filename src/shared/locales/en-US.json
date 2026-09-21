@@ -294,6 +294,7 @@
     "searchPlaceholder": "Search settings...",
     "saved": "Settings saved",
     "saveFailed": "Failed to save settings",
+    "loadFailed": "Failed to load settings, reverted to defaults",
     "search": {
       "noResults": "No matching settings found",
       "tryAnother": "Try another keyword"
