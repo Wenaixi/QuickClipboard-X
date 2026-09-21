@@ -566,6 +566,15 @@ pub fn register_paste_plain_text_hotkey(shortcut_str: &str) -> Result<(), String
         .on_shortcut(shortcut, move |app, _shortcut, event| {
             match event.state {
                 ShortcutState::Pressed => {
+                    // 低占用/前台禁用守卫:与截图/文件盒/录制等热键对称——低内存
+                    // 模式下主窗全部销毁,纯文本粘贴热键直接读库模拟粘贴会向用户
+                    // 当前应用注入文本。ensure 返回 false 时不执行注入。
+                    if !matches!(
+                        ensure_normal_mode_for_hotkey(app, "纯文本粘贴"),
+                        Ok(true)
+                    ) {
+                        return;
+                    }
                     if try_activate_key(&key_id) {
                         // 首次按下
                         let app = app.clone();
@@ -680,9 +689,19 @@ pub fn register_number_shortcuts(modifier: &str) -> Result<(), String> {
 
             match app
                 .global_shortcut()
-                .on_shortcut(shortcut, move |_app, _shortcut, event| {
+                .on_shortcut(shortcut, move |app, _shortcut, event| {
                     match event.state {
                         ShortcutState::Pressed => {
+                            // 低占用/前台禁用守卫:与截图/文件盒/录制等热键对称——
+                            // 低内存模式下主窗全部销毁、仅托盘面板可交互,数字快捷键
+                            // 直接读库模拟粘贴会向用户当前应用注入文本;前台全局禁用
+                            // 时同样不应注入。ensure 返回 false 时不执行注入。
+                            if !matches!(
+                                ensure_normal_mode_for_hotkey(app, "数字快捷键"),
+                                Ok(true)
+                            ) {
+                                return;
+                            }
                             if try_activate_key(&key_id) {
                                 // 首次按下
                                 let key_id = key_id.clone();
@@ -1210,6 +1229,21 @@ mod tests {
                 && global_disable_pos < action_pos,
             "截图热键触发顺序必须为 低内存恢复→全局禁用守卫→执行动作"
         );
+    }
+
+    // 纯文本粘贴与数字快捷键同样必须过低内存守卫：低内存模式下主窗全部
+    // 销毁、仅托盘面板可交互,这两类热键直接读库模拟粘贴会向用户当前应用
+    // 注入文本——与截图/文件盒/录制热键对称,缺失即"低占用注入"设计破坏。
+    #[test]
+    fn paste_and_number_hotkeys_pass_low_memory_guard() {
+        let src = strip_line_comments(&global_source());
+        for name in ["register_paste_plain_text_hotkey", "register_number_shortcuts"] {
+            let b = fn_body(&src, name);
+            assert!(
+                b.find("ensure_normal_mode_for_hotkey").is_some(),
+                "{name} 必须过低内存恢复守卫,否则低占用下直接注入粘贴"
+            );
+        }
     }
 
     // reload 注册截图热键必须受 screenshot_enabled 守卫：
