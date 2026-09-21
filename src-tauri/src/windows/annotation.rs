@@ -27,6 +27,10 @@ pub fn open_annotation_window(app: &AppHandle, image_path: &str) -> Result<(), S
     if let Some(window) = app.get_webview_window(ANNOTATION_WINDOW_LABEL) {
         let _ = window.show();
         let _ = window.set_focus();
+        // 复用路径:上次编辑器未保存直接关窗时,截图会话仍停留在处理中终态,
+        // 下次截图会被 Existing 守卫拒绝重入。复用前先尝试把残留会话按失败
+        // 收口(会话不存在时静默跳过),保证编辑-取消-再截图链路不吞截图。
+        crate::windows::screenshot_window::abandon_stale_edit_session(app);
         // 复用路径:窗口页面已就绪(上次已触发 ready),直接 emit。
         window
             .emit(ANNOTATION_LOAD_EVENT, image_path)
@@ -129,6 +133,22 @@ mod tests {
         assert!(
             source.contains("refresh_excluded_hwnds(app)"),
             "创建编辑器窗口后必须刷新自身窗口排除列表"
+        );
+    }
+
+    // 复用路径必须先清理遗留截图会话:编辑器未保存直接关窗时会话停留
+    // Processing,下次截图被 Existing 守卫拒绝重入(吞截图)。复用前必须
+    // 调用 abandon_stale_edit_session 按失败收口残留会话。
+    #[test]
+    fn editor_reuse_abandons_stale_screenshot_session() {
+        let source = source();
+        let reuse_pos = source
+            .find("get_webview_window(ANNOTATION_WINDOW_LABEL)")
+            .expect("必须尝试复用现有窗口");
+        let reuse_seg = &source[reuse_pos..];
+        assert!(
+            reuse_seg.contains("abandon_stale_edit_session(app)"),
+            "复用路径必须先清理遗留截图会话,否则编辑-取消-再截图被吞"
         );
     }
 }

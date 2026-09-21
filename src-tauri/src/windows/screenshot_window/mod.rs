@@ -906,6 +906,17 @@ pub fn is_screenshot_active() -> bool {
     STATE.lock().sessions.phase().is_some()
 }
 
+/// 编辑器复用前清理遗留的"处理中"截图会话：编辑器未保存直接关窗时
+/// 会话停留在 Processing 终态,下次 start_screenshot 会被 Existing 守卫
+/// 拒绝重入(吞掉用户下一次截图)。此处把任一处理中会话按失败收口,
+/// 无会话时静默跳过(与 cancel 幂等语义一致)。
+pub fn abandon_stale_edit_session(app: &AppHandle) {
+    let session_id = STATE.lock().sessions.current().map(|s| s.session_id().to_string());
+    if let Some(session_id) = session_id {
+        finish_failed_screenshot(app, &session_id);
+    }
+}
+
 pub fn start_screenshot(app: &AppHandle, initial_action: Option<&str>) -> Result<(), String> {
     let settings = get_settings();
     validate_initial_screenshot_action(initial_action, &settings)?;
