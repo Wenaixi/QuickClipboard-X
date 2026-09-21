@@ -14,6 +14,7 @@ pub fn webdav_list_groups(device_id: &str) -> Result<Vec<CloudGroup>, String> {
             "SELECT g.name, g.icon, g.color, g.order_index, COALESCE(g.source_device_id, ''),
                     g.created_at, g.updated_at
              FROM groups g
+             WHERE g.name <> '全部'
              ORDER BY g.order_index, g.name",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -521,6 +522,19 @@ mod tests {
     use super::{merge_group_icon, normalize_group_color, normalize_group_icon};
     use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
 
+    // 云端上传通道必须过滤「全部」哨兵行:修复前的存量库可能有脏行,上传
+    // 时会进 groups.json 云端残留(拉取侧 save_groups 会 skip 不扩散,但
+    // 云端留冗余)。发送侧与接收侧、本地合并侧对称,SQL 必须含排除条件。
+    #[test]
+    fn webdav_list_groups_filters_all_sentinel() {
+        let src = strip_line_comments(&source_file("src/services/database/groups.rs"));
+        let body = fn_body(&src, "webdav_list_groups");
+        assert!(
+            body.contains("WHERE g.name <> '全部'"),
+            "webdav 上传列表必须排除「全部」哨兵行,否则存量脏行残留云端"
+        );
+    }
+
     #[test]
     fn normalizes_group_color_variants() {
         assert_eq!(normalize_group_color("#DC2626"), "#dc2626");
@@ -550,8 +564,7 @@ mod tests {
     // delete_group 已拒绝删除;update_group 若不拒绝改名,把"全部"改掉会让
     // 哨兵语义丢失、收藏过滤条件失效,同步出去还会污染其他设备的分组结构。
     #[test]
-    fn update_group_rejects_renaming_all_group() {
-        let src = strip_line_comments(&source_file("src/services/database/groups.rs"));
+    fn update_group_rejects_renaming_all_group() {        let src = strip_line_comments(&source_file("src/services/database/groups.rs"));
         let body = fn_body(&src, "update_group");
         let reject_pos = body
             .find("old_name == \"全部\"")
