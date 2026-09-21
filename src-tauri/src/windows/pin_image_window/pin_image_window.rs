@@ -278,7 +278,13 @@ async fn create_pin_image_window(
     if let Some(path) = image_path {
         // 建窗渲染透明度读窗口状态(继承持久化偏好):硬编码 255 会让用户改过的
         // 透明度在下次新建窗口时被重置回 100%,跨窗口继承承诺落空。
-        super::gdi::render_image(hwnd, &path, super::gdi::pin_state(label).opacity)?;
+        if let Err(error) = super::gdi::render_image(hwnd, &path, super::gdi::pin_state(label).opacity) {
+            // 渲染失败(文件在建操作与建窗之间被删/损坏,或 GDI 调用失败)
+            // 先走统一清理关闭空窗口——此时 GDI 空窗已建、HWND/状态/数据
+            // 三表已登记,直接上抛会留下黑屏空窗卡在屏上且数据残留。
+            let _ = close_pin_image_window(label);
+            return Err(error);
+        }
     }
     Ok(())
 }
@@ -799,6 +805,32 @@ mod tests {
         assert!(
             close_body.contains(".blocking_lock()"),
             "close_image_preview 必须用 .blocking_lock() 同步获取预览锁"
+        );
+    }
+
+    // 建窗渲染失败必须先清理空窗口:create_pin_image_window 内 render_image
+    // 失败(文件被删/损坏或 GDI 调用失败)若裸 ? 上抛,GDI 空窗留屏 + HWND/
+    // 状态/数据三表残留。护栏断言 render_image 调用之后、函数闭合前必须
+    // 出现 close_pin_image_window(顺序:render_image < close)。
+    #[test]
+    fn render_failure_closes_empty_window_before_returning() {
+        let src = strip_line_comments(&source_file("src/windows/pin_image_window/pin_image_window.rs"));
+        let body = fn_body(&src, "create_pin_image_window");
+        let render_pos = body
+            .find("render_image(hwnd, &path,")
+            .expect("建窗必须渲染图片");
+        let close_pos = body
+            .find("close_pin_image_window(label)")
+            .expect("渲染失败必须先清理空窗口");
+        assert!(
+            render_pos < close_pos,
+            "render_image 之后、函数闭合前必须调用 close_pin_image_window,否则空窗留屏+三表残留"
+        );
+        let ok_pos = body.rfind("\n    Ok(())").or_else(|| body.rfind("Ok(())"));
+        assert!(ok_pos.is_some(), "函数必须以 Ok(()) 收尾");
+        assert!(
+            close_pos < ok_pos.unwrap(),
+            "清理必须早于 Ok(()) 返回(失败分支不残留)"
         );
     }
 
