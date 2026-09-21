@@ -467,6 +467,12 @@ pub fn run() {
                     services::webdav_sync::start_scheduler();
                 }
 
+                // 激活自动更新后台定时检查:start_update_checker 是既有实现
+                // (60s tick + 按 update_check_interval 闸频),此前从未被调用,
+                // 用户设置"每日/每 3 天/每周"检查从不据此定时执行。启动即挂
+                // 上,首个 tick 前立即按闸频判定一次。
+                windows::updater_window::start_update_checker(app.handle().clone());
+
                 {
                     let app_handle = app.handle().clone();
                     tauri::async_runtime::spawn(async move {

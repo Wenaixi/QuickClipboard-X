@@ -469,5 +469,24 @@ mod tests {
         );
         let _ = FORCE_UPDATE_MODE.swap(false, Ordering::Relaxed);
     }
+
+    // 自动更新定时检查存活护栏:start_update_checker 必须在主入口挂载。
+    // 该后台任务此前从未被调用——设置页"每日/每周"自动检查间隔全空转,
+    // 只有手动"检查更新"才执行。若 lib.rs 的挂载行被删,自动更新偏好
+    // 再次变为死壳。
+    #[test]
+    fn auto_update_checker_is_wired_in_lib_entry() {
+        let lib_source = std::fs::read_to_string(format!(
+            "{}/src/lib.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读取主入口源码失败");
+        assert!(
+            lib_source.contains(
+                "windows::updater_window::start_update_checker(app.handle().clone());"
+            ),
+            "主入口必须挂载自动更新定时检查"
+        );
+    }
 }
 
