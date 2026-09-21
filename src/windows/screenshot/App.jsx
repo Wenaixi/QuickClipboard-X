@@ -693,8 +693,15 @@ function App() {
     const square = event.shiftKey && !clicked ? squareSelection(draft.start, end, bootstrap.bounds) : null;
     let finalSelection = square ?? selectionForPointerGesture(draft.start, end, bootstrap.bounds);
     // 手绘模式：拖动路径转轴对齐包围盒（形状遮罩由自由路径驱动）。
+    // 全部顶点共线(画笔直直线)时 polygonBounds 返回 null——展开 null 会得
+    // 无包围盒对象,后续 magnetSelection 对 undefined 抛 TypeError 中断选区
+    // 建立。与多边形闭合路径的退化回退对称:共线时不套用手绘形状遮罩,
+    // 保留矩形选区结果(捕获内容按包围盒本就一致)。
     if (!clicked && captureMode === 'freehand' && draft.path && draft.path.length >= 3) {
-      finalSelection = { ...polygonBounds(draft.path), polygonPath: draft.path.map((point) => ({ left: point.x, top: point.y })) };
+      const bounds = polygonBounds(draft.path);
+      if (bounds) {
+        finalSelection = { ...bounds, polygonPath: draft.path.map((point) => ({ left: point.x, top: point.y })) };
+      }
     }
     if (!square && clicked && bootstrap.sessionId && bootstrap.screenshotElementDetection !== 'none') {
       try {

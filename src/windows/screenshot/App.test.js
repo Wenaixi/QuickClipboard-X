@@ -51,6 +51,17 @@ test('多边形模式按键锚点与闭合路径接线完整', () => {
   assert.ok(source.includes('polygonPathRef.current'), '必须维护多边形锚点路径引用');
 });
 
+test('手绘共线退化路径必须有包围盒守卫(不抛 TypeError)', () => {
+  const source = readSource('./App.jsx');
+  const freehandStart = source.indexOf('captureMode === \'freehand\' && draft.path && draft.path.length >= 3');
+  const freehandBody = source.slice(freehandStart, freehandStart + 500);
+  // 全部顶点共线时 polygonBounds 返回 null:若不守卫直接展开 null,后续
+  // magnetSelection 对 undefined left 抛 TypeError 中断选区建立——与
+  // finishPolygonSelection 的退化回退对称,共线时保留矩形选区结果。
+  assert.ok(freehandBody.includes('const bounds = polygonBounds(draft.path);'), '手绘分支必须先算包围盒');
+  assert.ok(freehandBody.includes('if (bounds) {'), '包围盒为 null 时必须回退矩形(不套用手绘遮罩)');
+});
+
 test('normalizeBootstrap 使用显式显示器物理尺寸与逻辑尺寸', () => {
   const result = normalizeBootstrap({
     sessionId: 'session-1',
