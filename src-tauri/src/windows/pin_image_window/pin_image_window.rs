@@ -276,7 +276,9 @@ async fn create_pin_image_window(
     };
     let hwnd = super::gdi::create_gdi_window(label, physical_x, physical_y, physical_w, physical_h, is_preview_label(label))?;
     if let Some(path) = image_path {
-        super::gdi::render_image(hwnd, &path, 255)?;
+        // 建窗渲染透明度读窗口状态(继承持久化偏好):硬编码 255 会让用户改过的
+        // 透明度在下次新建窗口时被重置回 100%,跨窗口继承承诺落空。
+        super::gdi::render_image(hwnd, &path, super::gdi::pin_state(label).opacity)?;
     }
     Ok(())
 }
@@ -721,6 +723,42 @@ mod tests {
         assert!(
             body.contains("Some(PREVIEW_WINDOW_LOCK"),
             "取锁必须位于 if is_preview 的 Some 分支(非预览为 None)"
+        );
+    }
+
+    // 建窗渲染透明度必须读窗口状态(继承持久化偏好):create_pin_image_window
+    // 内 render_image 第三参若硬编码 255,用户改过的透明度在下次新建窗口时
+    // 被重置回 100%,跨窗口继承承诺落空。护栏断言:render_image 之后必须跟
+    // pin_state(label).opacity,不得出现裸 255。
+    #[test]
+    fn create_window_renders_with_inherited_opacity() {
+        let src = std::fs::read_to_string(format!(
+            "{}/src/windows/pin_image_window/pin_image_window.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读取贴图窗口源码失败");
+        let stripped: String = src
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = stripped
+            .find("async fn create_pin_image_window")
+            .expect("缺 create_pin_image_window");
+        let rest = &stripped[start..];
+        let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(stripped.len());
+        let body = &stripped[start..end];
+        let render_pos = body
+            .find("render_image(hwnd, &path,")
+            .expect("建窗必须渲染图片");
+        let render_seg = &body[render_pos..render_pos + 80];
+        assert!(
+            render_seg.contains("pin_state(label).opacity"),
+            "建窗渲染透明度必须读窗口状态(继承持久化偏好)"
+        );
+        assert!(
+            !render_seg.contains("255"),
+            "建窗渲染不得硬编码 255(会重置用户透明度偏好)"
         );
     }
 

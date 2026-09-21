@@ -210,10 +210,12 @@ pub(crate) fn create_gdi_window(
 
     let class_name: Vec<u16> = PIN_IMAGE_WINDOW_CLASS.encode_utf16().collect();
     let title: Vec<u16> = "贴图".encode_utf16().collect();
-    // 建窗同时登记状态:继承全局默认(置顶/阴影/锁定/像素级/透明度/恢复模式)
+    // 建窗同时登记状态:继承全局默认(置顶/阴影/锁定/像素级/透明度/恢复模式)。
+    // 用 default_pin_state 而非 pin_state:label 刚建必不在状态表,pin_state 内部
+    // 会重取同一把 PIN_STATE_MAP 锁(非重入)在 or_insert_with 闭包内即死锁。
     lock_state_map()
         .entry(label.to_string())
-        .or_insert_with(|| pin_state(label));
+        .or_insert_with(default_pin_state);
 
     let hwnd = unsafe {
         // GetModuleHandleW 返回 HMODULE,CreateWindowExW 需要 HINSTANCE
@@ -597,6 +599,20 @@ mod tests {
         assert!(
             body.contains("CreateWindowExW("),
             "必须用 CreateWindowExW 创建窗口"
+        );
+        // 建窗登记不得在锁持有时重入取锁:or_insert_with 闭包内若调 pin_state
+        // (内部再 lock_state_map 同一把非重入 Mutex)首次建窗即死锁,必须用
+        // default_pin_state(OnceCell 无锁)注入持久化默认状态。
+        let entry_pos = body.find("or_insert_with").expect("建窗登记必须 or_insert_with");
+        let entry_seg = &body[entry_pos..body.len().min(entry_pos + 200)];
+        assert!(
+            !entry_seg.contains("lock_state_map")
+                && !entry_seg.contains("pin_state("),
+            "建窗登记闭包不得再取状态表锁(死锁)"
+        );
+        assert!(
+            entry_seg.contains("default_pin_state"),
+            "建窗登记必须用 default_pin_state 注入持久化默认"
         );
     }
 
