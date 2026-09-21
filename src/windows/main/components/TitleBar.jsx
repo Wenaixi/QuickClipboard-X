@@ -12,6 +12,7 @@ import { useWindowDrag } from "@shared/hooks/useWindowDrag";
 import {
   toggleWindowPin,
   getWindowPinState,
+  syncWindowPinState,
   openAppSettings,
 } from "@shared/services/titleBarActions";
 import { clipboardStore } from "@shared/store/clipboardStore";
@@ -87,6 +88,12 @@ const TitleBar = forwardRef(
     const [isPinned, setIsPinned] = useState(() =>
       Boolean(getWindowPinState()),
     );
+    useEffect(() => {
+      // 挂载后从后端同步真实置顶状态:低占用重建主窗口后模块变量复位
+      // 为 false,与实际置顶(set_always_on_top)不一致,TitleBar 图标
+      // 会显示未固定而窗口实际置顶。
+      syncWindowPinState();
+    }, []);
     const [oneTimePasteEnabled, setOneTimePasteEnabledState] = useState(() =>
       getOneTimePasteEnabled(),
     );

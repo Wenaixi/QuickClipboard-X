@@ -164,6 +164,7 @@ pub fn run() {
                 commands::hide_main_window_if_auto_shown,
                 commands::promote_main_window_auto_popup,
                 commands::set_window_pinned,
+                commands::get_window_pin_state,
                 commands::open_settings_window,
                 commands::open_community_window,
                 commands::open_text_editor_window,

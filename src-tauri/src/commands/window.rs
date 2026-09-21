@@ -169,8 +169,15 @@ pub fn set_window_pinned(window: WebviewWindow, pinned: bool) -> Result<(), Stri
 
     window.set_always_on_top(pinned)
         .map_err(|e| format!("设置窗口置顶失败: {}", e))?;
-    
+
     Ok(())
+}
+
+// 查询主窗口当前置顶状态(会话级内存态):低占用销毁重建主窗口后前端
+// 模块变量复位,需从后端同步真实置顶,避免标题栏图标与实际不一致。
+#[tauri::command]
+pub fn get_window_pin_state() -> bool {
+    crate::windows::main_window::is_pinned()
 }
 
 #[tauri::command]
