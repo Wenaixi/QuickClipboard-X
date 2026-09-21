@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
 import { settingsStore, initSettings } from '@shared/store/settingsStore';
@@ -21,6 +21,7 @@ import HtmlEditor from './components/HtmlEditor';
 import StatusBar from './components/StatusBar';
 import ToastContainer from '@shared/components/common/ToastContainer';
 import { toast } from '@shared/store/toastStore';
+import { showConfirm } from '@shared/utils/dialog';
 
 function resolveEditableTypes(contentType, htmlContent) {
   const normalizedType = String(contentType || '');
@@ -188,6 +189,36 @@ function App() {
     originalTitle,
     editorData,
   ]);
+
+  // 未保存改动关窗确认:hasChanges 是闭包态,onCloseRequested 回调注册于
+  // 首次渲染,直接引用 hasChanges 会永远读到初始值 false——用 ref 同步
+  // 最新值(保存成功路径 setHasChanges(false) 紧邻 close(),闭包读旧 true
+  // 会二次弹框拦死正常关闭)。未确认必须 preventDefault 拦下 X/取消/Alt+F4,
+  // 避免编辑内容静默丢失。
+  const hasChangesRef = useRef(hasChanges);
+  useEffect(() => {
+    hasChangesRef.current = hasChanges;
+  }, [hasChanges]);
+
+  useEffect(() => {
+    let unlisten = null;
+    (async () => {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      unlisten = await getCurrentWindow().onCloseRequested(async (event) => {
+        if (hasChangesRef.current) {
+          const confirmed = await showConfirm(
+            t('textEditor.confirmDiscardMessage'),
+            t('textEditor.confirmDiscardTitle'),
+          );
+          if (!confirmed) event.preventDefault();
+        }
+      });
+    })();
+    return () => {
+      if (unlisten) unlisten();
+    };
+    // 依赖 t 防语言切换后文案过期,注册本身只应执行一次
+  }, [t]);
 
   useEffect(() => {
     const currentContent = editMode === 'html' ? htmlContent : textContent;

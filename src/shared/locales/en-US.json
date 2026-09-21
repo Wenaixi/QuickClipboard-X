@@ -1307,6 +1307,8 @@
     "charCount": "{{count}} characters",
     "lineCount": "{{count}} lines",
     "unsaved": "Unsaved",
+    "confirmDiscardTitle": "Discard Changes",
+    "confirmDiscardMessage": "You have unsaved changes. Discard them?",
     "clipboardItem": "Clipboard Item #{{number}}",
     "language": "Language",
     "group": "Group",

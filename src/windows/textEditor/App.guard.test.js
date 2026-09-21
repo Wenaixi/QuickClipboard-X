@@ -40,3 +40,17 @@ test('textEditor 保存失败不得关窗(改动不得静默丢失)', () => {
     'close() 必须只在 try 成功路径(早于 catch),失败路径不得关窗',
   );
 });
+
+test('textEditor 未保存改动关窗必须经确认拦截', () => {
+  // 未保存改动误触 X/取消/Alt+F4 不得静默丢失:onCloseRequested 注册 +
+  // hasChangesRef 读最新值(闭包会读到旧 false)+ showConfirm 确认 +
+  // 未确认 preventDefault。hasChangesRef 必须在 onCloseRequested 之前
+  // 声明(useRef 先于使用);showConfirm 必须位于 onCloseRequested 回调内。
+  const refPos = source.indexOf('const hasChangesRef = useRef(hasChanges);');
+  const closePos = source.indexOf('onCloseRequested(async (event) => {');
+  assert.ok(refPos !== -1 && closePos !== -1 && refPos < closePos, 'hasChangesRef 必须先于 onCloseRequested 声明');
+  const closeBody = source.slice(closePos, closePos + 700);
+  assert.ok(closeBody.includes('hasChangesRef.current'), '回调必须读 ref 最新值(非闭包捕获)');
+  assert.ok(closeBody.includes('showConfirm('), '回调必须调用 showConfirm 确认');
+  assert.ok(closeBody.includes('event.preventDefault()'), '未确认必须 preventDefault 拦截关窗');
+});
