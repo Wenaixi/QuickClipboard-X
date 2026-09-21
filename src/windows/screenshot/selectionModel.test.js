@@ -716,7 +716,11 @@ test('resizeSelection 拒绝非法边缘或无效输入', () => {
 test('resizeSelection 普通路径不翻转且被拖边按对边夹紧到最小 1px 源码护栏', () => {
   const source = readSource('./selectionModel.js');
   const start = source.indexOf('export function resizeSelection');
-  const body = source.slice(start, start + 4000);
+  const end = source.indexOf('export function nudgeSelection');
+  // 用 nudgeSelection 起点收尾切出 resizeSelection 完整函数体（withShapePath
+  // 抽离后函数加长，4000 字符 slice 只覆盖到夹紧段前会漏检，见 CLAUDE.md
+  // 10.4 slice 边界陷阱）。普通路径夹紧段在函数尾部。
+  const body = source.slice(start, end);
   // 源码护栏一：被拖动的边必须按对边夹紧到最小 1px（right 不小于 left+1，left 不大于 right-1），
   // 拖动越过对边时选区收窄到 1px 而非翻转（ShareX 公开行为：调整边缘不翻转选区）。
   assert.ok(body.includes("if (edge.includes('e')) right = clamp(right, left + 1, bounds.width);"), 'e 边必须夹紧到 left+1 且不翻转');
