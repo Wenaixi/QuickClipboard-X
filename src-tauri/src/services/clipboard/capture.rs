@@ -259,11 +259,18 @@ fn capture_primary_content(
     }
 
     if let Some(path) = cached_image_path {
-        if content.text.is_none() && content.html.is_none() {
-            content.content_type = ContentType::Files;
-            content.files = Some(vec![path.to_string()]);
+        // 缓存图片注入前先确认当前剪贴板仍含图片格式:重试窗口内用户可能已
+        // 改复制纯文本,此时沿用旧图路径会产出「新文本+旧 image_id」错配记录,
+        // 且文本哈希去重会丢弃干净文本使错配静默持久化。图仍在剪贴板是注入
+        // 前提(Excel 图+文本晚到场景仍需保留图),而非「无文本」。
+        let image_still_present = ctx.get_image().is_ok();
+        if image_still_present {
+            if content.text.is_none() && content.html.is_none() {
+                content.content_type = ContentType::Files;
+                content.files = Some(vec![path.to_string()]);
+            }
+            content.image_path = Some(path.to_string());
         }
-        content.image_path = Some(path.to_string());
     } else {
         if let Ok(rust_image) = ctx.get_image() {
             let image_path = save_clipboard_image(rust_image)?;
@@ -444,6 +451,32 @@ mod hash_guards {
         assert!(
             files_seg.contains("hasher.update([0u8])"),
             "Files 分支每段路径后必须插入零字节分隔符(与粘贴侧同口径)"
+        );
+    }
+
+    // 缓存图片注入前必须确认当前剪贴板仍含图片:重试窗口内用户改复制
+    // 纯文本时沿用旧图路径会产出「新文本+旧 image_id」错配记录,且文本
+    // 哈希去重丢弃干净文本使错配静默持久化。图在场是注入前提。
+    #[test]
+    fn cached_image_injection_requires_image_still_present() {
+        let src = strip_line_comments(&source_file("src/services/clipboard/capture.rs"));
+        let body = fn_body(&src, "capture_primary_content");
+        let cached_seg = {
+            let start = body
+                .find("if let Some(path) = cached_image_path")
+                .expect("缺缓存图片注入分支");
+            let end = body
+                .find("} else {")
+                .expect("缺缓存注入分支结束");
+            &body[start..end]
+        };
+        assert!(
+            cached_seg.contains("ctx.get_image().is_ok()"),
+            "缓存图片注入前必须确认当前剪贴板仍含图片(get_image 在场)"
+        );
+        assert!(
+            cached_seg.contains("image_still_present"),
+            "旧图路径必须收在图片在场判定内,不得无条件注入"
         );
     }
 }
