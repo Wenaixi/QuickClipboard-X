@@ -344,12 +344,17 @@ function AnnotationApp() {
   };
 
   const handleClear = () => {
+    // 同 undo/redo:先丢弃进行中草稿,避免清空后 draw 重跑渲染悬浮旧草稿
+    // (不可撤销不可保存,松手还会补成正式图层诈尸)。
+    draftRef.current = null;
     setHistory((h) => pushSnapshot(h, layers).history);
     setRedoStack([]);
     setLayers(newEmptyLayers());
   };
 
   const handleRemoveSelected = (id) => {
+    // 同 handleClear:删除图层前先清进行中草稿,防悬浮残留。
+    draftRef.current = null;
     setHistory((h) => pushSnapshot(h, layers).history);
     setRedoStack([]);
     setLayers((prev) => removeLayer(prev, id));

@@ -125,4 +125,23 @@ test('编辑器多指针只认首指,undo 先清草稿', () => {
   const popPos = undoBody.indexOf('undoSnapshot(history, redoStack)');
   assert.ok(clearPos !== -1 && popPos !== -1, '撤销必须先清草稿再弹栈');
   assert.ok(clearPos < popPos, '清草稿必须早于弹栈');
+
+  // 清空/删除图层同款:这两个操作会触发 setLayers 重跑 draw,不清进行中
+  // 草稿会让半截笔画悬浮在清空后的画布上(不可撤销不可保存,松手后还会
+  // 补成正式图层)。顺序断言锁死"清草稿必须先于压栈快照"。
+  const clearFnPos = appSource.indexOf('const handleClear = () =>');
+  assert.ok(clearFnPos !== -1, '清空处理必须存在');
+  const clearFnBody = appSource.slice(clearFnPos, appSource.indexOf('const handleRemoveSelected', clearFnPos));
+  const clearDraftPos = clearFnBody.indexOf('draftRef.current = null');
+  const clearPushPos = clearFnBody.indexOf('pushSnapshot(h, layers)');
+  assert.ok(clearDraftPos !== -1 && clearPushPos !== -1, '清空必须先清草稿再压栈快照');
+  assert.ok(clearDraftPos < clearPushPos, '清空时清草稿必须早于压栈');
+
+  const removeFnPos = appSource.indexOf('const handleRemoveSelected = (id) =>');
+  assert.ok(removeFnPos !== -1, '删除图层处理必须存在');
+  const removeFnBody = appSource.slice(removeFnPos, appSource.indexOf('const handleSave', removeFnPos));
+  const removeDraftPos = removeFnBody.indexOf('draftRef.current = null');
+  const removePushPos = removeFnBody.indexOf('pushSnapshot(h, layers)');
+  assert.ok(removeDraftPos !== -1 && removePushPos !== -1, '删除图层必须先清草稿再压栈快照');
+  assert.ok(removeDraftPos < removePushPos, '删除图层时清草稿必须早于压栈');
 });
