@@ -52,7 +52,9 @@ export function isPolygonClosed(points) {
 
 // 多边形路径 → 物理像素顶点数组（供后端 CaptureRect::from_polygon_bounds
 // 取包围盒捕获）：逻辑坐标按 devicePixelRatio 缩放，Double 取整与选区
-// 边界口径一致（floor 左上/ceil 右下）。
+// 边界口径一致（floor 左上/ceil 右下）。调用方 polygonPath 元素为
+// {left, top}（与 CSS --selection-polygon 同构），须按 left/top 读取——
+// 读 x/y 会拿到 undefined → NaN 顶点，后端包围盒捕获失效。
 export function polygonPhysicalVertices(points, devicePixelRatio) {
   assertPoints(points);
   if (!Number.isFinite(devicePixelRatio) || devicePixelRatio <= 0) {
@@ -62,8 +64,8 @@ export function polygonPhysicalVertices(points, devicePixelRatio) {
     throw new RangeError('多边形至少需要 3 个不共线顶点');
   }
   return points.map((point) => ({
-    x: Math.floor(point.x * devicePixelRatio),
-    y: Math.floor(point.y * devicePixelRatio),
+    x: Math.floor((point.left ?? point.x) * devicePixelRatio),
+    y: Math.floor((point.top ?? point.y) * devicePixelRatio),
   }));
 }
 

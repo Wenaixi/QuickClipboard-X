@@ -41,6 +41,18 @@ test('polygonPhysicalVertices 逻辑坐标转物理像素且四舍五入一致',
     { x: 250, y: 200 },
     { x: 187, y: 300 },
   ]);
+  // 多边形完成路径另存 {left, top} 结构（与 CSS --selection-polygon 同构），
+  // 必须兼容读取——若只读 point.x 会拿到 undefined → NaN 顶点。
+  const leftTop = polygonPhysicalVertices([
+    { left: 100, top: 80 },
+    { left: 200, top: 160 },
+    { left: 150, top: 240 },
+  ], 1.25);
+  assert.deepEqual(leftTop, [
+    { x: 125, y: 100 },
+    { x: 250, y: 200 },
+    { x: 187, y: 300 },
+  ]);
   assert.throws(() => polygonPhysicalVertices([{ x: 0, y: 0 }, { x: 1, y: 1 }], 1.25), /至少需要 3/);
   assert.throws(() => polygonPhysicalVertices([{ x: 0, y: 0 }, { x: 1, y: 1 }, { x: 2, y: 2 }], 0), /devicePixelRatio/);
 });
