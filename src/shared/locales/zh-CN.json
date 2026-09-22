@@ -1306,7 +1306,8 @@
     "cancel": "取消",
     "doneAndCopy": "完成并复制",
     "waitingLoad": "等待加载截图…",
-    "textPrompt": "输入标注文本"
+    "textPrompt": "输入标注文本",
+    "confirmText": "确认"
   },
   "floatingToolbar": {
     "scrollToTop": "返回顶部",

@@ -11,6 +11,7 @@ import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useTranslation } from 'react-i18next';
 import { showError } from '@shared/utils/dialog';
+import SimpleInputDialog from './SimpleInputDialog';
 import {
   createLayer,
   addLayer,
@@ -138,6 +139,9 @@ function AnnotationApp() {
   const displayTransformRef = useRef({ scale: 1, offsetX: 0, offsetY: 0 });
   const [imagePath, setImagePath] = useState('');
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
+  // 文本标注输入浮层状态:非空时渲染 SimpleInputDialog,确认后提交文本
+  // 图层,取消/Esc 则丢弃——替代 window.prompt(WebView2 可能返回 null)。
+  const [textDraft, setTextDraft] = useState(null);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -307,13 +311,10 @@ function AnnotationApp() {
     // 只收口本笔指针,第二指抬起(含 pointerleave 兜底)不得提交混入笔。
     if (event?.pointerId !== undefined && event.pointerId !== draft.pointerId) return;
     draftRef.current = null;
-    // 文本工具：弹输入框取文本。
+    // 文本工具：打开自绘输入浮层取文本(替代 window.prompt——WebView2
+    // 对 prompt 支持有别于常规浏览器,可能返回 null 让文本标注静默失效)。
     if (draft.type === 'text') {
-      const label = window.prompt(t('annotation.textPrompt', { defaultValue: '输入标注文本' }), '');
-      if (label && label.trim()) {
-        const layer = createLayer(String(Date.now()), 'text', { ...draftParamsFor(draft.type, draft.start, draft.end), text: label.trim() }, [draft.start]);
-        commitLayer(layer);
-      }
+      setTextDraft({ x: draft.start.x, y: draft.start.y });
       draw();
       return;
     }
@@ -428,6 +429,29 @@ function AnnotationApp() {
       </div>
       <div className="relative min-h-0 flex-1 overflow-hidden bg-qc-panel-2">
         <canvas ref={canvasRef} className="h-full w-full touch-none" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerLeave={handlePointerUp} onPointerCancel={handlePointerUp} />
+        {textDraft && (
+          <SimpleInputDialog
+            title={t('annotation.textPrompt', { defaultValue: '输入标注文本' })}
+            value=""
+            onChange={() => {}}
+            onConfirm={(label) => {
+              const trimmed = (label || '').trim();
+              if (trimmed) {
+                const layer = createLayer(String(Date.now()), 'text', { ...draftParamsFor('text', textDraft, textDraft), text: trimmed }, [textDraft]);
+                commitLayer(layer);
+              }
+              setTextDraft(null);
+              draw();
+            }}
+            onCancel={() => {
+              setTextDraft(null);
+              draw();
+            }}
+            placeholder=""
+            confirmText={t('annotation.confirmText', { defaultValue: '确认' })}
+            cancelText={t('annotation.cancel', { defaultValue: '取消' })}
+          />
+        )}
       </div>
       <div className="pointer-events-none absolute right-2 top-1 text-xs text-qc-fg-muted">
         {imageSize.width > 0 ? `${imageSize.width} × ${imageSize.height}` : t('annotation.waitingLoad', { defaultValue: '等待加载截图…' })}

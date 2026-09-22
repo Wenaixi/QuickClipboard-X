@@ -142,9 +142,41 @@ test('编辑器独立窗口必须 initSettings 同步语言,按钮/提示接语�
   assert.ok(initPos < renderPos, 'initSettings 必须早于 render(先同步语言再渲染,防启动闪烁)');
   assert.ok(indexSource.includes('.finally('), 'render 必须挂在 finally(语言加载失败也要渲染,不白屏)');
   assert.ok(appSource.includes("useTranslation"), 'App.jsx 必须接 useTranslation');
-  for (const key of ['undo', 'redo', 'clear', 'cancel', 'doneAndCopy', 'waitingLoad', 'textPrompt']) {
+  for (const key of ['undo', 'redo', 'clear', 'cancel', 'doneAndCopy', 'waitingLoad', 'textPrompt', 'confirmText']) {
     assert.ok(appSource.includes(`annotation.${key}`), `App.jsx 必须接 annotation.${key} 语言键`);
   }
+});
+
+test('编辑器文本工具必须用自绘浮层替代 window.prompt(WebView2 prompt 静默失效)', () => {
+  // D-2:窗口依赖 window.prompt 拿文本标注内容,WebView2 对 prompt 支持
+  // 有别于常规浏览器(可能返回 null 让文本标注静默失效且无任何提示)。
+  // 必须换用自绘输入浮层(主窗口 SimpleInputDialog 同款交互),且浮层
+  // 确认后提交文本图层、取消/Esc 丢弃。核心护栏:App.jsx 内不得再出现
+  // window.prompt(任何兜底都不能退回原生 prompt)。
+  assert.ok(appSource.includes("from './SimpleInputDialog'"), 'App.jsx 必须接自绘输入浮层');
+  const textDraftPos = appSource.indexOf('const [textDraft, setTextDraft] = useState(null)');
+  assert.ok(textDraftPos !== -1, '必须声明文本输入浮层状态');
+  const textHandle = appSource.indexOf("if (draft.type === 'text')", textDraftPos);
+  assert.ok(textHandle !== -1, '文本工具必须走浮层打开路径');
+  const setTextDraftPos = appSource.indexOf('setTextDraft({ x:', textDraftPos);
+  assert.ok(setTextDraftPos !== -1, '文本收口必须打开浮层');
+  assert.ok(textHandle < setTextDraftPos, '文本工具分支必须先打开浮层再收口');
+  assert.ok(appSource.includes('setTextDraft(null)'), '浮层取消/确认后必须关闭');
+  const confirmPos = appSource.indexOf('onConfirm={(label) =>');
+  assert.ok(confirmPos !== -1, '浮层必须接确认回调');
+  const cancelPos = appSource.indexOf('onCancel={() =>');
+  assert.ok(cancelPos !== -1, '浮层必须接取消回调');
+  assert.ok(appSource.indexOf('setTextDraft(null)', confirmPos) > -1, '确认回调必须关闭浮层');
+  // 剥行注释后不得残留任何 window.prompt 调用(注释里的"替代 window.prompt"
+  // 措辞不应误命中——用剥注释后的源码判定,防原生 prompt 复活)。
+  const bareSource = appSource
+    .split('\n')
+    .filter((line) => !line.trimStart().startsWith('//'))
+    .join('\n');
+  assert.ok(
+    bareSource.includes('window.prompt') === false,
+    '不得再使用 window.prompt(WebView2 对 prompt 支持不可靠,必须自绘浮层)',
+  );
 });
 
 test('编辑器多指针只认首指,undo 先清草稿', () => {

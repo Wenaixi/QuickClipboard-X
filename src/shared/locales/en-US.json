@@ -1306,7 +1306,8 @@
     "cancel": "Cancel",
     "doneAndCopy": "Done & Copy",
     "waitingLoad": "Waiting for screenshot…",
-    "textPrompt": "Enter annotation text"
+    "textPrompt": "Enter annotation text",
+    "confirmText": "Confirm"
   },
   "floatingToolbar": {
     "scrollToTop": "Scroll to Top",
