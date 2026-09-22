@@ -177,6 +177,14 @@ pub fn refresh_always_on_top(window: &WebviewWindow) -> Result<(), String> {
         return Ok(());
     }
 
+    // 置顶刷新必须尊重用户置顶偏好:取消置顶(is_pinned=false)后,show/
+    // raise 路径再无条件 SetWindowPos(HWND_TOPMOST) 会把刚取消的置顶顶回,
+    // 置顶开关形同虚设。仅在偏好置顶时才置顶;未置顶偏好下窗口保持普通
+    // z 序(可正常交互,但不压在所有应用之上)。
+    if !super::state::is_pinned() {
+        return Ok(());
+    }
+
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::WindowsAndMessaging::{
         SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
@@ -296,6 +304,35 @@ mod tests {
     use super::super::state::{MainWindowState, WindowState};
     use super::should_show_window;
     use crate::services::system::hotkey::test_utils::{fn_body, strip_line_comments};
+
+    // 置顶刷新必须尊重用户置顶偏好:取消置顶后 show/raise 路径再无条件
+    // SetWindowPos(HWND_TOPMOST) 会把刚取消的置顶顶回,置顶开关形同虚设。
+    // 护栏断言:refresh_always_on_top(Windows 分支)必须含 is_pinned() 守卫,
+    // 且守卫必须早于 HWND_TOPMOST 置顶调用(顺序不变量)。
+    #[test]
+    fn refresh_always_on_top_respects_pin_preference() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/windows/main_window/visibility.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 visibility.rs 源文件");
+        let stripped = strip_line_comments(&source);
+        let body = fn_body(&stripped, "refresh_always_on_top");
+        let guard = body
+            .find("if !super::state::is_pinned()")
+            .expect("refresh_always_on_top 必须尊重置顶偏好(is_pinned 守卫)");
+        let topmost = body
+            .find("HWND_TOPMOST")
+            .expect("refresh_always_on_top 必须包含置顶调用");
+        assert!(
+            guard < topmost,
+            "is_pinned 守卫必须早于 HWND_TOPMOST 置顶(否则取消置顶被顶回)"
+        );
+        assert!(
+            body.contains("return Ok(());"),
+            "is_pinned 守卫必须提前返回"
+        );
+    }
 
     // 切片2:show_normal_window 普通显示路径必须清掉 WS_EX_TRANSPARENT,
     // 否则从贴边态/穿透态切到普通窗口时残留整窗穿透,鼠标无法操作。
