@@ -18,6 +18,12 @@ pub use storage::{store_recording_to_history, RecordingResult};
 pub const RECORDING_MIN_FPS: u8 = 10;
 pub const RECORDING_MAX_FPS: u8 = 15;
 
+// 录制帧缓冲上限:15fps × 120s = 1800 帧。未压缩 RGBA 全屏 1080p 单帧约
+// 8.3MB,1800 帧峰值约 15GB——无此上限时长达数小时的误录让内存无限膨胀
+// (30 分钟≈223GB),且停止时同步编码会把工作线程长时间卡住。到上限即
+// 自动收口(回收采集线程并落历史),保护内存与停止路径响应性。
+const MAX_RECORDED_FRAMES: usize = 1800;
+
 /// 录制会话句柄：start_recording 返回，stop 推进代数使在飞采集失效。
 #[derive(Clone, Default)]
 pub struct RecordingSession {
@@ -110,6 +116,17 @@ pub fn begin_recording(
         let manager: &'static RecordingManager = manager();
         move |width: u32, height: u32, rgba: Vec<u8>| {
             if let Ok(mut frames) = manager.frames.lock() {
+                // 帧缓冲到上限自动收口:长时间误录不再让内存无限膨胀,
+                // 主动推进代数使采集循环退出,由停止路径收尾落历史。
+                if frames.len() >= MAX_RECORDED_FRAMES {
+                    drop(frames);
+                    if let Ok(session) = manager.session.lock() {
+                        if let Some(session) = session.as_ref() {
+                            session.stop();
+                        }
+                    }
+                    return;
+                }
                 frames.push(CapturedFrame { width, height, rgba });
             }
         }
@@ -229,5 +246,25 @@ mod tests {
         // 停止路径必须把累积帧编码为 GIF 并落历史。
         assert!(source.contains("encode_rgba_frames"), "停止必须编码 GIF");
         assert!(source.contains("store_recording_to_history(app, &result)"), "停止必须落剪贴板历史");
+        // 帧缓冲必须设上限:长时间误录不得让内存无限膨胀(未压缩 RGBA 1080p
+        // 单帧约 8.3MB,无上限半小时≈223GB)。on_frame 收帧前必须判
+        // MAX_RECORDED_FRAMES,到上限主动 stop 收口采集循环。
+        assert!(
+            source.contains("const MAX_RECORDED_FRAMES: usize = 1800;"),
+            "必须定义录制帧缓冲上限常量"
+        );
+        let on_frame_body = {
+            let start = source.find("let on_frame = {").expect("缺 on_frame 闭包");
+            let end = source.find("let session = start_recording(").expect("缺 start_recording 调用");
+            &source[start..end]
+        };
+        assert!(
+            on_frame_body.contains("frames.len() >= MAX_RECORDED_FRAMES"),
+            "on_frame 收帧前必须判帧缓冲上限"
+        );
+        assert!(
+            on_frame_body.contains("session.stop()"),
+            "帧缓冲到上限必须主动停止采集会话(收口循环)"
+        );
     }
 }
