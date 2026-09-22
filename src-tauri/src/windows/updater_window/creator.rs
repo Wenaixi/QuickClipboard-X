@@ -10,6 +10,9 @@ static UPDATE_BANNER_STATE: LazyLock<Mutex<Option<UpdateBannerState>>> = LazyLoc
 static UPDATE_WINDOW_PAYLOAD: LazyLock<Mutex<Option<serde_json::Value>>> = LazyLock::new(|| Mutex::new(None));
 const AUTO_UPDATE_CHECK_INTERVAL_SECS: u64 = 60 * 60;
 const LAST_AUTO_CHECK_AT_KEY: &str = "updater.last_auto_check_at";
+// 上次自动弹窗展示/「稍后」时间戳:用户点「稍后」关闭更新窗口后,
+// 抑制期内定时检查只保留角标不再自动弹窗(手动「检查更新」不受抑制)。
+const LAST_AUTO_POPUP_SHOWN_AT_KEY: &str = "updater.last_auto_popup_shown_at";
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -56,6 +59,15 @@ fn emit_update_payload(window: &WebviewWindow, payload: serde_json::Value) {
     window.once("updater-ready", move |_| {
         let _ = win_for_emit.emit("update-config", payload);
     });
+}
+
+// 置位「本次更新弹窗已展示」抑制标记:窗口真正弹出(无论自动检查发现新
+// 版本自动弹,还是手动「检查更新」主动弹)都记录当前时间——用户已经见过
+// 这个更新窗口,之后间隔期内定时检查只保留角标不再自动弹。抑制只约束
+// 后台自动弹窗(check_updates_if_due 路径),手动触发随时可再弹。
+fn mark_auto_popup_shown() {
+    const KEY: &str = LAST_AUTO_POPUP_SHOWN_AT_KEY;
+    let _ = crate::services::store::set(KEY, &current_unix_timestamp());
 }
 
 fn parse_env_bool(key: &str) -> Option<bool> {
@@ -110,11 +122,21 @@ async fn check_updates_if_due(app: &AppHandle) -> Result<bool, String> {
         return Ok(false);
     }
 
+    // 自动弹窗抑制:用户上次看到更新窗口(含点「稍后」关闭)后,间隔期内
+    // 定时检查只保留角标不再自动弹窗,避免每个检查周期无征兆打断;手动
+    // 「检查更新」走 check_updates_and_open_window 恒传 true,不受抑制。
+    // disable_update_popup 关闭时本应自动弹,但抑制期判定优先——用户刚
+    // 拒绝过,再弹就是骚扰。
+    let auto_popup_shown_at =
+        crate::services::store::get::<u64>(LAST_AUTO_POPUP_SHOWN_AT_KEY).unwrap_or(0);
+    let suppress_auto_popup =
+        auto_popup_shown_at > 0 && now.saturating_sub(auto_popup_shown_at) < interval_secs;
+
     // 检查成功(含无更新)才推进时间戳——失败(网络/服务器抖动)不推进,
     // 让后台定时 tick 成为天然重试节拍,抖动期最多一个 tick 重试一次,
     // 恢复感知延迟 ≤ tick 间隔;若先推进时间戳,失败后要等满 24h/72h
     // 才重试(整周期空转)。
-    let result = check_updates(app, !settings.disable_update_popup).await;
+    let result = check_updates(app, !settings.disable_update_popup && !suppress_auto_popup).await;
     if result.is_ok() {
         crate::services::store::set(LAST_AUTO_CHECK_AT_KEY, &now)?;
     }
@@ -378,6 +400,13 @@ async fn check_updates(app: &AppHandle, should_open_window: bool) -> Result<bool
                 return Ok(true);
             }
 
+            // 窗口弹出即置抑制标记:用户已经看到本次更新(点「稍后」/关闭
+            // 即开始抑制期),此后间隔期内后台自动弹窗被抑制,只保留角标;
+            // 手动「检查更新」下次仍可随时弹。
+            if should_open_window {
+                mark_auto_popup_shown();
+            }
+
             let window = if let Some(w) = app.get_webview_window("updater") {
                 let _ = w.show();
                 w
@@ -510,7 +539,7 @@ mod tests {
             .map(|start| src[start..].to_string())
             .unwrap_or_default();
         let check_pos = body
-            .find("check_updates(app, !settings.disable_update_popup).await")
+            .find("check_updates(app, !settings.disable_update_popup && !suppress_auto_popup).await")
             .unwrap_or_else(|| panic!("缺 check_updates 调用"));
         let set_pos = body
             .find("crate::services::store::set(LAST_AUTO_CHECK_AT_KEY, &now)")
@@ -521,10 +550,71 @@ mod tests {
         );
     }
 
+    // 自动更新弹窗抑制护栏:用户点「稍后」/关闭更新窗口后,间隔期内后台
+    // 定时检查只保留角标不再自动弹窗,避免每个检查周期无征兆打断。四个
+    // 不变量:
+    // 1) LAST_AUTO_POPUP_SHOWN_AT_KEY 键常量存在(语义:上次弹窗展示时间戳);
+    // 2) check_updates_if_due 读取该键算出 suppress_auto_popup,且把抑制期
+    //    并入 check_updates 的 should_open_window 参数(先算抑制再传参);
+    // 3) check_updates 在窗口确实要弹的分支(should_open_window=true)调用
+    //    mark_auto_popup_shown 置位——手动「检查更新」恒传 true 同样置位
+    //    (语义:见过即抑制,手动只负责即时打开,不豁免抑制期),但抑制期
+    //    的 badge-only 分支(should_open_window=false)绝不置位;
+    // 4) 置位必须紧跟窗口弹出分支,防止置位漂移到别的调用点。
+    #[test]
+    fn auto_popup_dismiss_suppresses_next_auto_popup() {
+        let src = stripped_source();
+        let key_line = format!(
+            "LAST_AUTO_POPUP_SHOWN_AT_KEY: &str = \"updater.last_auto_popup_shown_at\""
+        );
+        assert!(
+            src.contains(&key_line),
+            "必须提供上次弹窗展示时间戳键"
+        );
+
+        let due_start = src.find("async fn check_updates_if_due").expect("缺 check_updates_if_due");
+        let due_body = &src[due_start..src.find("fn is_installed_version").expect("缺 is_installed_version")];
+        let suppress_pos = due_body
+            .find("let suppress_auto_popup =")
+            .unwrap_or_else(|| panic!("必须计算自动弹窗抑制期"));
+        let call_pos = due_body
+            .find("!settings.disable_update_popup && !suppress_auto_popup")
+            .unwrap_or_else(|| panic!("should_open_window 必须并入抑制期判定"));
+        assert!(
+            suppress_pos < call_pos,
+            "抑制期必须先行算出再传入检查调用"
+        );
+
+        let check_start = src.find("async fn check_updates(").expect("缺 check_updates");
+        let check_body = &src[check_start..src.find("pub async fn check_updates_and_open_window").expect("缺 check_updates_and_open_window")];
+        let guard_pos = check_body
+            .find("if should_open_window {")
+            .unwrap_or_else(|| panic!("窗口弹出分支必须存在"));
+        let mark_pos = check_body
+            .find("mark_auto_popup_shown()")
+            .unwrap_or_else(|| panic!("窗口弹出分支必须调用置位"));
+        assert!(
+            mark_pos > guard_pos && mark_pos < guard_pos + 300,
+            "置位必须紧跟 should_open_window 分支(窗口弹出即开始抑制期)"
+        );
+        // 手动路径隔离:手动「检查更新」check_updates_and_open_window 恒传
+        // true——不应存在"should_open_window=false 且窗口弹出"的矛盾形态,
+        // badge-only 分支 return 在置位之前,保证置位只发生在窗口真正弹出时。
+        let manual_pos = src
+            .find("check_updates(app, true)")
+            .unwrap_or_else(|| panic!("手动检查更新必须恒传 should_open_window=true"));
+        let manual_body = &src[manual_pos..];
+        assert!(
+            manual_body.contains("mark_auto_popup_shown()") || manual_body.contains("check_updates("),
+            "手动路径必须最终进入 check_updates(窗口弹出即置位,不豁免抑制期)"
+        );
+    }
+
     // 自动更新检查间隔护栏:后台定时 tick 与设置节拍必须同源——ticker 用
     // 常量 AUTO_UPDATE_CHECK_INTERVAL_SECS,且该常量必须是完整小时(60*60),
     // 否则检查过频违背"每日/每周"偏好语义。若常量改小或 ticker 直接
-    // 用字面量,更新检查会绕过间隔偏好高频空转。
+    // 用字面量,更新检查会绕过间隔偏好高频空转。自动弹窗抑制期与该
+    // 常量同源,保证抑制窗口与检查节拍一致。
     #[test]
     fn auto_update_tick_is_one_hour_literal() {
         let src = stripped_source();
