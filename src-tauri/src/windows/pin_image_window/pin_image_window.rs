@@ -592,7 +592,9 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         // 断言目标用拆分拼接构造：本测试读自己源码，若断言语句直接写完整
-        // 标识符会自命中永远红（§10.4 自指陷阱）。
+        // 标识符会自命中永远红（§10.4 自指陷阱）。前两段断言目标是后端
+        // 自身代码,剥离整行注释后匹配不会受本段说明文字影响;末尾前端
+        // 刷新监听断言已随贴图窗口整体删除而移除,相应前端文件已不存在。
         let dead_fn_a = ["update_pin_", "image_file"].concat();
         let dead_fn_b = ["update_pin_", "image_data"].concat();
         let dead_event = ["pin-", "image:refresh"].concat();
@@ -601,8 +603,6 @@ mod tests {
             "后端零调用更新函数不得重新引入"
         );
         assert!(!code.contains(&dead_event), "后端不得重新引入刷新事件发射");
-        // 贴图前端窗口目录已随 pinImage 窗口整体删除,前端文件不再存在,
-        // 无刷新监听可断言;若前端窗口重新引入必须先接真实数据源。
     }
 
     #[test]
