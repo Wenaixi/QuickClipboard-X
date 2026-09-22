@@ -1311,7 +1311,10 @@
   },
   "clipboardList": {
     "loadFailed": "加载剪贴板历史失败",
-    "retry": "重试"
+    "retry": "重试",
+    "searching": "搜索中...",
+    "noResults": "无搜索结果",
+    "empty": "暂无剪贴板记录"
   },
   "favoritesList": {
     "loadFailed": "加载收藏列表失败",

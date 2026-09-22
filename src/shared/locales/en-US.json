@@ -1311,7 +1311,10 @@
   },
   "clipboardList": {
     "loadFailed": "Failed to load clipboard history",
-    "retry": "Retry"
+    "retry": "Retry",
+    "searching": "Searching...",
+    "noResults": "No results found",
+    "empty": "No clipboard history yet"
   },
   "favoritesList": {
     "loadFailed": "Failed to load favorites",

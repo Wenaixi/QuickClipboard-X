@@ -464,7 +464,7 @@ const ClipboardList = forwardRef(({
     return <div className="flex-1 bg-qc-surface overflow-hidden flex items-center justify-center transition-colors duration-500 clipboard-list" data-no-drag>
       <div className="flex flex-col items-center gap-2 text-qc-fg-subtle">
         <div className="h-5 w-5 animate-spin rounded-full border-2 border-qc-border border-t-theme-9"></div>
-        <p className="text-sm">搜索中...</p>
+        <p className="text-sm">{t('clipboardList.searching', { defaultValue: '搜索中...' })}</p>
       </div>
     </div>;
   }
@@ -482,7 +482,7 @@ const ClipboardList = forwardRef(({
     }
     return <div className="flex-1 bg-qc-surface overflow-hidden flex items-center justify-center transition-colors duration-500 clipboard-list" data-no-drag>
       <p className="text-qc-fg-subtle text-sm">
-        {clipSnap.filter ? '无搜索结果' : '暂无剪贴板记录'}
+        {clipSnap.filter ? t('clipboardList.noResults', { defaultValue: '无搜索结果' }) : t('clipboardList.empty', { defaultValue: '暂无剪贴板记录' })}
       </p>
     </div>;
   }
