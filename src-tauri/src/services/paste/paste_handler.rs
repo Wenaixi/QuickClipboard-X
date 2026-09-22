@@ -209,6 +209,16 @@ fn paste_item_internal(
         simulate_paste()?;
         std::thread::sleep(std::time::Duration::from_millis(100));
         crate::AppSounds::play_paste_on_success();
+
+        // 粘贴后置顶:遵循 paste_to_top 设置,把本条 item_order 提到非置顶区
+        // 最前(不涉及 is_pinned 固定置顶)。此处在 paste_item_internal 统一
+        // 收口,覆盖所有粘贴入口(列表单击/数字快捷键/纯文本快捷键/quickpaste
+        // 后端路径),避免各入口手写置顶分叉;复制动作(simulate=false)不置顶。
+        if let Some(id) = clipboard_id {
+            if crate::services::settings::get_settings().paste_to_top {
+                let _ = crate::services::database::move_clipboard_item_to_top(id);
+            }
+        }
     }
 
     Ok(())
@@ -764,6 +774,46 @@ mod tests {
 
     fn paste_source() -> String {
         strip_line_comments(&source_file("src/services/paste/paste_handler.rs"))
+    }
+
+    // 粘贴后置顶必须统一在 paste_item_internal 成功路径收口(遵循 paste_to_top
+    // 设置)——数字快捷键/纯文本快捷键/quickpaste 后端路径都经此函数,若各入口
+    // 手写置顶会分叉;复制动作(simulate=false)不置顶。护栏断言:函数体内必须
+    // 含 paste_to_top 判断与 move_clipboard_item_to_top 调用,且俱在 simulate 块内。
+    #[test]
+    fn paste_to_top_is_centralized_in_paste_item_internal() {
+        let src = paste_source();
+        let body = fn_body(&src, "paste_item_internal");
+        let sim_start = body
+            .find("if simulate {")
+            .expect("paste_item_internal 必须含模拟粘贴块");
+        let sim_end = body
+            .find("\n    }\n\n    Ok(())")
+            .expect("模拟粘贴块必须以 Ok(()) 结束");
+        let sim_block = &body[sim_start..sim_end];
+        assert!(
+            sim_block.contains("get_settings().paste_to_top"),
+            "粘贴后置顶必须读取 paste_to_top 设置"
+        );
+        assert!(
+            !sim_block.contains("!crate::services::settings::get_settings().paste_to_top"),
+            "paste_to_top 判断不得被反转(条件反转会让置顶永远不执行)"
+        );
+        assert!(
+            sim_block.contains("move_clipboard_item_to_top(id)"),
+            "粘贴后置顶必须调 move_clipboard_item_to_top"
+        );
+        // 置顶只在模拟粘贴(simulate)成功后执行,复制动作不置顶。
+        let top = sim_block
+            .find("move_clipboard_item_to_top(id)")
+            .expect("缺置顶调用");
+        let play = sim_block
+            .find("play_paste_on_success")
+            .expect("缺粘贴成功音效");
+        assert!(
+            play < top,
+            "置顶必须在粘贴成功(音效)之后执行"
+        );
     }
 
     // white-list 必须同时覆盖 resolve_item_image_path 与 convert_legacy_image_format
