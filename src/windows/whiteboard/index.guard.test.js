@@ -59,21 +59,27 @@ test('白板 renderPreview 必须全量重绘形状栈', () => {
 });
 
 test('白板清空必须清栈并走全量重绘', () => {
-  const start = bare.indexOf('document.getElementById(\'clear\')');
-  assert.ok(start >= 0, '缺少 clear 按钮绑定');
-  const clearSeg = bare.slice(start, start + 300);
+  // clear 按钮绑定在 start() 函数体内(document.getElementById('clear') 在
+  // setupToolButtons 也出现一次,裸 indexOf 会命中靠前的变量赋值,300 字符
+  // 切片切不到真正的 click 监听器)——从 start 起点切到文件尾的
+  // initSettings 调用,确保覆盖 start 函数体内的绑定段。
+  const startFn = bare.indexOf('function start');
+  assert.ok(startFn >= 0, '缺少 start');
+  const initPos = bare.indexOf('initSettings(');
+  assert.ok(initPos > startFn, '缺少 initSettings 启动段');
+  const startSeg = bare.slice(startFn, initPos);
   assert.ok(
-    clearSeg.includes('shapes.length = 0'),
+    startSeg.includes('shapes.length = 0'),
     '清空必须重置形状栈（只 clearRect 会留下无法撤销/保存的形状）',
   );
   assert.ok(
-    clearSeg.includes('renderPreview()'),
+    startSeg.includes('renderPreview()'),
     '清空必须走全量重绘入口（保证画布与栈一致）',
   );
   // 绘制中清空必须先收口当前一笔:否则 drawing 残留让清空后的画布仍画
   // 半笔,松手 endDraw 又把半笔补回已清空的栈(松手诈尸)。与 undo 同构。
   assert.ok(
-    clearSeg.includes('endDraw({ pointerId: activePointerId })'),
+    startSeg.includes('endDraw({ pointerId: activePointerId })'),
     '清空必须先收口进行中一笔(与撤销同构,防松手诈尸)',
   );
 });
@@ -200,5 +206,30 @@ test('白板工具按钮文本走语言包(i18n.t)不再静态中文', () => {
   assert.ok(
     !save.includes('保存失败,请重试'),
     '保存失败不得再是裸中文字面',
+  );
+});
+
+// 白板启动竞态护栏(R126 新发现):initSettings 的跨进程 IPC(loadSettings
+// 内 invoke)在模块脚本执行后才 resolve,DOMContentLoaded 可能在 resolve
+// 前就已派发——若只靠 addEventListener 注册 start,DOM 就绪在先时会错过
+// 事件,start 永不执行,白板死屏(画布不可画/按钮无响应)。必须用
+// readyState 守卫:loading 时挂监听、否则直接调 start,两条路径必须都在。
+test('白板 initSettings 完成后必须 readyState 守卫启动(防 DOMContentLoaded 错过死屏)', () => {
+  assert.ok(
+    bare.includes("document.readyState === 'loading'"),
+    '必须用 readyState 判定文档是否仍在加载'
+  );
+  assert.ok(
+    bare.includes("window.addEventListener('DOMContentLoaded', start)"),
+    'loading 态必须挂 DOMContentLoaded 监听等 start'
+  );
+  assert.ok(
+    bare.includes('} else {') && bare.includes('start();'),
+    '文档已就绪时必须直接调 start(否则 IPC 后错过事件死屏)'
+  );
+  // 监听必须在 initSettings 的 finally 内注册,保证 start 只跑一次
+  assert.ok(
+    bare.indexOf('document.readyState') > bare.indexOf('initSettings()'),
+    'readyState 守卫必须在 initSettings 之后(语言同步后才启动)'
   );
 });

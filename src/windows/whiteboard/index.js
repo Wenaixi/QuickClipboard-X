@@ -304,8 +304,16 @@ function start() {
 // 白板为独立裸窗口,不经主窗口启动流程;shared/i18n.js 初始语言固定
 // zh-CN,若不同步设置语言,用户在设置切到 en-US 后白板按钮文案仍是中文
 // (与截图窗口 initSettings 同构)。先同步语言再启动,避免启动闪烁。
+// 注意:模块脚本在 HTML 解析完成前执行,DOMContentLoaded 可能已在 IPC
+// (initSettings 内 invoke)resolve 前派发——只靠 addEventListener 注册会
+// 错过事件导致 start 永不执行(白板死屏)。readyState 守卫兜底:文档已
+// 进入交互态则直接 start,否则等 DOMContentLoaded。
 initSettings()
   .catch((error) => console.error('加载白板语言设置失败:', error))
   .finally(() => {
-    window.addEventListener('DOMContentLoaded', start);
+    if (document.readyState === 'loading') {
+      window.addEventListener('DOMContentLoaded', start);
+    } else {
+      start();
+    }
   });
