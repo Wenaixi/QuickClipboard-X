@@ -55,7 +55,10 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                         MouseButton::Right if button_state == MouseButtonState::Up => {
-                            if crate::services::low_memory::is_low_memory_mode() {
+                            // 低占用模式用原生托盘菜单(switch_to_native_menu
+                            // 构建后由托盘右击自动弹出),此处无需额外动作;
+                            // 普通模式才显式弹 tauri 自绘菜单。
+                            if !crate::services::low_memory::is_low_memory_mode() {
                                 let app = app_handle.clone();
                                 tauri::async_runtime::spawn(async move {
                                     if let Err(e) = super::menu::show_tray_menu(app).await {
