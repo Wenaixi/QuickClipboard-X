@@ -9,6 +9,7 @@ import { createRoot } from 'react-dom/client';
 import { listen } from '@tauri-apps/api/event';
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { useTranslation } from 'react-i18next';
 import { showError } from '@shared/utils/dialog';
 import {
   createLayer,
@@ -121,6 +122,7 @@ function drawLayersToContext(ctx, layers, imageWidth, imageHeight) {
 }
 
 function AnnotationApp() {
+  const { t } = useTranslation();
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
   const imageRef = useRef(null);
@@ -307,7 +309,7 @@ function AnnotationApp() {
     draftRef.current = null;
     // 文本工具：弹输入框取文本。
     if (draft.type === 'text') {
-      const label = window.prompt('输入标注文本', '');
+      const label = window.prompt(t('annotation.textPrompt', { defaultValue: '输入标注文本' }), '');
       if (label && label.trim()) {
         const layer = createLayer(String(Date.now()), 'text', { ...draftParamsFor(draft.type, draft.start, draft.end), text: label.trim() }, [draft.start]);
         commitLayer(layer);
@@ -417,18 +419,18 @@ function AnnotationApp() {
           ))}
         </div>
         <div className="ml-auto flex items-center gap-1">
-          <button type="button" disabled={!canUndoSnapshots(history)} onClick={handleUndo} className="rounded-md px-2 py-1 text-xs hover:bg-qc-hover disabled:opacity-40">撤销</button>
-          <button type="button" disabled={!canRedoSnapshots(redoStack)} onClick={handleRedo} className="rounded-md px-2 py-1 text-xs hover:bg-qc-hover disabled:opacity-40">重做</button>
-          <button type="button" onClick={handleClear} className="rounded-md px-2 py-1 text-xs hover:bg-qc-hover">清空</button>
-          <button type="button" onClick={handleCancel} className="rounded-md px-2 py-1 text-xs hover:bg-qc-hover">取消</button>
-          <button type="button" onClick={handleSave} className="rounded-md bg-qc-primary px-2.5 py-1 text-xs text-qc-panel">完成并复制</button>
+          <button type="button" disabled={!canUndoSnapshots(history)} onClick={handleUndo} className="rounded-md px-2 py-1 text-xs hover:bg-qc-hover disabled:opacity-40">{t('annotation.undo', { defaultValue: '撤销' })}</button>
+          <button type="button" disabled={!canRedoSnapshots(redoStack)} onClick={handleRedo} className="rounded-md px-2 py-1 text-xs hover:bg-qc-hover disabled:opacity-40">{t('annotation.redo', { defaultValue: '重做' })}</button>
+          <button type="button" onClick={handleClear} className="rounded-md px-2 py-1 text-xs hover:bg-qc-hover">{t('annotation.clear', { defaultValue: '清空' })}</button>
+          <button type="button" onClick={handleCancel} className="rounded-md px-2 py-1 text-xs hover:bg-qc-hover">{t('annotation.cancel', { defaultValue: '取消' })}</button>
+          <button type="button" onClick={handleSave} className="rounded-md bg-qc-primary px-2.5 py-1 text-xs text-qc-panel">{t('annotation.doneAndCopy', { defaultValue: '完成并复制' })}</button>
         </div>
       </div>
       <div className="relative min-h-0 flex-1 overflow-hidden bg-qc-panel-2">
         <canvas ref={canvasRef} className="h-full w-full touch-none" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerLeave={handlePointerUp} onPointerCancel={handlePointerUp} />
       </div>
       <div className="pointer-events-none absolute right-2 top-1 text-xs text-qc-fg-muted">
-        {imageSize.width > 0 ? `${imageSize.width} × ${imageSize.height}` : '等待加载截图…'}
+        {imageSize.width > 0 ? `${imageSize.width} × ${imageSize.height}` : t('annotation.waitingLoad', { defaultValue: '等待加载截图…' })}
       </div>
       {layers.length > 0 && (
         <div className="border-t border-qc-border px-3 py-1">

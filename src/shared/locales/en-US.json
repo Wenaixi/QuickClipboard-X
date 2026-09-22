@@ -1299,6 +1299,15 @@
     "confirmDiscardMessage": "The whiteboard has unsaved drawing. Discard it?",
     "saveFailed": "Save failed, please retry: {error}"
   },
+  "annotation": {
+    "undo": "Undo",
+    "redo": "Redo",
+    "clear": "Clear",
+    "cancel": "Cancel",
+    "doneAndCopy": "Done & Copy",
+    "waitingLoad": "Waiting for screenshot…",
+    "textPrompt": "Enter annotation text"
+  },
   "floatingToolbar": {
     "scrollToTop": "Scroll to Top",
     "addFavorite": "Add Favorite",

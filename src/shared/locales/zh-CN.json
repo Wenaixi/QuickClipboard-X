@@ -1299,6 +1299,15 @@
     "confirmDiscardMessage": "当前白板有未保存的绘制内容，确定放弃吗？",
     "saveFailed": "保存失败,请重试:{error}"
   },
+  "annotation": {
+    "undo": "撤销",
+    "redo": "重做",
+    "clear": "清空",
+    "cancel": "取消",
+    "doneAndCopy": "完成并复制",
+    "waitingLoad": "等待加载截图…",
+    "textPrompt": "输入标注文本"
+  },
   "floatingToolbar": {
     "scrollToTop": "返回顶部",
     "addFavorite": "添加收藏项",
@@ -1312,6 +1321,9 @@
     "richText": "富文本",
     "plainTextMode": "纯文本模式",
     "richTextMode": "富文本模式",
+    "htmlMode": "HTML",
+    "htmlSource": "HTML 源码",
+    "htmlPreview": "预览",
     "wordWrap": "自动换行",
     "reset": "重置",
     "placeholder": "在此编辑文本内容...",

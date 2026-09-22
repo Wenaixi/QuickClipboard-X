@@ -128,6 +128,25 @@ test('编辑器跨图加载必须先清进行中草稿,再清图层(防旧草稿
   assert.ok(clearDraftPos < clearLayersPos, '清草稿必须早于清图层(避免 draw 渲染旧草稿)');
 });
 
+test('编辑器独立窗口必须 initSettings 同步语言,按钮/提示接语言包', () => {
+  // D-1:编辑器是独立窗口,不经主窗口启动流程,若不先加载设置并切换语言,
+  // 用户在设置切 en-US 后编辑工具按钮恒中文(与截图窗口不对称)。必须:
+  // index.jsx initSettings().finally(render) 异步同步语言再渲染;
+  // App.jsx 接 useTranslation,六个工具按钮与提示文案走 annotation 语言段。
+  const indexSource = readFileSync(new URL('./index.jsx', import.meta.url), 'utf8');
+  assert.ok(indexSource.includes("import { initSettings } from '@shared/store/settingsStore'"), 'index.jsx 必须引入 initSettings');
+  const initPos = indexSource.indexOf('initSettings()');
+  assert.ok(initPos !== -1, 'index.jsx 必须调用 initSettings');
+  const renderPos = indexSource.indexOf('root.render(<App />)');
+  assert.ok(renderPos !== -1, 'index.jsx 必须渲染 App');
+  assert.ok(initPos < renderPos, 'initSettings 必须早于 render(先同步语言再渲染,防启动闪烁)');
+  assert.ok(indexSource.includes('.finally('), 'render 必须挂在 finally(语言加载失败也要渲染,不白屏)');
+  assert.ok(appSource.includes("useTranslation"), 'App.jsx 必须接 useTranslation');
+  for (const key of ['undo', 'redo', 'clear', 'cancel', 'doneAndCopy', 'waitingLoad', 'textPrompt']) {
+    assert.ok(appSource.includes(`annotation.${key}`), `App.jsx 必须接 annotation.${key} 语言键`);
+  }
+});
+
 test('编辑器多指针只认首指,undo 先清草稿', () => {
   // 多指针守卫(白板同款):第二根手指/手掌误触落下不得覆盖首笔草稿,
   // move/up 只处理本笔指针;撤销重做前先丢弃进行中草稿,避免撤销后
