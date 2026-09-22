@@ -111,8 +111,9 @@ async fn check_updates_if_due(app: &AppHandle) -> Result<bool, String> {
     }
 
     // 检查成功(含无更新)才推进时间戳——失败(网络/服务器抖动)不推进,
-    // 让 60s tick 成为天然重试节拍,抖动期最多 1 分钟重试一次,恢复感知
-    // 延迟 ≤ 60s;若先推进时间戳,失败后要等满 24h/72h 才重试(整周期空转)。
+    // 让后台定时 tick 成为天然重试节拍,抖动期最多一个 tick 重试一次,
+    // 恢复感知延迟 ≤ tick 间隔;若先推进时间戳,失败后要等满 24h/72h
+    // 才重试(整周期空转)。
     let result = check_updates(app, !settings.disable_update_popup).await;
     if result.is_ok() {
         crate::services::store::set(LAST_AUTO_CHECK_AT_KEY, &now)?;
@@ -497,7 +498,7 @@ mod tests {
 
     // 自动更新失败重试护栏:上次检查时间戳必须只在检查成功后推进。
     // 若先推进时间戳再检查,失败(网络/服务器抖动)后要等满整个间隔
-    // (24h/72h)才重试,自动更新整周期空转;成功才推进让 60s tick
+    // (24h/72h)才重试,自动更新整周期空转;成功才推进让后台定时 tick
     // 成为天然重试节拍。顺序断言:store::set(LAST_AUTO_CHECK_AT_KEY
     // 必须位于 check_updates 调用之后(仅 contains 无法表达顺序,
     // 见 §10.3 顺序类不变量用 find 下标比较)。
@@ -516,7 +517,28 @@ mod tests {
             .unwrap_or_else(|| panic!("缺时间戳推进写入"));
         assert!(
             set_pos > check_pos,
-            "时间戳推进必须位于 check_updates 之后(失败不推进,60s tick 重试)"
+            "时间戳推进必须位于 check_updates 之后(失败不推进,定时 tick 重试)"
+        );
+    }
+
+    // 自动更新检查间隔护栏:后台定时 tick 与设置节拍必须同源——ticker 用
+    // 常量 AUTO_UPDATE_CHECK_INTERVAL_SECS,且该常量必须是完整小时(60*60),
+    // 否则检查过频违背"每日/每周"偏好语义。若常量改小或 ticker 直接
+    // 用字面量,更新检查会绕过间隔偏好高频空转。
+    #[test]
+    fn auto_update_tick_is_one_hour_literal() {
+        let src = stripped_source();
+        assert!(
+            src.contains("const AUTO_UPDATE_CHECK_INTERVAL_SECS: u64 = 60 * 60;"),
+            "自动更新检查间隔常量必须是 60 * 60 秒(完整小时)"
+        );
+        let start_pos = src
+            .find("pub fn start_update_checker")
+            .expect("缺 start_update_checker");
+        let ticker = &src[start_pos..];
+        assert!(
+            ticker.contains("interval(Duration::from_secs(AUTO_UPDATE_CHECK_INTERVAL_SECS))"),
+            "定时 tick 必须使用 AUTO_UPDATE_CHECK_INTERVAL_SECS 常量(与设置节拍同源)"
         );
     }
 }
