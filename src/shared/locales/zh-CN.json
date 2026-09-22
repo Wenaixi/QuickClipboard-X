@@ -875,6 +875,7 @@
       "apiKeyPlaceholder": "请输入API密钥",
       "model": "AI模型",
       "modelDesc": "选择使用的AI模型",
+      "recommended": "（推荐）",
       "baseUrl": "API地址",
       "baseUrlDesc": "自定义AI服务的API地址",
       "refreshModels": "刷新模型列表",

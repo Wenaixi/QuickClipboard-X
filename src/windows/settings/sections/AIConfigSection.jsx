@@ -20,7 +20,7 @@ function AIConfigSection({
   // （含 instruct 且不含 vision/vl），列为推荐会让用户必然测试失败。
   const modelOptions = [{
     value: 'Qwen/Qwen2.5-VL-7B-Instruct',
-    label: 'Qwen2.5-VL-7B-Instruct (推荐)'
+    label: `Qwen2.5-VL-7B-Instruct${t('settings.aiConfig.recommended')}`
   }, {
     value: 'deepseek-v3',
     label: 'DeepSeek V3'

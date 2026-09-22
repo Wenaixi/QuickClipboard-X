@@ -875,6 +875,7 @@
       "apiKeyPlaceholder": "Enter API key",
       "model": "AI Model",
       "modelDesc": "Select AI model to use",
+      "recommended": " (Recommended)",
       "baseUrl": "API URL",
       "baseUrlDesc": "Custom AI service API URL",
       "refreshModels": "Refresh Models",
