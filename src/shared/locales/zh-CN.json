@@ -1161,6 +1161,7 @@
       "disableUpdatePopup": "关闭更新弹窗",
       "disableUpdatePopupDesc": "开启后，后台发现新版本时不再弹出更新窗口，而是将主窗口标题栏左侧图标显示为绿色更新标记；点击该图标可打开更新窗口。手动检查更新仍会打开更新窗口。",
       "github": "GitHub",
+      "community": "社区交流",
       "star": "给个Star",
       "feedback": "反馈问题",
       "share": "推荐分享",

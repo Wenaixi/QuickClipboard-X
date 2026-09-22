@@ -30,6 +30,9 @@ function AboutSection({
   const [showQROverlay, setShowQROverlay] = useState(false);
   const [version, setVersion] = useState('1.0.0');
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const githubUrl = appLinks.github;
+  const feedbackUrl = `${appLinks.github}/issues`;
+  const shareUrl = appLinks.website;
   const updateIntervalOptions = [{
     value: 'daily',
     label: t('settings.about.updateIntervalDaily')
@@ -143,7 +146,7 @@ function AboutSection({
             GitHub
           </Button>
           <Button variant="secondary" icon={<i className="ti ti-users"></i>} onClick={handleOpenCommunity}>
-            社区交流
+            {t('settings.about.community')}
           </Button>
           <Button variant="secondary" icon={<i className="ti ti-brand-bilibili"></i>} onClick={handleOpenBilibili}>
             Bilibili
@@ -195,19 +198,19 @@ function AboutSection({
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
           <div className="space-y-3">
-            <div className="flex items-center gap-3 p-3 bg-qc-panel rounded-lg">
+            <a className="flex items-center gap-3 p-3 bg-qc-panel rounded-lg cursor-pointer transition-colors hover:bg-qc-hover" href={githubUrl} target="_blank" rel="noreferrer">
               <i className="ti ti-star text-yellow-500 text-lg"></i>
               <span className="text-sm text-qc-fg-muted">{t('settings.about.star')}</span>
-            </div>
-            <div className="flex items-center gap-3 p-3 bg-qc-panel rounded-lg">
+            </a>
+            <a className="flex items-center gap-3 p-3 bg-qc-panel rounded-lg cursor-pointer transition-colors hover:bg-qc-hover" href={feedbackUrl} target="_blank" rel="noreferrer">
               <i className="ti ti-bug text-red-500 text-lg"></i>
               <span className="text-sm text-qc-fg-muted">{t('settings.about.feedback')}</span>
-            </div>
-            <div className="flex items-center gap-3 p-3 bg-qc-panel rounded-lg">
+            </a>
+            <a className="flex items-center gap-3 p-3 bg-qc-panel rounded-lg cursor-pointer transition-colors hover:bg-qc-hover" href={shareUrl} target="_blank" rel="noreferrer">
               <i className="ti ti-speakerphone text-blue-500 text-lg"></i>
               <span className="text-sm text-qc-fg-muted">{t('settings.about.share')}</span>
-            </div>
-            <div className="flex items-center gap-3 p-3 bg-qc-panel rounded-lg">
+            </a>
+            <div role="button" tabIndex={0} onClick={() => setShowQROverlay(true)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowQROverlay(true); } }} className="flex items-center gap-3 p-3 bg-qc-panel rounded-lg cursor-pointer transition-colors hover:bg-qc-hover">
               <i className="ti ti-coffee text-orange-500 text-lg"></i>
               <span className="text-sm text-qc-fg-muted">{t('settings.about.donate')}</span>
             </div>

@@ -1161,6 +1161,7 @@
       "disableUpdatePopup": "Disable update popup",
       "disableUpdatePopupDesc": "When enabled, background checks will no longer open the updater window. Instead, the icon on the left side of the main window title bar will turn into a green update marker, and clicking it will open the updater window. Manual update checks still open the updater window.",
       "github": "GitHub",
+      "community": "Community",
       "star": "Give a Star",
       "feedback": "Report Issues",
       "share": "Share & Recommend",
