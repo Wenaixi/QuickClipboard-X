@@ -7,8 +7,16 @@ import {
   pasteFavorite as apiPasteFavorite
 } from '@shared/api/favorites'
 
+// 收藏粘贴计数事件:后端每次粘贴成功 emit id。若当前处于「未粘贴/已粘贴」
+// 过滤视图,被粘贴项按过滤口径(paste_count 0→1)应立即从列表剔除——
+// 否则滞留列表,视图语义失真,需切过滤或重启才恢复。全量视图下仅原地
+// +1 保持计数。
 listen('favorite-paste-count-updated', (event) => {
   const id = event.payload
+  if (favoritesStore.pasteStatus !== 'all') {
+    const removed = favoritesStore.removePastedItemIfFiltered(id)
+    if (removed) return
+  }
   for (const key of Object.keys(favoritesStore.items)) {
     const item = favoritesStore.items[key]
     if (item && item.id === id) {
@@ -99,7 +107,20 @@ export const favoritesStore = proxy({
   hasItem(index) {
     return index in this.items
   },
-  
+
+  // 过滤视图下粘贴剔除:当前处于「未粘贴/已粘贴」过滤时,某 id 被后端
+  // 标记为已粘贴(paste_count 0→1),该条目不再匹配当前过滤,应连同后续
+  // 索引向左平移剔除,totalCount-1,保持列表与过滤口径一致。
+  removePastedItemIfFiltered(id) {
+    if (this.pasteStatus === 'all') return false
+    const entries = Object.entries(this.items)
+      .map(([key, item]) => [parseInt(key, 10), item])
+      .find(([, item]) => item?.id === id)
+    if (!entries) return false
+    this.removeItem(id)
+    return true
+  },
+
   // 删除项
   removeItem(id) {
     this.removeItems([id])

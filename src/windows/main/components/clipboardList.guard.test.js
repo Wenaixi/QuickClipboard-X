@@ -50,3 +50,60 @@ test('FavoritesList loadSelectionEntries 必须透传 pasteStatus(与剪贴板�
     'useCallback deps 必须含 favSnap.pasteStatus,否则过滤切换后仍按旧参数拉取'
   );
 });
+
+test('粘贴计数事件在过滤视图下必须实时剔除条目(剪贴板/收藏双域同构,否则「未粘贴/已粘贴」视图滞留需切过滤或重启才恢复)', () => {
+  const clipStore = readFileSync(join(here, '../../../shared/store/clipboardStore.js'), 'utf8');
+  const favStore = readFileSync(join(here, '../../../shared/store/favoritesStore.js'), 'utf8');
+  const clipBare = strip(clipStore);
+  const favBare = strip(favStore);
+  // 剪贴板:监听必须先判过滤激活,过滤激活时调剔除并短路,不重复 +1。
+  assert.match(
+    clipBare,
+    /listen\('paste-count-updated', \(event\) => \{/,
+    '剪贴板必须监听 paste-count-updated'
+  );
+  assert.match(
+    clipBare,
+    /if \(clipboardStore\.pasteStatus !== 'all'\) \{/,
+    '剪贴板监听必须先行判定过滤激活'
+  );
+  assert.match(
+    clipBare,
+    /clipboardStore\.removePastedItemIfFiltered\(id\)/,
+    '剪贴板监听过滤激活时必须调用剔除'
+  );
+  assert.ok(
+    clipBare.includes('removePastedItemIfFiltered(id)') && clipBare.includes('if (removed) return'),
+    '剔除成功必须短路,避免过滤视图下残留 +1'
+  );
+  assert.match(
+    clipBare,
+    /removePastedItemIfFiltered\(id\) \{\s*\n\s*if \(this\.pasteStatus === 'all'\) return false[\s\S]*?this\.removeItem\(id\)[\s\S]*?return true/,
+    '剪贴板剔除方法必须:全量视图不剔除、过滤视图按 id 移除条目并返回成功'
+  );
+  // 收藏:同构断言。
+  assert.match(
+    favBare,
+    /listen\('favorite-paste-count-updated', \(event\) => \{/,
+    '收藏必须监听 favorite-paste-count-updated'
+  );
+  assert.match(
+    favBare,
+    /if \(favoritesStore\.pasteStatus !== 'all'\) \{/,
+    '收藏监听必须先行判定过滤激活'
+  );
+  assert.match(
+    favBare,
+    /favoritesStore\.removePastedItemIfFiltered\(id\)/,
+    '收藏监听过滤激活时必须调用剔除'
+  );
+  assert.ok(
+    favBare.includes('removePastedItemIfFiltered(id)') && favBare.includes('if (removed) return'),
+    '收藏剔除成功必须短路'
+  );
+  assert.match(
+    favBare,
+    /removePastedItemIfFiltered\(id\) \{\s*\n\s*if \(this\.pasteStatus === 'all'\) return false[\s\S]*?this\.removeItem\(id\)[\s\S]*?return true/,
+    '收藏剔除方法必须与剪贴板同构'
+  );
+});
