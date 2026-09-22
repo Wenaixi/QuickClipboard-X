@@ -534,6 +534,8 @@ fn text_row_to_string(row: &ClipboardDataItem) -> String {
 // 极端非法编码也不阻塞粘贴。CP_ACP=0 让系统使用活动代码页。
 fn decode_ansi_text(raw_data: &[u8]) -> String {
     unsafe {
+        // MultiByteToWideChar 与 GetACP 同在 Win32_Globalization 模块
+        // (CP_ACP=0 让系统使用活动代码页,中文环境 CP936/GBK)。
         use windows::Win32::Globalization::{GetACP, MultiByteToWideChar, CP_ACP};
         let wide_len = MultiByteToWideChar(CP_ACP, Default::default(), raw_data, None);
         if wide_len <= 0 {
