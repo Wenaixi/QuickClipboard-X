@@ -11,7 +11,15 @@ pub async fn pull_from_peer(device_id: &str) -> Result<SyncReport, String> {
     // 计数语义已决:删除记录与新增记录一样是数据变更,tombstone 应用数
     // 如实计入 pulled(与 uploader 的 upload_tombstones 口径一致),不另立
     // removed 字段——避免报告结构跨端膨胀,前端已有 errors 通道可区分异常。
-    let tombstones = super::http_client::fetch_peer_tombstones(&peer).await?;
+    // 墓碑差量拉取:锚点取本地 MAX(deleted_at)——全量拉取在墓碑表单调
+    // 增长后每次同步都传全表,服务端 list_sync_tombstones_since 差量能力
+    // 已被 snapshot 路由(since 参数)消费,客户端不带锚点等于丢弃。与
+    // history/favorites 的 since 增量口径对称。
+    let tombstones = super::http_client::fetch_peer_tombstones(
+        &peer,
+        crate::services::database::lan_local_tombstones_max_deleted_at()?,
+    )
+    .await?;
     let _ = crate::services::database::upsert_sync_tombstones(&tombstones.tombstones)?;
     let tombstone_report = crate::services::database::apply_sync_tombstones(&tombstones.tombstones)?;
     report.pulled_clipboard += tombstone_report.history;

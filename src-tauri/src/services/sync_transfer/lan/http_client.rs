@@ -156,8 +156,14 @@ pub async fn fetch_peer_groups(peer: &super::peer_store::PairedPeer) -> Result<s
     authorized_get(peer, "/qc-sync/groups").await
 }
 
-pub async fn fetch_peer_tombstones(peer: &super::peer_store::PairedPeer) -> Result<super::LanTombstoneBatch, String> {
-    authorized_get(peer, "/qc-sync/tombstones").await
+pub async fn fetch_peer_tombstones(peer: &super::peer_store::PairedPeer, since_deleted_at: Option<i64>) -> Result<super::LanTombstoneBatch, String> {
+    // 墓碑差量拉取:锚点取本地 MAX(deleted_at),服务端 list_sync_tombstones_since
+    // 以 deleted_at >= since 返回(>= 而非 >——严格大于会在锚点等于对端墓碑
+    // deleted_at 时确定性漏拉且永不补拉,与 history/favorites 的 >= 口径一致)。
+    match since_deleted_at {
+        Some(since) => authorized_get(peer, &format!("/qc-sync/tombstones?since={}", since)).await,
+        None => authorized_get(peer, "/qc-sync/tombstones").await,
+    }
 }
 
 pub async fn push_peer_history_records(

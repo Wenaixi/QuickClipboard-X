@@ -87,6 +87,21 @@ pub(crate) fn restored_record_updated_at(updated_at: i64, tombstone_deleted_at: 
     }
 }
 
+// 本地墓碑最大删除时间戳增量锚点:LAN pull 差量拉取用——取本地 MAX
+// (deleted_at)作为 since 传给对端,服务端以 deleted_at >= since 返回,
+// 避免每次同步全量传输墓碑表。与 lan_local_history_max_updated_at 同构
+// (COALESCE 0 + None 归一),表空时返回 None(客户端走无 since 全量)。
+pub fn lan_local_tombstones_max_deleted_at() -> Result<Option<i64>, String> {
+    with_connection(|conn| {
+        Ok(conn.query_row(
+            "SELECT COALESCE(MAX(deleted_at), 0) FROM sync_tombstones",
+            [],
+            |row| row.get::<_, i64>(0),
+        )?)
+    })
+    .map(|max_ts| if max_ts > 0 { Some(max_ts) } else { None })
+}
+
 pub fn list_sync_tombstones_since(since_deleted_at: Option<i64>) -> Result<Vec<SyncTombstone>, String> {
     with_connection(|conn| {
         let mut tombstones = Vec::new();
@@ -94,7 +109,7 @@ pub fn list_sync_tombstones_since(since_deleted_at: Option<i64>) -> Result<Vec<S
             let mut stmt = conn.prepare(
                 "SELECT collection, item_id, source_device_id, deleted_at, created_at
                  FROM sync_tombstones
-                 WHERE deleted_at > ?1
+                 WHERE deleted_at >= ?1
                  ORDER BY deleted_at ASC",
             )?;
             let rows = stmt.query_map(params![since_deleted_at], sync_tombstone_from_row)?;
@@ -451,4 +466,52 @@ fn is_image_id_referenced(conn: &rusqlite::Connection, image_id: &str) -> Result
     };
 
     Ok(query("clipboard")? || query("favorites")?)
+}
+
+#[cfg(test)]
+mod sync_tombstone_diff_guard {
+    use super::{lan_local_tombstones_max_deleted_at, list_sync_tombstones_since};
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+    // LAN pull 墓碑差量护栏(R126 C-I-2):fetch_peer_tombstones 必须携带
+    // 本地 MAX(deleted_at) 锚点(否则每次同步全量传输墓碑表);服务端
+    // list_sync_tombstones_since 必须以 deleted_at >= since 过滤——严格大于
+    // 会在锚点等于对端墓碑 deleted_at 时确定性漏拉该墓碑且永不补拉,
+    // 与 history/favorites 的 >= 增量口径一致。客户端接线必须用
+    // lan_local_tombstones_max_deleted_at() 取锚点。
+    #[test]
+    fn tombstone_diff_anchor_and_ge_filter_are_wired() {
+        let ts_src = strip_line_comments(&source_file("src/services/database/tombstones.rs"));
+        let list_body = fn_body(&ts_src, "list_sync_tombstones_since");
+        assert!(
+            list_body.contains("WHERE deleted_at >= ?1"),
+            "墓碑差量必须用 deleted_at >= since(严格大于会漏拉锚点同值墓碑)"
+        );
+        assert!(
+            !list_body.contains("WHERE deleted_at > ?1"),
+            "禁止退回严格大于过滤(锚点同值墓碑被漏拉且永不补拉)"
+        );
+        assert!(
+            ts_src.contains("fn lan_local_tombstones_max_deleted_at"),
+            "必须提供本地墓碑 MAX(deleted_at) 增量锚点函数"
+        );
+
+        let client_src = strip_line_comments(&source_file("src/services/sync_transfer/lan/http_client.rs"));
+        let client_body = fn_body(&client_src, "fetch_peer_tombstones");
+        assert!(
+            client_body.contains("since_deleted_at: Option<i64>"),
+            "fetch_peer_tombstones 必须接收 since 锚点参数"
+        );
+        assert!(
+            client_body.contains("tombstones?since={}"),
+            "客户端必须把 since 拼进 /qc-sync/tombstones?since= 请求"
+        );
+
+        let pull_src = strip_line_comments(&source_file("src/services/sync_transfer/lan/pull.rs"));
+        let pull_body = fn_body(&pull_src, "pull_from_peer");
+        assert!(
+            pull_body.contains("lan_local_tombstones_max_deleted_at()"),
+            "pull 必须用本地墓碑 MAX 锚点做差量拉取"
+        );
+    }
 }
