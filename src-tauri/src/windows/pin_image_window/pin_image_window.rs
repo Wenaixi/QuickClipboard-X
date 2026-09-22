@@ -747,7 +747,7 @@ mod tests {
             .find("lock_pin_data().remove(label)")
             .expect("close 必须移除数据");
         let close_call_pos = close_body
-            .find("PostMessageW")
+            .find("close_gdi_window_sync")
             .expect("close 必须关闭窗口");
         assert!(
             lock_pos < remove_pos && remove_pos < close_call_pos,

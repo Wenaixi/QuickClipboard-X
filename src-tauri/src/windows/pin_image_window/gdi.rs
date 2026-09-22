@@ -504,7 +504,7 @@ pub(crate) fn find_gdi_window(label: &str) -> Option<HWND> {
     // 记)、或 OS 复用该句柄值给了别的窗口——内存表里的旧值必须用 IsWindow
     // 校验真实存在性,否则 close/save/动画拿着失效句柄操作空窗口,失败被
     // 吞掉后表残留(渐变幽灵窗)。
-    if unsafe { IsWindow(hwnd).as_bool() } {
+    if unsafe { IsWindow(Some(hwnd)).as_bool() } {
         Some(hwnd)
     } else {
         lock_hwnd_map().retain(|_, h| *h != hwnd.0 as isize);
@@ -523,8 +523,8 @@ pub(crate) fn close_gdi_window_sync(label: &str) {
             SendMessageW(
                 hwnd,
                 WM_CLOSE,
-                WPARAM(0),
-                LPARAM(0),
+                None,
+                None,
             );
         }
     }
@@ -813,7 +813,7 @@ mod tests {
         let stripped = gdi_source();
         let find_body = crate::services::system::hotkey::test_utils::fn_body(&stripped, "find_gdi_window");
         assert!(
-            find_body.contains("IsWindow(hwnd).as_bool()"),
+            find_body.contains("IsWindow(Some(hwnd)).as_bool()"),
             "find_gdi_window 必须用 IsWindow 校验句柄真实性,失效句柄须从内存表剔除"
         );
         assert!(
