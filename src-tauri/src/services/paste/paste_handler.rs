@@ -509,8 +509,10 @@ fn find_preferred_text_row<'a>(
 }
 
 // 把剪贴板文本格式行解码成 UTF-8 字符串:CF_UNICODETEXT 的 raw_data 是
-// UTF-16LE 编码字节,CF_TEXT 是 ANSI 字节(系统默认代码页)。解码失败时
-// 退回逐字节转字符的保底(极端非法编码也不阻塞粘贴)。
+// UTF-16LE 编码字节,CF_TEXT 是 ANSI 字节(系统活动代码页,中文环境即
+// GBK)。CF_TEXT 若按 UTF-8 lossy 解码,非 ASCII 全变 U+FFFD 乱码——先用
+// MultiByteToWideChar 按 CP_ACP 转 UTF-16 再转 UTF-8;极少数无法映射的
+// 字节才保底逐字节转字符(极端非法编码也不阻塞粘贴)。
 fn text_row_to_string(row: &ClipboardDataItem) -> String {
     if row.format_name == "CF_UNICODETEXT" {
         let units: Vec<u16> = row
@@ -522,7 +524,28 @@ fn text_row_to_string(row: &ClipboardDataItem) -> String {
         let utf16 = String::from_utf16_lossy(trimmed);
         String::from_utf16(trimmed).unwrap_or(utf16)
     } else {
-        String::from_utf8_lossy(&row.raw_data).into_owned()
+        decode_ansi_text(&row.raw_data)
+    }
+}
+
+// ANSI 字节 → UTF-8:按系统活动代码页(GetACP,中文环境 CP936/GBK)经
+// MultiByteToWideChar 转 UTF-16 再转 UTF-8。直接 from_utf8_lossy 会把
+// GBK 字节当 UTF-8 解,非 ASCII 全变 U+FFFD。转码失败时退回 lossy 保底,
+// 极端非法编码也不阻塞粘贴。CP_ACP=0 让系统使用活动代码页。
+fn decode_ansi_text(raw_data: &[u8]) -> String {
+    unsafe {
+        use windows::Win32::Globalization::{GetACP, MultiByteToWideChar, CP_ACP};
+        let wide_len = MultiByteToWideChar(CP_ACP, Default::default(), raw_data, None);
+        if wide_len <= 0 {
+            return String::from_utf8_lossy(raw_data).into_owned();
+        }
+        let mut wide = vec![0u16; wide_len as usize];
+        let written = MultiByteToWideChar(CP_ACP, Default::default(), raw_data, Some(&mut wide));
+        if written <= 0 {
+            return String::from_utf8_lossy(raw_data).into_owned();
+        }
+        wide.truncate(written as usize);
+        String::from_utf16_lossy(&wide)
     }
 }
 
@@ -694,8 +717,26 @@ mod tests {
             "CF_UNICODETEXT 必须按 UTF-16 解码"
         );
         assert!(
-            decoder.contains("String::from_utf8_lossy"),
-            "CF_TEXT(ANSI)必须按字节保底解码"
+            decoder.contains("decode_ansi_text"),
+            "CF_TEXT(ANSI)必须走活动代码页转码,不得裸 from_utf8_lossy 乱码"
+        );
+        assert!(
+            !decoder.contains("String::from_utf8_lossy(&row.raw_data)"),
+            "CF_TEXT 分支禁止再按 UTF-8 lossy 直接解码(GBK 字节变 U+FFFD)"
+        );
+
+        let ansi_decoder = fn_body(&src, "decode_ansi_text");
+        assert!(
+            ansi_decoder.contains("MultiByteToWideChar"),
+            "ANSI 解码必须经 MultiByteToWideChar 转码"
+        );
+        assert!(
+            ansi_decoder.contains("CP_ACP"),
+            "ANSI 解码必须用 CP_ACP(系统活动代码页,中文环境 GBK)"
+        );
+        assert!(
+            ansi_decoder.contains("GetACP") || ansi_decoder.contains("CP_ACP"),
+            "ANSI 解码必须引用系统活动代码页来源"
         );
     }
 
