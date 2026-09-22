@@ -18,6 +18,7 @@
     "core:app:allow-name",
     "core:app:allow-version",
     "core:window:allow-toggle-maximize",
-    "core:window:allow-start-dragging"
+    "core:window:allow-start-dragging",
+    "dialog:default"
   ]
 }
