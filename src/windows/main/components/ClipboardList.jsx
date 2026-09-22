@@ -38,7 +38,7 @@ const ClipboardList = forwardRef(({
   const clipSnap = useSnapshot(clipboardStore);
   const isMultiSelectMode = clipSnap.isMultiSelectMode;
   const settings = useSnapshot(settingsStore);
-  const showShortcut = settings.showListShortcuts !== false && !clipSnap.filter && clipSnap.contentType === 'all';
+  const showShortcut = settings.showListShortcuts !== false && !clipSnap.filter && clipSnap.contentType === 'all' && clipSnap.pasteStatus === 'all';
   const showIndex = settings.showListIndex !== false;
   const selectedIdSet = useMemo(() => new Set(clipSnap.selectedEntries.map(entry => entry.id)), [clipSnap.selectedEntries]);
   const selectedOrderMap = useMemo(() => new Map(clipSnap.selectedEntries.map((entry, order) => [entry.id, order + 1])), [clipSnap.selectedEntries]);

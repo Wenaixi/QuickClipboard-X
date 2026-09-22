@@ -14,6 +14,15 @@ const strip = (src) =>
     .filter((line) => !line.trimStart().startsWith('//'))
     .join('\n');
 
+test('ClipboardList 数字快捷键角标在粘贴状态过滤视图下必须隐藏(与搜索/内容类型同处理,否则角标暗示可直达但数字快捷键按全量前 9 处取数,联动错位)', () => {
+  const code = strip(clipboardList);
+  assert.match(
+    code,
+    /showShortcut = settings\.showListShortcuts !== false && !clipSnap\.filter && clipSnap\.contentType === 'all' && clipSnap\.pasteStatus === 'all';/,
+    'showShortcut 判定必须同时排除 filter/contentType/pasteStatus 三个过滤维度,任一过滤激活都不显示数字角标'
+  );
+});
+
 test('ClipboardList loadSelectionEntries 必须透传 pasteStatus(否则过滤视图下 Shift 范围多选按全量序拉回,错选非可视条目)', () => {
   const code = strip(clipboardList);
   assert.match(
