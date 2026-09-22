@@ -1309,6 +1309,10 @@
     "textPrompt": "Enter annotation text",
     "confirmText": "Confirm"
   },
+  "clipboardList": {
+    "loadFailed": "Failed to load clipboard history",
+    "retry": "Retry"
+  },
   "floatingToolbar": {
     "scrollToTop": "Scroll to Top",
     "addFavorite": "Add Favorite",

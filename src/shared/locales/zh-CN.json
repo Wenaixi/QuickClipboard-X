@@ -1309,6 +1309,10 @@
     "textPrompt": "输入标注文本",
     "confirmText": "确认"
   },
+  "clipboardList": {
+    "loadFailed": "加载剪贴板历史失败",
+    "retry": "重试"
+  },
   "floatingToolbar": {
     "scrollToTop": "返回顶部",
     "addFavorite": "添加收藏项",

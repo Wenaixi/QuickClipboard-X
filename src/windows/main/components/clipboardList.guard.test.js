@@ -107,3 +107,34 @@ test('粘贴计数事件在过滤视图下必须实时剔除条目(剪贴板/收
     '收藏剔除方法必须与剪贴板同构'
   );
 });
+
+test('ClipboardList 加载失败必须渲染错误态与重试(不得静默伪装空历史)', () => {
+  // B-候选3:store 层 catch 只写 error 字段,UI 空态只判 totalCount===0,
+  // 用户无法区分真实空与加载失败,无重试入口。必须:空态分支内先判 error
+  // 渲染错误提示 + 重试按钮(点击调 initClipboardItems 重新加载)。
+  const code = strip(clipboardList);
+  assert.match(
+    code,
+    /if \(clipSnap\.error\) \{/,
+    '空态分支必须先判加载错误'
+  );
+  assert.match(
+    code,
+    /clipboardList\.loadFailed/,
+    '错误态必须渲染加载失败文案(走语言包)'
+  );
+  assert.match(
+    code,
+    /onClick=\{\(\) => initClipboardItems\(\)\}/,
+    '错误态必须提供重试按钮并触发重新加载'
+  );
+  assert.match(
+    code,
+    /clipboardList\.retry/,
+    '重试按钮必须走语言包键'
+  );
+  assert.ok(
+    code.includes('initClipboardItems') && code.includes('@shared/store/clipboardStore'),
+    'ClipboardList 必须引入 initClipboardItems(重试依赖)'
+  );
+});

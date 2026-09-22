@@ -5,8 +5,9 @@ import { listen } from '@tauri-apps/api/event';
 import { useCustomScrollbar } from '@shared/hooks/useCustomScrollbar';
 import { useSortableList } from '@shared/hooks/useSortable';
 import { useNavigation } from '@shared/hooks/useNavigation';
+import { useTranslation } from 'react-i18next';
 import { ROW_HEIGHT_CONFIG } from '@shared/hooks/useItemCommon';
-import { clipboardStore, loadClipboardRange, pasteClipboardItem } from '@shared/store/clipboardStore';
+import { clipboardStore, initClipboardItems, loadClipboardRange, pasteClipboardItem } from '@shared/store/clipboardStore';
 import { navigationStore } from '@shared/store/navigationStore';
 import { settingsStore } from '@shared/store/settingsStore';
 import { getClipboardHistory, moveClipboardItemToTop, moveClipboardItemById, closePreviewWindow } from '@shared/api';
@@ -36,6 +37,7 @@ const ClipboardList = forwardRef(({
   const onScrollStateChangeRef = useRef(onScrollStateChange);
   const snap = useSnapshot(navigationStore);
   const clipSnap = useSnapshot(clipboardStore);
+  const { t } = useTranslation();
   const isMultiSelectMode = clipSnap.isMultiSelectMode;
   const settings = useSnapshot(settingsStore);
   const showShortcut = settings.showListShortcuts !== false && !clipSnap.filter && clipSnap.contentType === 'all' && clipSnap.pasteStatus === 'all';
@@ -468,6 +470,16 @@ const ClipboardList = forwardRef(({
   }
 
   if (clipSnap.totalCount === 0) {
+    if (clipSnap.error) {
+      return <div className="flex-1 bg-qc-surface overflow-hidden flex items-center justify-center transition-colors duration-500 clipboard-list" data-no-drag>
+        <div className="flex flex-col items-center gap-2 text-qc-fg-subtle">
+          <p className="text-sm">{t('clipboardList.loadFailed', { defaultValue: '加载剪贴板历史失败' })}</p>
+          <button type="button" onClick={() => initClipboardItems()} className="rounded-md bg-qc-panel px-2.5 py-1 text-xs text-qc-fg hover:bg-qc-hover">
+            {t('clipboardList.retry', { defaultValue: '重试' })}
+          </button>
+        </div>
+      </div>;
+    }
     return <div className="flex-1 bg-qc-surface overflow-hidden flex items-center justify-center transition-colors duration-500 clipboard-list" data-no-drag>
       <p className="text-qc-fg-subtle text-sm">
         {clipSnap.filter ? '无搜索结果' : '暂无剪贴板记录'}
