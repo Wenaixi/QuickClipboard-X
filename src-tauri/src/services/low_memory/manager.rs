@@ -29,6 +29,7 @@ const WEBVIEW_LABELS: &[&str] = &[
     "ruler",
     "whiteboard",
     "annotation",
+    "input-dialog",
 ];
 
 const AUTO_LOW_MEMORY_WINDOW_LABELS: &[&str] = &[
@@ -44,6 +45,7 @@ const AUTO_LOW_MEMORY_WINDOW_LABELS: &[&str] = &[
     "ruler",
     "whiteboard",
     "annotation",
+    "input-dialog",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -344,6 +346,13 @@ fn destroy_all_webviews(app: &AppHandle) {
     // 重建后自动低占用检测把它当可见窗口永久阻断空闲计时、快捷键唤出误走
     // next 分支。销毁即复位,与上面文件盒清记录/贴图清数据同对称口径。
     crate::windows::quickpaste::set_visible(false);
+
+    // input-dialog 的 INPUT_RESULT/INPUT_OPTIONS 是模块级静态状态,销毁窗口
+    // 走不到 submit 清理——残留的结果会被下次 open 读到(贴图透明度/分组
+    // 改名弹框读到上次结果直接完成,输入未生效)。销毁即清空,与
+    // transfer_shelf 清记录/quickpaste 复位可见性同对称语义。
+    crate::windows::plugins::input_dialog::clear_result();
+    crate::windows::plugins::input_dialog::clear_options();
 }
 
 // 确保主窗口可用：窗口对象还在但句柄失效时先销毁再重建。
@@ -818,6 +827,32 @@ mod tests {
         assert!(
             body.contains("starts_with(crate::windows::transfer_shelf::LABEL_PREFIX)"),
             "自动检测必须把 transfer-shelf 前缀的文件盒窗口纳入可见性扫描"
+        );
+    }
+
+    // 源码护栏:input-dialog 必须同时进入销毁表与自动检测可见性扫描表——
+    // focus.rs 排除表已含 input-dialog(bf11db39),而低内存两张静态表漏它:
+    // 用户弹着输入框(贴图透明度/分组改名)而其它窗口已隐藏时,空闲计时
+    // 不被对话框阻塞照走,自动进入低占用后对话框又销毁不掉,残留屏上且
+    // 静态 INPUT_RESULT/INPUT_OPTIONS 悬空。销毁后还必须清 input_dialog
+    // 静态状态,与 quickpaste 可见性复位同对称语义。
+    #[test]
+    fn low_memory_tables_cover_input_dialog_and_clear_its_state() {
+        let src = strip_line_comments(&manager_source());
+        let prod = &src[..src.find("#[cfg(test)]").unwrap_or(src.len())];
+
+        let destroy_body = crate::services::system::hotkey::test_utils::fn_body(&src, "destroy_all_webviews");
+        assert!(
+            prod.contains("\"input-dialog\""),
+            "input-dialog 必须进入低内存销毁/扫描表(否则弹框被自动低占用打断且销毁不掉)"
+        );
+        assert!(
+            destroy_body.contains("input_dialog::clear_result()"),
+            "销毁 input-dialog 后必须清空静态结果状态"
+        );
+        assert!(
+            destroy_body.contains("input_dialog::clear_options()"),
+            "销毁 input-dialog 后必须清空静态配置状态"
         );
     }
 }
