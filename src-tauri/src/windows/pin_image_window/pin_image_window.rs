@@ -31,8 +31,7 @@ struct PinImageData {
     preview_mode: bool,
     image_physical_x: Option<i32>,
     image_physical_y: Option<i32>,
-    original_image_path: Option<String>, 
-    edit_data: Option<String>,           
+    original_image_path: Option<String>,
 }
 
 pub fn init_pin_image_window() {
@@ -62,7 +61,6 @@ pub async fn pin_image_from_file(
     image_physical_width: Option<u32>,
     image_physical_height: Option<u32>,
     original_image_path: Option<String>,
-    edit_data: Option<String>,
 ) -> Result<(), String> {
     let is_preview = preview_mode.unwrap_or(false);
     let use_physical_coords = image_physical_x.is_some() && image_physical_y.is_some();
@@ -158,7 +156,6 @@ pub async fn pin_image_from_file(
             image_physical_x,
             image_physical_y,
             original_image_path: actual_original_path,
-            edit_data,
         },
     );
 
@@ -587,6 +584,30 @@ mod tests {
         assert!(
             !fn_body.contains("get_monitor_at_cursor"),
             "read_image_logical_size_at 不得用光标屏 scale"
+        );
+    }
+
+    // 死数据字段不得复活:贴图编辑功能未实现(start_pin_edit_mode 返回不可用),
+    // PinImageData 已删 edit 数据字段与命令参数。负向断言用拆分拼接避免
+    // 自命中(§10.4 陷阱)。断言目标若直接写字面在本说明里会永远失败。
+    #[test]
+    fn pin_image_edit_data_field_is_not_reintroduced() {
+        let read_self = || {
+            std::fs::read_to_string(format!(
+                "{}/src/windows/pin_image_window/pin_image_window.rs",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .expect("读取贴图窗口源码失败")
+        };
+        let code = read_self()
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let field = ["edit", "_data"].concat();
+        assert!(
+            !code.contains(&field),
+            "PinImageData 不得再引入贴图编辑死字段(贴图编辑未实现)"
         );
     }
 
