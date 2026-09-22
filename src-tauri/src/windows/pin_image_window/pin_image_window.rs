@@ -127,9 +127,7 @@ pub async fn pin_image_from_file(
 
     // 预览窗口整个建窗流程串行化(建窗前就取锁)——固定标签 "image-preview"
     // 下两个并发请求(如预览与真实贴图交错、或 menu hover 连续触发)会交错执行:
-    // A 关闭旧窗、A 写入数据、B 关闭 A 新窗、A/B 各自 create 同一标签(第二个
-    // WebviewWindowBuilder::build 对已存在 label 抛错或复用),窗口与其数据错位。
-    // 注:文字描述历史实现——GDI 版已不用 WebviewWindowBuilder,此注释保留背景。
+    // A 关闭旧窗、A 写入数据、B 关闭 A 新窗、A/B 各自 create 同一标签。
     // 非预览窗口标签唯一(PIN_IMAGE_COUNTER 递增),无此竞态,不需要取锁。
     let _preview_guard = if is_preview {
         Some(PREVIEW_WINDOW_LOCK.get_or_init(|| tokio::sync::Mutex::new(())).lock().await)
