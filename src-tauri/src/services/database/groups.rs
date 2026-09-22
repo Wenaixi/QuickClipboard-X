@@ -330,16 +330,34 @@ pub fn update_group(old_name: String, new_name: String, new_icon: String, new_co
         let new_icon = normalize_group_icon(&new_icon);
         let new_color = normalize_group_color(&new_color);
         let tx = conn.unchecked_transaction()?;
-        
+
+        // 改名是"删除旧名 + 新增新名"两语义的组合:delete_group 会为旧名写
+        // 删除墓碑让远端收敛,update_group 若只改行不写墓碑,未同步设备的
+        // 旧名分组仍会经 LWW 判断当作新增保留,双向拉取后同组双名并存。
+        // 与 delete_group 同款墓碑,远端拉取侧按墓碑把旧名分组删除、其
+        // 收藏归「全部」,消除双名分裂。
+        if old_name != new_name {
+            super::tombstones::record_sync_tombstone_in_conn(
+                &tx,
+                super::tombstones::COLLECTION_GROUPS,
+                &old_name,
+                &crate::services::sync_transfer::device_id(),
+                now,
+            )?;
+        }
+
         tx.execute(
             "UPDATE groups SET name = ?1, icon = ?2, color = ?3, updated_at = ?4 WHERE name = ?5",
             params![&new_name, &new_icon, &new_color, now, &old_name],
         )?;
-        
+
         if old_name != new_name {
+            // 收藏随分组改名迁移,必须同时刷新 updated_at:同步增量以
+            // updated_at 判定变更,不刷新则改名端收藏的 group_name 变更
+            // 不进 LAN/WebDAV 收藏增量,另一端收藏仍挂在旧名下不归位。
             tx.execute(
-                "UPDATE favorites SET group_name = ?1 WHERE group_name = ?2",
-                params![&new_name, &old_name],
+                "UPDATE favorites SET group_name = ?1, updated_at = ?2 WHERE group_name = ?3",
+                params![&new_name, now, &old_name],
             )?;
         }
         
@@ -628,6 +646,33 @@ mod tests {
         assert!(
             guard_pos < tombstone_pos,
             "'全部'拒绝必须早于墓碑/合并逻辑,否则仍会触达 UPDATE"
+        );
+    }
+
+    // 点名必须两件套:改写旧名墓碑 + 收藏迁移刷新 updated_at。改名在
+    // LWW 同步语义下等价"删除旧名+新增新名",旧名不写墓碑远端会把它
+    // 当新增保留,同组双名并存、收藏在两名间分裂;收藏迁移不带
+    // updated_at 则改名端自身入库 not 进同步增量,另一端收藏不归位。
+    #[test]
+    fn update_group_rename_writes_tombstone_and_bumps_favorite_updated_at() {
+        let src = strip_line_comments(&source_file("src/services/database/groups.rs"));
+        let body = fn_body(&src, "update_group");
+
+        let tombstone_pos = body
+            .find("record_sync_tombstone_in_conn")
+            .expect("改名必须写 COLLECTION_GROUPS 删除墓碑,否则远端把旧名当新增保留");
+        let groups_update_pos = body
+            .find("UPDATE groups SET name = ?1")
+            .expect("缺分组改名 UPDATE");
+        assert!(
+            tombstone_pos < groups_update_pos,
+            "墓碑必须与 UPDATE 同事务且先于改名落库,旧名残留窗口最小"
+        );
+
+        let favorite_update = "UPDATE favorites SET group_name = ?1, updated_at = ?2";
+        assert!(
+            body.contains(favorite_update),
+            "收藏迁移必须刷新 updated_at,否则改名端收藏变更不进同步增量"
         );
     }
 }
