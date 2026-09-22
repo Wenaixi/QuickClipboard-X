@@ -258,29 +258,69 @@ async fn create_pin_image_window(
         ((width as f64 + 10.0) * scale).round() as u32,
         ((height as f64 + 10.0) * scale).round() as u32,
     );
-    let image_path = {
+    let (image_path, preview) = {
         let map = lock_pin_data();
-        map.get(label).map(|d| d.file_path.clone())
+        (map.get(label).map(|d| d.file_path.clone()), map.get(label).is_some_and(|d| d.preview_mode))
     };
-    let hwnd = super::gdi::create_gdi_window(label, physical_x, physical_y, physical_w, physical_h, is_preview_label(label))?;
-    if let Some(path) = image_path {
-        // 建窗渲染透明度读窗口状态(继承持久化偏好):硬编码 255 会让用户改过的
-        // 透明度在下次新建窗口时被重置回 100%,跨窗口继承承诺落空。
-        if let Err(error) = super::gdi::render_image(hwnd, &path, super::gdi::pin_state(label).opacity) {
-            // 渲染失败(文件在建操作与建窗之间被删/损坏,或 GDI 调用失败)
-            // 先走统一清理关闭空窗口——此时 GDI 空窗已建、HWND/状态/数据
-            // 三表已登记,直接上抛会留下黑屏空窗卡在屏上且数据残留。
-            let _ = close_pin_image_window(label);
-            return Err(error);
+    // 图片解码+逐像素预乘是 CPU 密集段(4K 全屏约 830 万像素),放阻塞线程池
+    // 执行,不让它占住 tokio 异步线程——否则与截图后快速贴图命令同池排队,
+    // 表现为贴图时卡顿/未响应。
+    let premultiplied = match image_path {
+        Some(path) => Some(
+            tokio::task::spawn_blocking(move || {
+                super::gdi::decode_and_premultiply_image(&path)
+            })
+            .await
+            .map_err(|e| format!("贴图解码线程失败: {e}"))??,
+        ),
+        None => None,
+    };
+    // 建窗 + GDI 渲染必须在主线程执行:GDI 窗口建在无消息循环的线程上时,
+    // 拖动/右键/关闭消息永远无人派发(窗口冻结),且跨线程 SendMessageW 同步
+    // 发送到无泵线程会让调用方挂死。winit 主线程事件循环一直在泵消息,窗口
+    // 建到主线程后交互正常、关窗同步发送也有泵应答。
+    let label_owned = label.to_string();
+    let app = app.clone();
+    let hwnd_isize = run_on_main_thread_result(&app, move || {
+        let hwnd = super::gdi::create_gdi_window(&label_owned, physical_x, physical_y, physical_w, physical_h, preview)?;
+        if let Some((w, h, bgra)) = premultiplied {
+            // 建窗渲染透明度读窗口状态(继承持久化偏好):硬编码 255 会让用户
+            // 改过的透明度在下次新建窗口时被重置回 100%,跨窗口继承承诺落空。
+            let opacity = super::gdi::pin_state(&label_owned).opacity;
+            if let Err(error) = super::gdi::render_premultiplied(hwnd, w, h, &bgra, opacity) {
+                // 渲染失败(文件在建操作与建窗之间被删/损坏,或 GDI 调用失败)
+                // 先走统一清理关闭空窗口——此时 GDI 空窗已建、HWND/状态/数据
+                // 三表已登记,直接上抛会留下黑屏空窗卡在屏上且数据残留。
+                let _ = close_pin_image_window(&label_owned);
+                return Err(error);
+            }
         }
-    }
+        Ok(hwnd.0 as isize)
+    })
+    .await?;
+    let _ = hwnd_isize;
     Ok(())
 }
 
-/// 预览窗口固定标签
-fn is_preview_label(label: &str) -> bool {
-    label == "image-preview"
+// 在主线程执行同步闭包并返回结果(oneshot 传值)。GDI 窗口创建/渲染必须
+// 落在有消息泵的主线程;async 命令运行在 tokio worker,不能直接建窗。
+// 闭包内所有非 Send 对象(HWND 等)一律转 isize 进出。
+async fn run_on_main_thread_result<T, F>(app: &AppHandle, task: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.run_on_main_thread(move || {
+        let _ = tx.send(task());
+    })
+    .map_err(|e| format!("调度主线程任务失败: {}", e))?;
+
+    rx.await.map_err(|_| "主线程任务被取消".to_string())?
 }
+
+// 预览窗口固定标签(数据表 PinImageData.preview_mode 与标签一致,
+// 建窗时预览位直接从数据表读取,本函数不再需要)
 
 // 图片数据查询:由 GDI 菜单/另存/清理按标签读 PIN_IMAGE_DATA_MAP。
 // 原命令壳 get_pin_image_data(WebviewWindow 版)随前端删除后无调用者,
@@ -695,9 +735,9 @@ mod tests {
     }
 
     // 建窗渲染透明度必须读窗口状态(继承持久化偏好):create_pin_image_window
-    // 内 render_image 第三参若硬编码 255,用户改过的透明度在下次新建窗口时
-    // 被重置回 100%,跨窗口继承承诺落空。护栏断言:render_image 之后必须跟
-    // pin_state(label).opacity,不得出现裸 255。
+    // 内 render_premultiplied 第五参若硬编码 255,用户改过的透明度在下次新建
+    // 窗口时被重置回 100%,跨窗口继承承诺落空。护栏断言:render_premultiplied
+    // 之后必须跟 pin_state(label).opacity,不得出现裸 255。
     #[test]
     fn create_window_renders_with_inherited_opacity() {
         let src = std::fs::read_to_string(format!(
@@ -717,11 +757,11 @@ mod tests {
         let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(stripped.len());
         let body = &stripped[start..end];
         let render_pos = body
-            .find("render_image(hwnd, &path,")
-            .expect("建窗必须渲染图片");
+            .find("render_premultiplied(hwnd, w, h, &bgra, opacity)")
+            .expect("建窗必须渲染预乘图片");
         let render_seg = &body[render_pos..render_pos + 80];
         assert!(
-            render_seg.contains("pin_state(label).opacity"),
+            render_seg.contains("pin_state(&label_owned).opacity"),
             "建窗渲染透明度必须读窗口状态(继承持久化偏好)"
         );
         assert!(
@@ -770,23 +810,23 @@ mod tests {
         );
     }
 
-    // 建窗渲染失败必须先清理空窗口:create_pin_image_window 内 render_image
-    // 失败(文件被删/损坏或 GDI 调用失败)若裸 ? 上抛,GDI 空窗留屏 + HWND/
-    // 状态/数据三表残留。护栏断言 render_image 调用之后、函数闭合前必须
-    // 出现 close_pin_image_window(顺序:render_image < close)。
+    // 建窗渲染失败必须先清理空窗口:create_pin_image_window 主线程闭包内
+    // render_premultiplied 失败(文件被删/损坏或 GDI 调用失败)若裸 ? 上抛,
+    // GDI 空窗留屏 + HWND/状态/数据三表残留。护栏断言 render_premultiplied
+    // 之后、Ok(hwnd isize) 之前必须出现 close_pin_image_window。
     #[test]
     fn render_failure_closes_empty_window_before_returning() {
         let src = strip_line_comments(&source_file("src/windows/pin_image_window/pin_image_window.rs"));
         let body = fn_body(&src, "create_pin_image_window");
         let render_pos = body
-            .find("render_image(hwnd, &path,")
-            .expect("建窗必须渲染图片");
+            .find("render_premultiplied(hwnd, w, h, &bgra, opacity)")
+            .expect("建窗必须渲染预乘图片");
         let close_pos = body
-            .find("close_pin_image_window(label)")
+            .find("close_pin_image_window(&label_owned)")
             .expect("渲染失败必须先清理空窗口");
         assert!(
             render_pos < close_pos,
-            "render_image 之后、函数闭合前必须调用 close_pin_image_window,否则空窗留屏+三表残留"
+            "render_premultiplied 之后必须调用 close_pin_image_window,否则空窗留屏+三表残留"
         );
         let ok_pos = body.rfind("\n    Ok(())").or_else(|| body.rfind("Ok(())"));
         assert!(ok_pos.is_some(), "函数必须以 Ok(()) 收尾");
@@ -796,22 +836,39 @@ mod tests {
         );
     }
 
-    // 贴图窗口必须走 GDI 分层窗口(不再创建 WebView):
-    // 创建路径必须调用 gdi::create_gdi_window。
+    // 贴图窗口必须走 GDI 分层窗口(不再创建 WebView),且建窗+渲染必须落在
+    // 有消息泵的主线程:
+    // 1. 图片解码+预乘(CPU 密集段)必须在阻塞线程池执行,不得占 tokio worker;
+    // 2. 建窗必须在主线程闭包内(run_on_main_thread),窗口消息才能正常派发;
+    // 3. 渲染走 render_premultiplied(GDI 渲染函数)。
     #[test]
-    fn pin_image_window_is_created_through_gdi() {
+    fn pin_image_window_is_created_through_gdi_on_main_thread() {
         let stripped: String = source_file("src/windows/pin_image_window/pin_image_window.rs")
             .lines()
             .filter(|l| !l.trim_start().starts_with("//"))
             .collect::<Vec<_>>()
             .join("\n");
+        let start = stripped
+            .find("async fn create_pin_image_window")
+            .expect("缺 create_pin_image_window");
+        let rest = &stripped[start..];
+        let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(stripped.len());
+        let body = &stripped[start..end];
         assert!(
-            stripped.contains("gdi::create_gdi_window"),
+            body.contains("gdi::create_gdi_window"),
             "贴图窗口必须走 gdi::create_gdi_window(GDI 分层窗口)"
         );
         assert!(
-            stripped.contains("super::gdi::render_image"),
-            "建窗后必须渲染图片到 GDI 窗口"
+            body.contains("spawn_blocking(move || {") && body.contains("decode_and_premultiply_image"),
+            "解码+预乘必须走阻塞线程池(不得占 tokio worker)"
+        );
+        assert!(
+            body.contains("run_on_main_thread_result"),
+            "建窗+渲染必须在主线程闭包内执行(窗口消息正常派发)"
+        );
+        assert!(
+            body.contains("render_premultiplied(hwnd, w, h, &bgra, opacity)"),
+            "建窗后必须渲染预乘图片到 GDI 窗口"
         );
         assert!(
             !stripped.contains("WebviewWindowBuilder"),

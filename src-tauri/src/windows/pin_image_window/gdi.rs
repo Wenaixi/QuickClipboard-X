@@ -256,17 +256,12 @@ pub(crate) fn create_gdi_window(
     Ok(hwnd)
 }
 
-/// 渲染图片到分层窗口。image crate 解码 → 非预乘 RGBA → 预乘 BGRA → DIB →
-/// UpdateLayeredWindow。
-///
-/// 句柄生命周期严格配对:GetDC → CreateCompatibleDC → CreateDIBSection →
-/// SelectObject(dib) → UpdateLayeredWindow → SelectObject(hOldBitmap) →
-/// DeleteObject(dib) → DeleteDC → ReleaseDC。
-pub(crate) fn render_image(
-    hwnd: HWND,
+/// 解码图片并预乘为 BGRA 像素缓冲。纯内存操作(可安全放入阻塞线程池),
+/// 与 GDI 渲染解耦:大图解码+逐像素预乘是 CPU 密集段,不占用贴图窗口
+/// 所在线程;渲染由 render_premultiplied 在窗口线程执行。
+pub(crate) fn decode_and_premultiply_image(
     image_path: &str,
-    opacity: u8,
-) -> Result<(), String> {
+) -> Result<(i32, i32, Vec<u32>), String> {
     let decoded = image::ImageReader::open(image_path)
         .map_err(|e| format!("打开贴图文件失败: {}", e))?
         .with_guessed_format()
@@ -280,6 +275,38 @@ pub(crate) fn render_image(
         return Err("贴图尺寸无效".to_string());
     }
 
+    // 非预乘 RGBA → 预乘 BGRA:ae = a + (a>>7) 在 0..=255 内加权,
+    // (c*ae)>>8 保持 0..=255,α=255 恒等透传、α=0 归零,满足 ULW_ALPHA
+    // 对预乘的约束(fluor 实证方案)。
+    let src = decoded.as_raw();
+    let mut bgra = Vec::with_capacity((w as usize) * (h as usize));
+    for chunk in src.chunks_exact(4) {
+        let r = chunk[0] as u32;
+        let g = chunk[1] as u32;
+        let b = chunk[2] as u32;
+        let a = chunk[3] as u32;
+        let pr = premultiply(r, a);
+        let pg = premultiply(g, a);
+        let pb = premultiply(b, a);
+        bgra.push((a << 24) | (pr << 16) | (pg << 8) | pb);
+    }
+
+    Ok((w, h, bgra))
+}
+
+/// 把预乘 BGRA 像素渲染到分层窗口:CreateDIBSection + memcpy + ULW。
+/// 须在贴图窗口所在线程执行(窗口句柄与 DC 的线程归属一致)。
+pub(crate) fn render_premultiplied(
+    hwnd: HWND,
+    w: i32,
+    h: i32,
+    bgra: &[u32],
+    opacity: u8,
+) -> Result<(), String> {
+    if w <= 0 || h <= 0 || (w as usize) * (h as usize) != bgra.len() {
+        return Err("预乘像素缓冲尺寸无效".to_string());
+    }
+
     let screen_dc = unsafe { GetDC(None) };
     if screen_dc.is_invalid() {
         return Err("获取屏幕 DC 失败".to_string());
@@ -290,7 +317,7 @@ pub(crate) fn render_image(
         return Err("创建内存 DC 失败".to_string());
     }
 
-    // 32bpp 自顶向下 DIB(负高度 = 顶行在内存首行,与 RGBA 行序一致)
+    // 32bpp 自顶向下 DIB(负高度 = 顶行在内存首行,与 BGRA 行序一致)
     let mut bmi = BITMAPINFO::default();
     bmi.bmiHeader = BITMAPINFOHEADER {
         biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
@@ -313,21 +340,9 @@ pub(crate) fn render_image(
         return Err("创建 DIB 位图失败: DIB 数据指针为空".to_string());
     }
 
-    // 非预乘 RGBA → 预乘 BGRA,逐像素写入 DIB
-    let src = decoded.as_raw();
+    // 预乘 BGRA 逐像素拷入 DIB
     let dst = unsafe { std::slice::from_raw_parts_mut(bits as *mut u32, (w * h) as usize) };
-    for (d, chunk) in dst.iter_mut().zip(src.chunks_exact(4)) {
-        let r = chunk[0] as u32;
-        let g = chunk[1] as u32;
-        let b = chunk[2] as u32;
-        let a = chunk[3] as u32;
-        // 预乘:ae = a + (a>>7) 在 0..=255 内加权,(c*ae)>>8 保持 0..=255,
-        // α=255 恒等透传、α=0 归零,满足 ULW_ALPHA 对预乘的约束
-        let pr = premultiply(r, a);
-        let pg = premultiply(g, a);
-        let pb = premultiply(b, a);
-        *d = (a << 24) | (pr << 16) | (pg << 8) | pb;
-    }
+    dst.copy_from_slice(bgra);
 
     let old = unsafe { SelectObject(mem_dc, HGDIOBJ(dib.0)) };
 
@@ -390,11 +405,14 @@ fn premultiply(channel: u32, alpha: u32) -> u32 {
     ((channel * ae) >> 8) & 0xFF
 }
 
-/// 渲染当前状态到窗口:读取状态透明度并重渲染(菜单透明度档/阴影开关用)
+/// 渲染当前状态到窗口:读取状态透明度并重渲染(菜单透明度档/阴影开关用)。
+/// 解码+预乘放阻塞线程池,GDI 渲染经主线程委托——窗口建在主线程,所有
+/// 对窗口的 UpdateLayeredWindow 必须与窗口线程一致(跨线程 GDI 操作无效)。
 pub(crate) fn render_current(label: &str, hwnd: HWND) -> Result<(), String> {
     let state = pin_state(label);
     let path = crate::windows::pin_image_window::pin_image_file_path(label)?;
-    render_image(hwnd, &path, state.opacity)
+    let (w, h, bgra) = decode_and_premultiply_image(&path)?;
+    render_premultiplied(hwnd, w, h, &bgra, state.opacity)
 }
 
 /// 切换置顶:用 SetWindowPos 在 TOPMOST/NOTOPMOST 间切换(不抢焦点)
@@ -583,30 +601,28 @@ mod tests {
         );
     }
 
-    // 渲染句柄配对:render_image 必须恢复旧位图后删 DIB/DC/释放屏幕 DC,
-    // 任一缺失即 GDI 泄漏。负向断言剥行注释避免字面误命中。
+    // 渲染句柄配对:render_premultiplied(拆分后的 GDI 渲染函数)必须恢复旧
+    // 位图后删 DIB/DC/释放屏幕 DC,任一缺失即 GDI 泄漏。负向断言剥行注释
+    // 避免字面误命中。解码+预乘已拆到 decode_and_premultiply_image(可放
+    // 阻塞线程池),预乘调用必须留在解码函数内。
     #[test]
-    fn render_image_pairs_every_gdi_handle() {
+    fn render_premultiplied_pairs_every_gdi_handle() {
         let stripped: String = gdi_source()
             .lines()
             .filter(|l| !l.trim_start().starts_with("//"))
             .collect::<Vec<_>>()
             .join("\n");
         let start = stripped
-            .find("pub(crate) fn render_image")
-            .expect("缺少 render_image");
+            .find("pub(crate) fn render_premultiplied")
+            .expect("缺少 render_premultiplied");
         let rest = &stripped[start..];
         let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(stripped.len());
         let body = &stripped[start..end];
 
-        // 正向:渲染必须包含预乘计算与 UpdateLayeredWindow
+        // 正向:GDI 渲染函数必须包含 UpdateLayeredWindow 与句柄配对
         assert!(
             body.contains("UpdateLayeredWindow("),
-            "render_image 必须调用 UpdateLayeredWindow"
-        );
-        assert!(
-            body.contains("premultiply("),
-            "必须调用预乘函数(非预乘 RGBA 直传会花屏)"
+            "render_premultiplied 必须调用 UpdateLayeredWindow"
         );
         // 句柄配对:恢复旧位图必须在删除 DIB 之前
         let restore = body.find("SelectObject(mem_dc, old)").expect("缺少恢复旧位图");
@@ -633,6 +649,51 @@ mod tests {
             fail_seg.contains("DeleteDC(mem_dc)") &&
             fail_seg.contains("ReleaseDC(None, screen_dc)"),
             "坐标失败 early-return 必须走完整清理序列(防 GDI 句柄泄漏)"
+        );
+    }
+
+    // 解码+预乘必须留在 decode_and_premultiply_image(纯内存段,可放阻塞
+    // 线程池):render_premultiplied 只做 GDI 渲染不得再含预乘调用,否则
+    // CPU 密集段又回到窗口线程。
+    #[test]
+    fn decode_and_premultiply_image_keeps_premultiply_off_render() {
+        let stripped: String = gdi_source()
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let decode_start = stripped
+            .find("pub(crate) fn decode_and_premultiply_image")
+            .expect("缺少 decode_and_premultiply_image");
+        let decode_end = stripped[decode_start..]
+            .find("\n}\n")
+            .map(|i| decode_start + i)
+            .unwrap_or(stripped.len());
+        let decode_body = &stripped[decode_start..decode_end];
+        assert!(
+            decode_body.contains("premultiply("),
+            "解码函数必须含预乘调用(非预乘 RGBA 直传会花屏)"
+        );
+        assert!(
+            decode_body.contains("Vec::with_capacity"),
+            "解码函数必须产出预乘 BGRA 像素缓冲"
+        );
+
+        let render_start = stripped
+            .find("pub(crate) fn render_premultiplied")
+            .expect("缺少 render_premultiplied");
+        let render_end = stripped[render_start..]
+            .find("\n}\n")
+            .map(|i| render_start + i)
+            .unwrap_or(stripped.len());
+        let render_body = &stripped[render_start..render_end];
+        assert!(
+            !render_body.contains("premultiply("),
+            "GDI 渲染函数不得含预乘调用(CPU 密集段不得回到窗口线程)"
+        );
+        assert!(
+            render_body.contains("copy_from_slice(bgra)"),
+            "GDI 渲染函数必须直接拷入预乘缓冲"
         );
     }
 
