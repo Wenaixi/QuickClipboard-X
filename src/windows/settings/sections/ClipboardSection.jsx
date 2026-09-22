@@ -138,12 +138,13 @@ function ClipboardSection({
           <Toggle
             checked={settings.edgeHideEnabled}
             onChange={checked => {
-              // 后端守不变量:hover 蕴含 hide,关 hide 必须连带关 hover,
-              // 前端同步批量更新,避免 store 与后端归一化后的状态分叉
-              onSettingChange('edgeHideEnabled', checked)
-              if (!checked) {
-                onSettingChange('edgeHoverPopupEnabled', false)
-              }
+              // 后端守不变量:hover 蕴含 hide,关 hide 必须连带关 hover。
+              // 两次独立 onSettingChange 会触发两次保存与两次「设置已保存」
+              // toast——合并成单次对象批量保存,一次落盘一次提示。
+              // 开 hide 时只改 hide 本身,不展开 hover(保留上次偏好)。
+              onSettingChange(checked
+                ? { edgeHideEnabled: true }
+                : { edgeHideEnabled: false, edgeHoverPopupEnabled: false })
             }}
           />
         </SettingItem>
