@@ -493,4 +493,29 @@ mod tests {
             "失败原因必须进 report.errors,前端可读"
         );
     }
+
+    // 护栏:自动推送失败不得静默,且必须与复位串行——失败报告构造/上报
+    // 必须先于 AUTO_PUSH_RUNNING 复位。若复位提前,下一次变更在报告落盘
+    // 前就重启自动推送,LAST_REPORT 可能被后到的成功报告覆盖,失败再次
+    // 不可见(静默回归)。
+    #[test]
+    fn auto_push_failure_is_reported_before_running_reset() {
+        use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+        let src = strip_line_comments(&source_file("src/services/webdav_sync/sync_scheduler.rs"));
+        let body = fn_body(&src, "run_auto_push");
+        assert!(
+            body.contains("report.errors.push(format!(\"自动推送失败: {e}\"))"),
+            "失败分支必须构造含失败原因的报告"
+        );
+        let store_pos = body
+            .find("store_report(\"push\", report, true)")
+            .unwrap_or_else(|| panic!("失败分支必须走同一 store_report"));
+        let reset_pos = body
+            .find("AUTO_PUSH_RUNNING.store(false, Ordering::SeqCst)")
+            .unwrap_or_else(|| panic!("失败分支必须复位自动推送运行标志"));
+        assert!(
+            store_pos < reset_pos,
+            "失败报告必须早于 AUTO_PUSH_RUNNING 复位(失败先落盘再放行重试)"
+        );
+    }
 }
