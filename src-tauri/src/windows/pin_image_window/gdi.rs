@@ -467,8 +467,22 @@ unsafe extern "system" fn pin_image_window_proc(
                 LRESULT(HTCAPTION as isize)
             }
         }
-        WM_ACTIVATE | WM_LBUTTONDOWN | WM_LBUTTONUP | WM_LBUTTONDBLCLK
-        | WM_MOUSEMOVE | WM_MOUSEWHEEL => DefWindowProcW(hwnd, msg, wparam, lparam),
+        WM_ACTIVATE | WM_LBUTTONDOWN | WM_LBUTTONUP
+        | WM_MOUSEMOVE => DefWindowProcW(hwnd, msg, wparam, lparam),
+        // 双击关闭贴图:设置页「双击关闭当前贴图」承诺。WebView 版贴图窗口
+        // 有双击关闭交互,GDI 迁移时未接线——双击走默认处理窗口无反应。
+        // 反查标签后走统一关窗(数据清理 + WM_CLOSE),返回 0 吞掉消息。
+        WM_LBUTTONDBLCLK => {
+            if let Some(label) = label_for_hwnd(hwnd) {
+                let _ = crate::windows::pin_image_window::close_pin_image_window(&label);
+            }
+            LRESULT(0)
+        }
+        // 滚轮缩放:设置页印制了滚轮/Shift/Ctrl/Alt 缩放说明(pinZoom 家族),
+        // 但贴图窗口图片按原始尺寸渲染,缩放窗口几何不重渲染会导致图片与
+        // 窗口尺寸不匹配(裁切/留白)。GDI 版缩放语义需渲染管线配合,当前
+        // 未接线——记录观察,不在此处空接一个会裁切图片的缩放。
+        WM_MOUSEWHEEL => DefWindowProcW(hwnd, msg, wparam, lparam),
         // 右键菜单:在光标处弹出原生菜单,选中后分发动作再返回 0
         WM_RBUTTONUP => {
             let Some(label) = label_for_hwnd(hwnd) else {
@@ -791,6 +805,30 @@ mod tests {
         assert!(
             label_pos < retain_pos && retain_pos < remove_pos,
             "WM_DESTROY 清理顺序必须为 反查标签 → retain 删句柄 → 删状态,否则 state 永不删除"
+        );
+    }
+
+    // 双击关闭贴图:设置页「双击关闭当前贴图」承诺,WM_LBUTTONDBLCLK 分支
+    // 必须反查标签并走统一关窗(close_pin_image_window)。若只走 DefWindowProc
+    // 默认处理,双击无反应,设置页说明与实现背离。
+    #[test]
+    fn dblclick_closes_pin_image_window() {
+        let stripped: String = gdi_source()
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let dbl_pos = stripped
+            .find("WM_LBUTTONDBLCLK => {")
+            .expect("双击必须独立分支处理");
+        let seg = &stripped[dbl_pos..];
+        assert!(
+            seg.contains("close_pin_image_window(&label)"),
+            "双击分支必须调 close_pin_image_window 关闭贴图"
+        );
+        assert!(
+            !seg.starts_with("WM_LBUTTONDBLCLK | WM_"),
+            "WM_LBUTTONDBLCLK 不得再并入分组走默认处理"
         );
     }
 
