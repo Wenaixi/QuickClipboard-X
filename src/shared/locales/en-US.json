@@ -1349,6 +1349,7 @@
     "unsaved": "Unsaved",
     "confirmDiscardTitle": "Discard Changes",
     "confirmDiscardMessage": "You have unsaved changes. Discard them?",
+    "saveFailed": "Save failed: {{error}}",
     "clipboardItem": "Clipboard Item #{{number}}",
     "language": "Language",
     "group": "Group",

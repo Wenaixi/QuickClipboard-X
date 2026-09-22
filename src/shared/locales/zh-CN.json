@@ -1349,6 +1349,7 @@
     "unsaved": "未保存",
     "confirmDiscardTitle": "放弃修改",
     "confirmDiscardMessage": "有未保存的修改，确定放弃吗？",
+    "saveFailed": "保存失败:{{error}}",
     "clipboardItem": "剪贴板项目 #{{number}}",
     "language": "语言",
     "group": "分组",

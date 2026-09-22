@@ -164,7 +164,12 @@ function App() {
           setHtmlContent(item.html_content || '');
           setOriginalTextContent(item.content || '');
           setOriginalHtmlContent(item.html_content || '');
-          setSelectedGroup(item.group_name || '全部');
+          // 原分组可能已被删除(删除分组不级联清收藏 group_name),此时继续
+          // 用失效分组名保存会必失败——回退「全部」,让保存路径可正常落库。
+          const groupStillExists =
+            item.group_name &&
+            groupsSnap.groups.some((group) => group.name === item.group_name);
+          setSelectedGroup(groupStillExists ? item.group_name : '全部');
           setEditMode('text');
         }
       } catch (error) {
@@ -242,7 +247,7 @@ function App() {
         await updateClipboardItem(editorData.id, contentForSave, htmlPayload);
       } else if (editorData.type === 'favorite') {
         if (editorData.id) {
-          await updateFavorite(editorData.id, title, contentForSave, selectedGroup, htmlPayload);
+          await updateFavorite(editorData.id, title.trim(), contentForSave, selectedGroup, htmlPayload);
         } else {
           await addFavorite(title.trim(), contentForSave, selectedGroup);
         }
@@ -253,6 +258,10 @@ function App() {
       setOriginalHtmlContent(htmlContent);
       setOriginalTitle(title);
       setHasChanges(false);
+      // 保存成功同步复位 ref:close() 经 onCloseRequested 校验 ref,若不
+      // 同步复位,setState 是异步的,ref 更新依赖 effect 时序,动态 import
+      // 先 resolve 时 close 会二次弹确认框拦死正常关闭。
+      hasChangesRef.current = false;
 
       const { Window } = await import('@tauri-apps/api/window');
       const currentWindow = Window.getCurrent();
@@ -261,7 +270,7 @@ function App() {
       // 保存失败必须提示用户并保持窗口打开——失败关窗会让改动静默丢失,
       // 用户误以为保存成功(ToastContainer 已挂载,直接复用 toast 提示)。
       console.error('保存失败:', error);
-      toast.error('保存失败:' + String(error?.message || error), { duration: 4000 });
+      toast.error(t('textEditor.saveFailed', { error: String(error?.message || error) }), { duration: 4000 });
     }
   };
 
@@ -278,6 +287,20 @@ function App() {
     }
     setTextContent(originalTextContent);
   };
+
+  // Esc 关闭:白板/取色器/标尺均 Esc 关闭,编辑器是唯一有未保存内容的
+  // 窗口,Esc 走 close() 自动获得 onCloseRequested 的未保存确认保护
+  // (hasChangesRef 已同步),交互与工具集其余窗口一致。
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        void handleCancel();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   const outerContainerClasses = `
     h-screen w-screen
