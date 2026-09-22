@@ -64,22 +64,22 @@ test('粘贴计数事件在过滤视图下必须实时剔除条目(剪贴板/收
   );
   assert.match(
     clipBare,
-    /if \(clipboardStore\.pasteStatus !== 'all'\) \{/,
-    '剪贴板监听必须先行判定过滤激活'
+    /if \(clipboardStore\.pasteStatus === 'unpasted'\) \{/,
+    '剪贴板监听必须仅在「未粘贴」视图激活时剔除(已粘贴视图 N→N+1 仍匹配,不得剔除)'
   );
   assert.match(
     clipBare,
     /clipboardStore\.removePastedItemIfFiltered\(id\)/,
-    '剪贴板监听过滤激活时必须调用剔除'
+    '剪贴板监听未粘贴视图激活时必须调用剔除'
   );
   assert.ok(
     clipBare.includes('removePastedItemIfFiltered(id)') && clipBare.includes('if (removed) return'),
-    '剔除成功必须短路,避免过滤视图下残留 +1'
+    '剔除成功必须短路,避免未粘贴视图下残留 +1'
   );
   assert.match(
     clipBare,
-    /removePastedItemIfFiltered\(id\) \{\s*\n\s*if \(this\.pasteStatus === 'all'\) return false[\s\S]*?this\.removeItem\(id\)[\s\S]*?return true/,
-    '剪贴板剔除方法必须:全量视图不剔除、过滤视图按 id 移除条目并返回成功'
+    /removePastedItemIfFiltered\(id\) \{\s*\n\s*if \(this\.pasteStatus !== 'unpasted'\) return false[\s\S]*?this\.removeItem\(id\)[\s\S]*?return true/,
+    '剪贴板剔除方法必须:非「未粘贴」视图不剔除、未粘贴视图按 id 移除条目并返回成功'
   );
   // 收藏:同构断言。
   assert.match(
@@ -89,13 +89,13 @@ test('粘贴计数事件在过滤视图下必须实时剔除条目(剪贴板/收
   );
   assert.match(
     favBare,
-    /if \(favoritesStore\.pasteStatus !== 'all'\) \{/,
-    '收藏监听必须先行判定过滤激活'
+    /if \(favoritesStore\.pasteStatus === 'unpasted'\) \{/,
+    '收藏监听必须仅在「未粘贴」视图激活时剔除(已粘贴视图 N→N+1 仍匹配,不得剔除)'
   );
   assert.match(
     favBare,
     /favoritesStore\.removePastedItemIfFiltered\(id\)/,
-    '收藏监听过滤激活时必须调用剔除'
+    '收藏监听未粘贴视图激活时必须调用剔除'
   );
   assert.ok(
     favBare.includes('removePastedItemIfFiltered(id)') && favBare.includes('if (removed) return'),
@@ -103,7 +103,7 @@ test('粘贴计数事件在过滤视图下必须实时剔除条目(剪贴板/收
   );
   assert.match(
     favBare,
-    /removePastedItemIfFiltered\(id\) \{\s*\n\s*if \(this\.pasteStatus === 'all'\) return false[\s\S]*?this\.removeItem\(id\)[\s\S]*?return true/,
+    /removePastedItemIfFiltered\(id\) \{\s*\n\s*if \(this\.pasteStatus !== 'unpasted'\) return false[\s\S]*?this\.removeItem\(id\)[\s\S]*?return true/,
     '收藏剔除方法必须与剪贴板同构'
   );
 });

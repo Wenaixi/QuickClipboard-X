@@ -8,13 +8,13 @@ import {
   pasteClipboardItem as apiPasteClipboardItem
 } from '@shared/api'
 
-// 粘贴计数事件:后端每次粘贴成功 emit id。若当前处于「未粘贴/已粘贴」
-// 过滤视图,被粘贴项按过滤口径(paste_count 0→1)应立即从列表剔除——
-// 否则滞留列表,视图语义失真,需切过滤或重启才恢复(与后端
-// paste_count>0/=0 过滤口径对称)。全量视图下仅原地 +1 保持计数。
+// 粘贴计数事件:后端每次粘贴成功 emit id。仅在「未粘贴」过滤视图下被
+// 粘贴项(paste_count 0→1)应立即从列表剔除——否则滞留列表,视图语义
+// 失真。「已粘贴」视图内条目 paste_count 本就 >0,被粘贴后 N→N+1 仍
+// 匹配,不应剔除。全量/已粘贴视图仅原地 +1 保持计数。
 listen('paste-count-updated', (event) => {
   const id = event.payload
-  if (clipboardStore.pasteStatus !== 'all') {
+  if (clipboardStore.pasteStatus === 'unpasted') {
     const removed = clipboardStore.removePastedItemIfFiltered(id)
     if (removed) return
   }
@@ -113,12 +113,13 @@ export const clipboardStore = proxy({
     return Number.isInteger(index) ? this.items[index] : null
   },
 
-  // 过滤视图下粘贴剔除:当前处于「未粘贴/已粘贴」过滤时,某 id 被后端
-  // 标记为已粘贴(paste_count 0→1),该条目不再匹配当前过滤(未粘贴→
-  // 不再未粘贴;已粘贴视图本就不含它),应连同后续索引向左平移剔除,
-  // totalCount-1,保持列表与过滤口径一致。返回是否剔除成功。
+  // 过滤视图下粘贴剔除:仅在「未粘贴」过滤视图下,某 id 被后端标记为
+  // 已粘贴(paste_count 0→1),该条目不再匹配当前过滤(未粘贴→不再未粘贴),
+  // 应连同后续索引向左平移剔除,totalCount-1,保持列表与过滤口径一致。
+  // 「已粘贴」视图内条目 paste_count 本就 >0,被粘贴后 N→N+1 仍匹配,
+  // 不得剔除。返回是否剔除成功。
   removePastedItemIfFiltered(id) {
-    if (this.pasteStatus === 'all') return false
+    if (this.pasteStatus !== 'unpasted') return false
     const index = this.findLoadedItemIndex(id)
     if (index === null || !this.items[index]) return false
     this.removeItem(id)
