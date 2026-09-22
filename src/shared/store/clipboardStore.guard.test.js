@@ -33,3 +33,23 @@ test('removeItems 锚点修正必须按被删索引相对位置逐位移,不得�
     'removeItems 不得再粗粒度减 removedCount(锚点漂移根因)',
   );
 });
+
+test('favorites 多选删除锚点修正必须同步逐位移(与剪贴板同案)', () => {
+  const favoritesSource = readFileSync(
+    new URL('./favoritesStore.js', import.meta.url),
+    'utf8',
+  );
+  const favoritesBody = favoritesSource.slice(
+    favoritesSource.indexOf('removeItems(ids) {'),
+    favoritesSource.indexOf('moveLoadedItem('),
+  );
+  assert.ok(
+    favoritesBody.includes('if (index < anchor)'),
+    'favorites removeItems 锚点修正必须按被删索引位置逐位移',
+  );
+  const coarse = `${'selectionAnchorIndex'} - ${removedCountLiteral}`;
+  assert.ok(
+    !favoritesBody.includes(coarse),
+    'favorites removeItems 不得再粗粒度减 removedCount',
+  );
+});

@@ -158,7 +158,19 @@ export const favoritesStore = proxy({
     this.totalCount = Math.max(0, this.totalCount - removedCount)
 
     if (this.selectionAnchorIndex != null) {
-      this.selectionAnchorIndex = Math.max(0, this.selectionAnchorIndex - removedCount)
+      // 锚点精确位移:被删索引在锚点之前 → 锚点前移 1(原锚点项随前移);
+      // 锚点自身被删 → 保持(后续项前移顶上);被删索引在锚点之后 → 不动。
+      // 粗粒度统一减 removedCount 会把「锚点之后删除」也误位移导致锚点漂移。
+      let anchor = this.selectionAnchorIndex
+      for (const [index, item] of entries) {
+        if (!removeIdSet.has(item.id)) {
+          continue
+        }
+        if (index < anchor) {
+          anchor -= 1
+        }
+      }
+      this.selectionAnchorIndex = Math.max(0, anchor)
     }
   },
 
