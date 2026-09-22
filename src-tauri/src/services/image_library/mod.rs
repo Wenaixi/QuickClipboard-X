@@ -760,6 +760,14 @@ pub fn rename_image(group: &str, old_filename: &str, new_filename: &str) -> Resu
 
     let new_path = dir.join(&new_name_with_ext);
 
+    // 新文件名扩展名必须仍是受支持的图片格式:图库列表按扩展名白名单过滤
+    // (is_supported_image_file),若放行把 a.png 改成 a.txt,rename 成功但条目
+    // 从图库彻底隐藏(不可见仍占盘),属可规避的状态污染。重命名不改变图片
+    // 本体,仅文件名,后缀必须保持图片类别。
+    if !is_supported_image_file(&new_path) {
+        return Err("仅支持常见图片格式的重命名".to_string());
+    }
+
     if new_path.exists() {
         return Err("目标文件名已存在".to_string());
     }
@@ -912,6 +920,29 @@ mod tests {
         assert!(
             group_body.contains("\"CON\" | \"PRN\" | \"AUX\" | \"NUL\""),
             "分组名校验必须同样拒绝保留设备名"
+        );
+    }
+
+    // 重命名必须保持图片扩展名:图库列表按 is_supported_image_file 白名单
+    // 过滤,rename_image 若放行把 a.png 改成 a.txt,条目从图库彻底隐藏
+    // (不可见仍占盘)。rename 前必须用 is_supported_image_file 校验新路径。
+    #[test]
+    fn rename_keeps_supported_image_extension() {
+        let src = stripped_source();
+        let rename_start = src.find("pub fn rename_image").expect("缺 rename_image");
+        let rename_end = src.find("pub fn move_image_to_group").expect("缺 move_image_to_group");
+        let rename_body = &src[rename_start..rename_end];
+        assert!(
+            rename_body.contains("is_supported_image_file(&new_path)"),
+            "rename_image 必须校验新文件名扩展名为受支持图片格式"
+        );
+        assert!(
+            rename_body.contains("仅支持常见图片格式的重命名"),
+            "非图片扩展名必须返回明确错误"
+        );
+        assert!(
+            !rename_body.contains("fs::rename(&old_path, &new_path)\n        .map_err"),
+            "扩展名校验必须早于实际重命名(stack 检验:校验先于 rename)"
         );
     }
 }
