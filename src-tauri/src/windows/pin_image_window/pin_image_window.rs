@@ -444,6 +444,7 @@ pub async fn start_pin_edit_mode(
     // 1x1 的副作用)。直接返回不可用,不注册监听、不阻塞、不留挂起状态。
     Err("贴图编辑功能当前不可用".to_string())
 }
+
 /// 窗口缩放动画:由 GDI 缩略图切换/窗口缩放调用(命令壳已删,转内部函数)。
 /// 复用原缓动公式 1 - 2^(-10t),逐帧 SetWindowPos(SWP_NOACTIVATE 防抢焦点)。
 pub fn animate_window_resize(
