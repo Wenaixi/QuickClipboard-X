@@ -22,7 +22,7 @@ export const defaultSettings = {
   autoLowMemoryIdleMinutes: 15,
   autoExitLowMemoryMode: false,
   memoryOptimizationEnabled: false,
-  historyLimit: 100,
+  historyLimit: 500,
   language: 'zh-CN',
   
   // 外观设置

@@ -239,7 +239,7 @@ impl Default for AppSettings {
             auto_low_memory_idle_minutes: 15,
             auto_exit_low_memory_mode: false,
             memory_optimization_enabled: false,
-            history_limit: 100,
+            history_limit: 500,
             language: "zh-CN".to_string(),
             theme: "light".to_string(),
             light_theme_style: "modern".to_string(),
@@ -470,6 +470,15 @@ impl AppSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // 历史上限默认值:截图/图片记录多时旧条目随裁剪被物理删除(连同 PNG),
+    // 100 条过紧会让频繁截图的用户旧图大面积丢失、失配红条。默认放宽到
+    // 500(前端下拉最高档位含 500),仍保留裁剪保护内存与磁盘。
+    #[test]
+    fn default_history_limit_is_500() {
+        let settings = AppSettings::default();
+        assert_eq!(settings.history_limit, 500, "历史上限默认必须是 500,不得回退到 100");
+    }
 
     #[test]
     fn normalize_update_check_interval_recognizes_every3days() {
