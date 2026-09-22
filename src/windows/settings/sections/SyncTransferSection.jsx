@@ -585,7 +585,62 @@ function LanModePanel({
             </label>
           </div>
         </SettingItem>
+        {/* 自动同步结果：后端失败也经 store_report 上报并 emit
+            sync-transfer-lan-report,这里把 last_report 渲染出来——
+            否则自动推送失败(设备离线/配对已移除)只有落日志,面板零感知。
+            手动 push/pull 的结果走上面 ActionResultCard,两者不重叠。 */}
+        <LanAutoReportCard
+          report={autoSyncStatus?.last_report}
+          peers={peers}
+          t={t}
+        />
       </SettingsSection>
+    </div>
+  );
+}
+
+// 自动同步(事件同步)最近一次报告卡片:展示推送/拉取条数与失败原因。
+// 后端 LanAutoSyncStatus.last_report 由 store_report 统一写入,失败时
+// errors 非空;此处必须渲染 errors 让失败可见,不能只看计数(全 0 时
+// "无变化"会把失败吞掉,与 WebDAV renderReportDetail 同标准)。
+function LanAutoReportCard({ report, peers, t }) {
+  if (!report) return null;
+  const peer = peers.find(p => p.device_id === report.peer_device_id);
+  const peerName = peer?.device_name || peer?.device_id || report.peer_device_id || '';
+  const errors = Array.isArray(report.result?.errors) ? report.result.errors : [];
+  const pushed = Number(report.result?.pushed ?? 0);
+  const pulled = Number(report.result?.pulled ?? 0);
+  const total = pushed + pulled;
+  const failed = errors.length > 0;
+  return (
+    <div className={`rounded-lg border p-3 ${failed ? 'border-red-400/60 bg-red-500/10' : 'border-qc-border bg-qc-surface/60'}`}>
+      <div className="flex items-start gap-3">
+        <div className={`mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${failed ? 'bg-red-500/15 text-red-500' : 'bg-blue-500/10 text-blue-500'}`}>
+          <i className={failed ? 'ti ti-alert-triangle' : 'ti ti-transfer-in'} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="font-medium text-qc-fg">{t('settings.syncTransfer.autoSyncState')}</span>
+            {peerName && <span className="text-qc-fg-muted">· {peerName}</span>}
+          </div>
+          {failed ? (
+            <div className="mt-1 break-all text-xs text-red-600">
+              {errors.map((error, index) => (
+                <div key={index}>{error}</div>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-1 text-xs text-qc-fg-muted">
+              {t('settings.syncTransfer.pushResultSummary', {
+                total,
+                history: Number(report.result?.pushed_clipboard ?? 0),
+                favorites: Number(report.result?.pushed_favorites ?? 0),
+                groups: Number(report.result?.pushed_groups ?? 0),
+              })}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
