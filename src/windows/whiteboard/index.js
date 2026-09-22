@@ -10,6 +10,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
 import { showError, showConfirm } from '@shared/utils/dialog';
 import i18n from '@shared/i18n';
+import { initSettings } from '@shared/store/settingsStore';
 
 const TOOLS = ['pen', 'line', 'arrow', 'rect', 'ellipse'];
 const COLORS = ['#1f2937', '#ef4444', '#3b82f6', '#22c55e'];
@@ -300,4 +301,11 @@ function start() {
   document.getElementById('color-0')?.classList.add('active');
 }
 
-window.addEventListener('DOMContentLoaded', start);
+// 白板为独立裸窗口,不经主窗口启动流程;shared/i18n.js 初始语言固定
+// zh-CN,若不同步设置语言,用户在设置切到 en-US 后白板按钮文案仍是中文
+// (与截图窗口 initSettings 同构)。先同步语言再启动,避免启动闪烁。
+initSettings()
+  .catch((error) => console.error('加载白板语言设置失败:', error))
+  .finally(() => {
+    window.addEventListener('DOMContentLoaded', start);
+  });
