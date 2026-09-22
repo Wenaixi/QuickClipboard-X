@@ -509,15 +509,18 @@ async fn save_transfer_file_stream(
         .await
         .map_err(|e| format!("完成接收文件保存失败: {}", e))??;
         let sha256 = hex::encode(hasher.finalize());
-        if let Err(message) = super::files::record_received_file(
+        // 索引写入失败必须传播:文件虽已落盘但收件盒元数据(来源设备/精确
+        // 接收时间)未记录,发送端仍会收到 200「保存成功」——零感知的假成功。
+        // 传播 Err 走下方统一错误分支,对端收 500 后用户可见「发送失败」;
+        // 已落盘文件不删除(discard_received_file 只删 rename 前的临时路径,
+        // final 文件在收件盒目录扫描兜底下仍可被列表看到)。
+        super::files::record_received_file(
             &saved_path,
             saved_len,
             &sha256,
             source_device_id,
             source_device_name,
-        ) {
-            eprintln!("[局域网文件接收] 写入接收文件索引失败: {}", message);
-        }
+        )?;
         Ok(SavedTransferFile {
             path: saved_path,
             size: saved_len,
@@ -842,6 +845,40 @@ mod save_file_image_limit_guard {
         assert!(
             limit_var_pos < read_pos,
             "FILES_PREFIX PUT 必须先用 MAX_PEER_IMAGE_BODY_BYTES 选定 body_limit 再读请求体"
+        );
+    }
+}
+
+#[cfg(test)]
+mod receive_index_failure_guard {
+    use crate::services::system::hotkey::test_utils::{fn_body, source_file, strip_line_comments};
+
+    // 收件盒索引写入失败必须传播(R126 C-I-1):save_transfer_file_stream
+    // 若吞掉 record_received_file 错误照常 Ok,对端收 200「保存成功」——
+    // 文件已落盘但收件盒元数据(来源设备/精确接收时间)未记录,发送端
+    // 零感知的假成功。护栏断言:函数体内不得有 eprintln 吞错,record 调用
+    // 必须 ? 传播(传播后经统一错误分支对端收 500)。
+    #[test]
+    fn receive_index_write_failure_propagates_not_swallowed() {
+        let src = strip_line_comments(&source_file("src/services/sync_transfer/lan/http_server.rs"));
+        let body = fn_body(&src, "save_transfer_file_stream");
+        assert!(
+            body.contains("record_received_file("),
+            "save_transfer_file_stream 必须调用收件盒索引写入"
+        );
+        let call_pos = body
+            .find("record_received_file(")
+            .expect("缺 record_received_file 调用");
+        let call_tail = &body[call_pos..];
+        // 调用必须是表达式以 ? 传播(而非 if let Err 吞掉):从调用处切到
+        // 函数尾,若中间出现 if let Err(...) 包围则说明被吞。
+        assert!(
+            call_tail.contains(")?;"),
+            "record_received_file 必须以 ? 传播错误,不得 if let Err 吞掉"
+        );
+        assert!(
+            !body.contains("eprintln!(\"[局域网文件接收]"),
+            "索引写入失败不得再 eprintln 吞错"
         );
     }
 }
