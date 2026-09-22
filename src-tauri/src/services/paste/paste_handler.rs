@@ -313,7 +313,11 @@ fn build_html_payload(
         .as_deref()
         .filter(|html| !html.trim().is_empty())
     {
-        payload.push(RsClipboardContent::Html(generate_cf_html(html)));
+        // 远端同步的 html_content 未经净化入库(LAN/WebDAV 对端不可信),
+        // 粘贴出口必须做标签/属性白名单净化——否则原文经 CF_HTML 写系统
+        // 剪贴板后,目标应用(Office/浏览器)解析内嵌脚本/事件属性可能执行,
+        // 构成跨信任边界转发风险。
+        payload.push(RsClipboardContent::Html(generate_cf_html(&sanitize_html_for_paste(html))));
         return Ok(payload);
     }
 
@@ -430,7 +434,9 @@ fn build_legacy_all_formats_payload(
                 .as_deref()
                 .filter(|html| !html.trim().is_empty())
             {
-                payload.push(RsClipboardContent::Html(generate_cf_html(html)));
+                // 与 build_html_payload 同款:远端 html_content 粘贴出口净化,
+                // 防止内嵌脚本/事件属性经剪贴板转发到目标应用执行。
+                payload.push(RsClipboardContent::Html(generate_cf_html(&sanitize_html_for_paste(html))));
             }
 
             if item
@@ -549,6 +555,106 @@ fn decode_ansi_text(raw_data: &[u8]) -> String {
         wide.truncate(written as usize);
         String::from_utf16_lossy(&wide)
     }
+}
+
+// 粘贴出口 HTML 白名单净化:远端同步的 html_content 未经净化入库,经
+// CF_HTML 写系统剪贴板后由目标应用解析。仅保留无执行能力的标签与属性,
+// 剥除 script/iframe/embed/object 与全部事件处理器;普通富文本(加粗/
+// 斜体/下划线/标题/列表/链接/图片)不受影响。纯字符串级过滤,不引入
+// HTML 解析器依赖。
+fn sanitize_html_for_paste(html: &str) -> String {
+    let mut cleaned = String::with_capacity(html.len());
+    let bytes = html.as_bytes();
+    let mut i = 0;
+    let mut text_only = String::new();
+    let mut in_tag = false;
+    let mut tag_start = 0;
+
+    while i < bytes.len() {
+        match bytes[i] {
+            b'<' if !in_tag => {
+                if !text_only.is_empty() {
+                    cleaned.push_str(&text_only);
+                    text_only.clear();
+                }
+                in_tag = true;
+                tag_start = i;
+            }
+            b'>' if in_tag => {
+                let tag = html[tag_start + 1..i].trim();
+                if let Some(clean) = sanitize_tag(tag) {
+                    cleaned.push('<');
+                    cleaned.push_str(&clean);
+                    cleaned.push('>');
+                }
+                in_tag = false;
+            }
+            _ if !in_tag => {
+                text_only.push(bytes[i] as char);
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    if in_tag {
+        // 未闭合的 `<` 视作普通文本(不补标签,避免注入半截标签)。
+        cleaned.push('<');
+        cleaned.push_str(&html[tag_start + 1..]);
+    } else if !text_only.is_empty() {
+        cleaned.push_str(&text_only);
+    }
+    cleaned
+}
+
+// 单个标签名 + 属性的白名单过滤:只放行标签,属性仅保留 href/src/srcset/
+// alt/title/width/height/colspan/rowspan/start/type(仅用于列表),全部
+// 事件属性(on*)与 javascript: 协议一律剥除。
+fn sanitize_tag(raw_tag: &str) -> Option<String> {
+    let raw_tag = raw_tag.trim();
+    if raw_tag.is_empty() {
+        return None;
+    }
+    let (is_closing, rest) = match raw_tag.strip_prefix('/') {
+        Some(rest) => (true, rest),
+        None => (false, raw_tag),
+    };
+    let mut parts = rest.splitn(2, char::is_whitespace);
+    let tag_name = parts.next()?.trim().to_ascii_lowercase();
+    if !matches!(
+        tag_name.as_str(),
+        "p" | "br" | "b" | "strong" | "i" | "em" | "u" | "s" | "h1" | "h2" | "h3"
+            | "ul" | "ol" | "li" | "a" | "img" | "span" | "div" | "blockquote"
+            | "pre" | "code" | "table" | "thead" | "tbody" | "tr" | "th" | "td"
+            | "font" | "sub" | "sup" | "hr"
+    ) {
+        return None;
+    }
+    if is_closing {
+        return Some(format!("/{}", tag_name));
+    }
+    let mut attrs = String::new();
+    if let Some(attr_part) = parts.next() {
+        for attr in attr_part.split(|c: char| c.is_whitespace()).filter(|a| !a.is_empty()) {
+            let lower = attr.to_ascii_lowercase();
+            if lower.starts_with("on") {
+                continue;
+            }
+            if lower.starts_with("href=") || lower.starts_with("src=") || lower.starts_with("srcset=") {
+                if lower.contains("javascript:") {
+                    continue;
+                }
+            }
+            if matches!(
+                lower.split('=').next().unwrap_or(""),
+                "href" | "src" | "srcset" | "alt" | "title" | "width" | "height"
+                    | "colspan" | "rowspan" | "start" | "type" | "style"
+            ) {
+                attrs.push(' ');
+                attrs.push_str(attr);
+            }
+        }
+    }
+    Some(format!("{}{}", tag_name, attrs))
 }
 
 fn find_raw_row<'a>(
@@ -740,6 +846,60 @@ mod tests {
             ansi_decoder.contains("GetACP") || ansi_decoder.contains("CP_ACP"),
             "ANSI 解码必须引用系统活动代码页来源"
         );
+    }
+
+    // 远端 html_content 粘贴出口净化护栏:build_html_payload 与
+    // build_legacy_all_formats_payload 两个 fallback 分支写剪贴板前必须
+    // 经 sanitize_html_for_paste 白名单净化——LAN/WebDAV 对端不可信,原文
+    // 经 CF_HTML 转发到目标应用(Office/浏览器)可能执行内嵌脚本/事件属性。
+    #[test]
+    fn remote_html_paythrough_is_sanitized_before_paste() {
+        let src = paste_source();
+        let html_body = fn_body(&src, "build_html_payload");
+        assert!(
+            html_body.contains("sanitize_html_for_paste(html)"),
+            "build_html_payload 的 html fallback 必须经白名单净化后写剪贴板"
+        );
+        assert!(
+            !html_body.contains("generate_cf_html(html))"),
+            "build_html_payload 禁止对远端 html 原文包 CF_HTML(未经净化)"
+        );
+        let legacy_body = fn_body(&src, "build_legacy_all_formats_payload");
+        assert!(
+            legacy_body.contains("sanitize_html_for_paste(html)"),
+            "legacy 多格式路径的 html fallback 必须同样净化"
+        );
+        assert!(
+            !legacy_body.contains("generate_cf_html(html)"),
+            "legacy 路径禁止对远端 html 原文包 CF_HTML"
+        );
+        let sanitizer = fn_body(&src, "sanitize_html_for_paste");
+        assert!(
+            src.contains("fn sanitize_tag"),
+            "必须提供标签白名单过滤函数"
+        );
+        assert!(
+            sanitizer.contains("on") && src.contains("starts_with(\"on\")"),
+            "净化必须剥除全部事件属性(on*)"
+        );
+        assert!(
+            src.contains("javascript:"),
+            "净化必须拒绝 javascript: 协议"
+        );
+    }
+
+    // 净化函数行为自检:普通富文本标签保留、script/iframe 与事件属性被剥除、
+    // javascript: 协议链接被剥除。
+    #[test]
+    fn sanitize_html_strips_executable_content() {
+        let input = r#"<p onclick="alert(1)">hello <b>world</b></p><script>alert(2)</script><a href="javascript:alert(3)">x</a><img src="a.png" onerror="alert(4)">"#;
+        let cleaned = sanitize_html_for_paste(input);
+        assert!(cleaned.contains("<b>"), "普通富文本标签必须保留");
+        assert!(cleaned.contains("hello"), "文本内容必须保留");
+        assert!(!cleaned.contains("script"), "script 标签必须剥除");
+        assert!(!cleaned.contains("onclick"), "事件属性必须剥除");
+        assert!(!cleaned.contains("onerror"), "事件属性必须剥除");
+        assert!(!cleaned.contains("javascript:"), "javascript: 协议必须剥除");
     }
 
     // 旧格式图片粘贴转换刷新条目内容时,只许动内容与更新时间——
