@@ -138,3 +138,54 @@ test('ClipboardList 加载失败必须渲染错误态与重试(不得静默伪�
     'ClipboardList 必须引入 initClipboardItems(重试依赖)'
   );
 });
+
+test('FavoritesList 加载失败必须渲染错误态与重试(收藏域同构,不得静默伪装空态)', () => {
+  // G-C1:收藏列表与剪贴板同源缺陷——store 层 catch 写 error,但 FavoritesList
+  // 无任何消费点,加载失败 totalCount 保持 0 → 渲染「暂无收藏内容」伪装空态。
+  // 必须:空态分支内先判 favSnap.error 渲染错误提示 + 重试按钮(点击调
+  // initFavorites),空态文案与搜索中文一并接语言包。
+  const code = strip(favoritesList);
+  assert.match(
+    code,
+    /if \(favSnap\.error\) \{/,
+    '收藏空态分支必须先判加载错误'
+  );
+  assert.match(
+    code,
+    /favoritesList\.loadFailed/,
+    '收藏错误态必须渲染加载失败文案(走语言包)'
+  );
+  assert.match(
+    code,
+    /onClick=\{\(\) => initFavorites\(\)\}/,
+    '收藏错误态必须提供重试按钮并触发重新加载'
+  );
+  assert.match(
+    code,
+    /favoritesList\.retry/,
+    '收藏重试按钮必须走语言包键'
+  );
+  assert.ok(
+    code.includes('initFavorites') && code.includes('@shared/store/favoritesStore'),
+    'FavoritesList 必须引入 initFavorites(重试依赖)'
+  );
+  assert.match(
+    code,
+    /favoritesList\.searching/,
+    '收藏加载中文必须走语言包'
+  );
+  assert.match(
+    code,
+    /favoritesList\.noResults/,
+    '收藏无结果文案必须走语言包'
+  );
+  assert.match(
+    code,
+    /favoritesList\.empty/,
+    '收藏空态文案必须走语言包'
+  );
+  assert.ok(
+    code.includes('useTranslation'),
+    'FavoritesList 必须接 useTranslation'
+  );
+});

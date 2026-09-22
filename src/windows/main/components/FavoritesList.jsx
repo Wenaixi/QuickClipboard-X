@@ -1,11 +1,12 @@
 import { Virtuoso } from 'react-virtuoso';
 import { useCallback, useState, useMemo, useRef, forwardRef, useImperativeHandle, useEffect } from 'react';
 import { useSnapshot } from 'valtio';
+import { useTranslation } from 'react-i18next';
 import { useCustomScrollbar } from '@shared/hooks/useCustomScrollbar';
 import { useSortableList } from '@shared/hooks/useSortable';
 import { useNavigation } from '@shared/hooks/useNavigation';
 import { ROW_HEIGHT_CONFIG } from '@shared/hooks/useItemCommon';
-import { favoritesStore, loadFavoritesRange, pasteFavorite } from '@shared/store/favoritesStore';
+import { favoritesStore, initFavorites, loadFavoritesRange, pasteFavorite } from '@shared/store/favoritesStore';
 import { groupsStore } from '@shared/store/groupsStore';
 import { navigationStore } from '@shared/store/navigationStore';
 import { settingsStore } from '@shared/store/settingsStore';
@@ -33,6 +34,7 @@ const FavoritesList = forwardRef(({
   const onScrollStateChangeRef = useRef(onScrollStateChange);
   const snap = useSnapshot(navigationStore);
   const favSnap = useSnapshot(favoritesStore);
+  const { t } = useTranslation();
   const isMultiSelectMode = favSnap.isMultiSelectMode;
   const groupsSnap = useSnapshot(groupsStore);
   const settings = useSnapshot(settingsStore);
@@ -382,15 +384,27 @@ const FavoritesList = forwardRef(({
     return <div className="flex-1 bg-qc-surface overflow-hidden flex items-center justify-center transition-colors duration-500 favorites-list" data-no-drag>
         <div className="flex flex-col items-center gap-2 text-qc-fg-subtle">
           <div className="h-5 w-5 animate-spin rounded-full border-2 border-qc-border border-t-theme-9"></div>
-          <p className="text-sm">搜索中...</p>
+          <p className="text-sm">{t('favoritesList.searching', { defaultValue: '搜索中...' })}</p>
         </div>
       </div>;
   }
 
   if (favSnap.totalCount === 0) {
+    // 加载失败不得伪装成「暂无收藏内容」:store 层 catch 写 error,空态分支
+    // 先判错误渲染失败提示 + 重试按钮(点击重新加载),与剪贴板列表同构。
+    if (favSnap.error) {
+      return <div className="flex-1 bg-qc-surface overflow-hidden flex items-center justify-center transition-colors duration-500 favorites-list" data-no-drag>
+        <div className="flex flex-col items-center gap-2 text-qc-fg-subtle">
+          <p className="text-sm">{t('favoritesList.loadFailed', { defaultValue: '加载收藏列表失败' })}</p>
+          <button type="button" onClick={() => initFavorites()} className="rounded-md bg-qc-panel px-2.5 py-1 text-xs text-qc-fg hover:bg-qc-hover">
+            {t('favoritesList.retry', { defaultValue: '重试' })}
+          </button>
+        </div>
+      </div>;
+    }
     return <div className="flex-1 bg-qc-surface overflow-hidden flex items-center justify-center transition-colors duration-500 favorites-list" data-no-drag>
         <p className="text-qc-fg-subtle text-sm">
-          {favSnap.filter ? '无搜索结果' : '暂无收藏内容'}
+          {favSnap.filter ? t('favoritesList.noResults', { defaultValue: '无搜索结果' }) : t('favoritesList.empty', { defaultValue: '暂无收藏内容' })}
         </p>
       </div>;
   }

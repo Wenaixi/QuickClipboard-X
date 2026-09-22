@@ -1313,6 +1313,13 @@
     "loadFailed": "加载剪贴板历史失败",
     "retry": "重试"
   },
+  "favoritesList": {
+    "loadFailed": "加载收藏列表失败",
+    "retry": "重试",
+    "searching": "搜索中...",
+    "noResults": "无搜索结果",
+    "empty": "暂无收藏内容"
+  },
   "floatingToolbar": {
     "scrollToTop": "返回顶部",
     "addFavorite": "添加收藏项",
