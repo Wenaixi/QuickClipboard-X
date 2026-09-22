@@ -661,14 +661,17 @@ fn merge_database(src_db: &Path) -> Result<(), String> {
                 if collection.trim().is_empty() || item_id.trim().is_empty() {
                     continue;
                 }
-                // 应用墓碑(含 LWW 语义:源端 deleted_at > 本地才生效)
-                let _ = record_sync_tombstone_in_conn(
+                // 应用墓碑(含 LWW 语义:源端 deleted_at > 本地才生效)。
+                // 失败不能静默吞掉——墓碑未落盘会把"已在源端删除"的数据在
+                // 导入后复活,反向覆盖本地删除状态;merge_database 已包事务,
+                // 传播错误让导入整体回滚(错误处理与 merge_* 一致)。
+                record_sync_tombstone_in_conn(
                     conn,
                     &collection,
                     &item_id,
                     &source_device_id,
                     deleted_at,
-                );
+                )?;
             }
         }
 
@@ -763,58 +766,66 @@ fn merge_favorites_from_importdb(conn: &rusqlite::Connection) -> rusqlite::Resul
 
     let cols = importdb_table_columns(conn, "favorites")?;
     let html_expr = if has_col(&cols, "html_content") {
-        "html_content"
+        "f.html_content"
     } else {
         "NULL"
     };
     let content_type_expr = if has_col(&cols, "content_type") {
-        "content_type"
+        "f.content_type"
     } else {
         "'text'"
     };
     let image_id_expr = if has_col(&cols, "image_id") {
-        "image_id"
+        "f.image_id"
     } else {
         "NULL"
     };
-    let group_expr = if has_col(&cols, "group_name") {
-        "group_name"
-    } else {
-        "'全部'"
-    };
     let item_order_expr = if has_col(&cols, "item_order") {
-        "item_order"
+        "f.item_order"
     } else {
         "0"
     };
     let created_expr = if has_col(&cols, "created_at") {
-        "created_at"
+        "f.created_at"
     } else {
         "CAST(strftime('%s','now') AS INTEGER)"
     };
     let updated_expr = if has_col(&cols, "updated_at") {
-        "updated_at"
+        "f.updated_at"
     } else {
         "CAST(strftime('%s','now') AS INTEGER)"
     };
     let paste_count_expr = if has_col(&cols, "paste_count") {
-        "paste_count"
+        "f.paste_count"
     } else {
         "0"
     };
     let char_count_expr = if has_col(&cols, "char_count") {
-        "char_count"
+        "f.char_count"
     } else {
         "NULL"
+    };
+    // 导入库分组名可能引用不存在的分组(源端删组后收藏未归位,或跨版本
+    // 表结构迁移),INSERT OR IGNORE 会照单全收成脏分组行——这些行既无
+    // 对应 groups 记录、又被前端"非'全部'即按组展示"当正常分组引用。
+    // 收敛规则:分组不存在时归入"全部"(与正常收藏的默认分组一致)。
+    // 左连接 importdb.groups 存在性校验,不存在收敛到哨兵"全部",
+    // 存在的行保留原分组名(保持幂等);若收藏表无 group_name 列则
+    // 全部归入"全部"(与旧行为一致)。SELECT 引用字段统一加 f. 前缀,
+    // 避免 LEFT JOIN 后 g 表同名列遮蔽造成歧义列。
+    let group_select_expr = if has_col(&cols, "group_name") {
+        "CASE WHEN g.name IS NULL THEN '全部' ELSE f.group_name END".to_string()
+    } else {
+        "'全部'".to_string()
     };
 
     let sql = format!(
         "INSERT OR IGNORE INTO favorites
          (id, title, content, html_content, content_type, image_id, group_name, item_order, paste_count, char_count, created_at, updated_at)
          SELECT
-            id,
-            title,
-            content,
+            f.id,
+            f.title,
+            f.content,
             {html},
             {content_type},
             {image_id},
@@ -824,11 +835,12 @@ fn merge_favorites_from_importdb(conn: &rusqlite::Connection) -> rusqlite::Resul
             {char_count},
             {created_at},
             {updated_at}
-         FROM importdb.favorites",
+         FROM importdb.favorites f
+         LEFT JOIN importdb.groups g ON g.name = f.group_name",
         html = html_expr,
         content_type = content_type_expr,
         image_id = image_id_expr,
-        group_name = group_expr,
+        group_name = group_select_expr,
         item_order = item_order_expr,
         paste_count = paste_count_expr,
         char_count = char_count_expr,
@@ -1768,6 +1780,46 @@ mod tests {
         assert!(
             body.contains("WHERE name <> '全部'"),
             "导入合并必须排除'全部'哨兵行"
+        );
+    }
+
+    // 收藏合并分组存在性校验:修复前 INSERT OR IGNORE 不校验分组存在,
+    // 导入库收藏引用不存在的分组会落库成脏分组行(前端按非'全部'即分组
+    // 展示却无对应 groups 记录)。修复要求 LEFT JOIN importdb.groups 存在性
+    // 校验,且分组不存在时用 CASE 收敛到"全部",存在时保留原分组名。
+    #[test]
+    fn merge_favorites_validates_group_exists_and_converges_to_all() {
+        let src = strip_line_comments(&source_file("src/services/data_management/mod.rs"));
+        let body = fn_body(&src, "merge_favorites_from_importdb");
+        assert!(
+            body.contains("LEFT JOIN importdb.groups g ON g.name = f.group_name"),
+            "收藏合并必须 LEFT JOIN importdb.groups 校验分组存在"
+        );
+        assert!(
+            body.contains("CASE WHEN g.name IS NULL THEN '全部' ELSE f.group_name END"),
+            "分组不存在必须 CASE 收敛到'全部',存在时保留原分组名"
+        );
+    }
+
+    // 墓碑错误不得静默吞掉:应用墓碑经 record_sync_tombstone_in_conn
+    // 若失败被 `let _ = ` 丢弃,墓碑未落盘会把源端已删除记录在导入后复活,
+    // 反向覆盖本地删除状态。修复要求该调用返回 `?` 传播错误(事务回滚,
+    // DETACH 不因失败而残留)。
+    #[test]
+    fn merge_tombstone_error_is_not_silently_dropped() {
+        let src = strip_line_comments(&source_file("src/services/data_management/mod.rs"));
+        let body = fn_body(&src, "merge_database");
+        let tombstone_pos = body
+            .find("record_sync_tombstone_in_conn(")
+            .expect("merge_database 必须调用墓碑记录");
+        let seg = &body[tombstone_pos..tombstone_pos + 220];
+        assert!(
+            !seg.contains("let _ = record_sync_tombstone_in_conn"),
+            "墓碑调用不得被 let _ 静默丢弃"
+        );
+        assert!(
+            seg.contains(")?;") || seg.contains("?;\n"),
+            "墓碑调用失败必须传播错误(事务回滚,防导入后删除复活)"
         );
     }
 
