@@ -139,19 +139,10 @@ pub async fn pin_image_from_file(
         // 预览模式固定标签:建窗前先清理旧窗口与旧数据(与 WebView 版
         // close 旧窗语义一致)。此处已持有 PREVIEW_WINDOW_LOCK,不能调
         // close_image_preview(它会 blocking_lock 同一把锁造成死锁),
-        // 直接移除数据 + PostMessage(WM_CLOSE) 即可。
+        // 直接移除数据 + 同步关窗即可。
         if super::gdi::find_gdi_window(&window_label).is_some() {
             lock_pin_data().remove(&window_label);
-            if let Some(hwnd) = super::gdi::find_gdi_window(&window_label) {
-                let _ = unsafe {
-                    windows::Win32::UI::WindowsAndMessaging::PostMessageW(
-                        Some(hwnd),
-                        windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
-                        windows::Win32::Foundation::WPARAM(0),
-                        windows::Win32::Foundation::LPARAM(0),
-                    )
-                };
-            }
+            super::gdi::close_gdi_window_sync(&window_label);
         }
     }
     
@@ -361,16 +352,11 @@ pub fn close_image_preview(app: AppHandle) -> Result<(), String> {
         None
     };
     lock_pin_data().remove(label);
-    if let Some(hwnd) = super::gdi::find_gdi_window(label) {
-        let _ = unsafe {
-            windows::Win32::UI::WindowsAndMessaging::PostMessageW(
-                Some(hwnd),
-                windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
-                windows::Win32::Foundation::WPARAM(0),
-                windows::Win32::Foundation::LPARAM(0),
-            )
-        };
-    }
+    // 同步关窗:SendMessageW(WM_CLOSE) 在返回前完成窗口销毁与句柄/状态表
+    // 清理,不再有 PostMessage 异步窗口期(数据已删而窗口还在屏上,固定标签
+    // 下次建窗命中旧 HWND);窗口失效时 find_gdi_window 的 IsWindow 校验会
+    // 清理内存表并返回 None,不致 op 空窗。
+    super::gdi::close_gdi_window_sync(label);
     Ok(())
 }
 
@@ -415,16 +401,7 @@ pub fn close_all_pin_image_windows() {
 /// 然后通知 GDI 层关闭窗口(WM_CLOSE → WM_DESTROY 清理 HWND 表)。
 pub fn close_pin_image_window(label: &str) -> Result<(), String> {
     cleanup_pin_image_data(label);
-    if let Some(hwnd) = super::gdi::find_gdi_window(label) {
-        let _ = unsafe {
-            windows::Win32::UI::WindowsAndMessaging::PostMessageW(
-                Some(hwnd),
-                windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
-                windows::Win32::Foundation::WPARAM(0),
-                windows::Win32::Foundation::LPARAM(0),
-            )
-        };
-    }
+    super::gdi::close_gdi_window_sync(label);
     Ok(())
 }
 

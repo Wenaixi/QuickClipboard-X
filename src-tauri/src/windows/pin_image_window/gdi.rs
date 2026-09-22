@@ -32,9 +32,10 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, RegisterClassW, ShowWindow, SW_SHOWNOACTIVATE, UpdateLayeredWindow, ULW_ALPHA,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, IsWindow, RegisterClassW, SendMessageW, ShowWindow,
+    SW_SHOWNOACTIVATE, UpdateLayeredWindow, ULW_ALPHA,
     WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT,
-    WM_ACTIVATE, WM_CREATE, WM_DESTROY, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEWHEEL,
+    WM_ACTIVATE, WM_CLOSE, WM_CREATE, WM_DESTROY, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEWHEEL,
     WM_MOUSEMOVE, WM_NCHITTEST, WM_RBUTTONUP, WS_POPUP, HTCLIENT, HTCAPTION,
 };
 use windows::Win32::Foundation::RECT;
@@ -498,9 +499,46 @@ fn label_for_hwnd(hwnd: HWND) -> Option<String> {
 
 /// 供外部按标签查询窗口句柄(close/save/动画共用)
 pub(crate) fn find_gdi_window(label: &str) -> Option<HWND> {
-    lock_hwnd_map()
-        .get(label)
-        .map(|hwnd| HWND(hwnd.clone() as usize as *mut core::ffi::c_void))
+    let hwnd = lock_hwnd_map().get(label).map(|hwnd| HWND(hwnd.clone() as usize as *mut core::ffi::c_void))?;
+    // 建窗登记后窗口可能已异步销毁(像 close_image_preview 先清数据再登
+    // 记)、或 OS 复用该句柄值给了别的窗口——内存表里的旧值必须用 IsWindow
+    // 校验真实存在性,否则 close/save/动画拿着失效句柄操作空窗口,失败被
+    // 吞掉后表残留(渐变幽灵窗)。
+    if unsafe { IsWindow(hwnd).as_bool() } {
+        Some(hwnd)
+    } else {
+        lock_hwnd_map().retain(|_, h| *h != hwnd.0 as isize);
+        None
+    }
+}
+
+/// 同步关闭贴图窗口:SendMessageW(WM_CLOSE) 比 PostMessageW 可靠——消息
+/// 同步送达窗口过程,窗口关闭(WM_DESTROY 清理句柄/状态表)在返回前完成,
+/// 不会出现 PostMessage 改走别的消息泵线程、WM_CLOSE 未派发时表已清、
+/// 或返回后窗口还在屏上的窗口期。本模块无独立消息循环线程,窗口由
+/// tauri 主线程事件泵驱动,同步送达语义确定。
+pub(crate) fn close_gdi_window_sync(label: &str) {
+    if let Some(hwnd) = find_gdi_window(label) {
+        unsafe {
+            SendMessageW(
+                hwnd,
+                WM_CLOSE,
+                WPARAM(0),
+                LPARAM(0),
+            );
+        }
+    }
+}
+
+/// 按标签健壮关闭:存在且有效则同步关窗,失败不静默吞(返回具体错误)。
+pub(crate) fn destroy_gdi_window_sync(label: &str) -> Result<(), String> {
+    let Some(hwnd) = find_gdi_window(label) else {
+        return Ok(());
+    };
+    unsafe {
+        DestroyWindow(hwnd).map_err(|e| format!("销毁贴图窗口失败: {}", e))?;
+    }
+    Ok(())
 }
 
 /// 收集全部贴图窗口句柄(focus.rs 排除表用——GDI 窗口不进 tauri webview_windows)
@@ -762,6 +800,38 @@ mod tests {
         assert!(
             stripped.contains("pub fn collect_pin_image_hwnds"),
             "必须提供收集全部贴图句柄的入口(focus.rs 排除表用),且为 pub 对外可见"
+        );
+    }
+
+    // 关窗链路护栏:find_gdi_window 必须用 IsWindow 校验内存表句柄的真实存在
+    // 性(建窗登记后窗口可能已异步销毁/OS 复用句柄值,拿失效句柄操作空窗
+    // 失败被吞后表残留);同步关闭必须走 SendMessageW(WM_CLOSE) 而非
+    // PostMessageW 异步(PostMessage 返回后窗口可能未销毁,数据已清而窗口
+    // 仍在屏上,固定标签下次建窗命中旧 HWND)。
+    #[test]
+    fn find_gdi_window_validates_hwnd_and_close_is_sync() {
+        let stripped = gdi_source();
+        let find_body = crate::services::system::hotkey::test_utils::fn_body(&stripped, "find_gdi_window");
+        assert!(
+            find_body.contains("IsWindow(hwnd).as_bool()"),
+            "find_gdi_window 必须用 IsWindow 校验句柄真实性,失效句柄须从内存表剔除"
+        );
+        assert!(
+            find_body.contains("retain(|_, h| *h != hwnd.0 as isize)"),
+            "IsWindow 失效时必须以 retain 剔除失效句柄(防表残留)"
+        );
+        let close_body = crate::services::system::hotkey::test_utils::fn_body(&stripped, "close_gdi_window_sync");
+        assert!(
+            close_body.contains("SendMessageW("),
+            "同步关窗必须用 SendMessageW(消息同步送达,关窗在返回前完成)"
+        );
+        assert!(
+            close_body.contains("WM_CLOSE"),
+            "同步关窗必须发 WM_CLOSE 走窗口过程"
+        );
+        assert!(
+            !close_body.contains("PostMessageW("),
+            "同步关窗不得再用 PostMessageW 异步(数据已清而窗口未毁的窗口期)"
         );
     }
 }
