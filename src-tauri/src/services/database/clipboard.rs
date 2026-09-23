@@ -1258,19 +1258,22 @@ pub fn toggle_pin_clipboard_item(id: i64) -> Result<bool, String> {
         let current_pinned: i64 = conn.query_row(
             "SELECT is_pinned FROM clipboard WHERE id = ?", params![id], |row| row.get(0)
         )?;
-        
-        let now = chrono::Local::now().timestamp();
+
+        // 置顶/取消置顶是纯本地排序操作,不推进 updated_at:排序语义与内容
+        // 版本解耦。若置顶同时 bump updated_at,该记录会以最大时间戳触发
+        // WebDAV/LAN 差量推送、把 item_order 排序传到对端互相踩踏,并成为
+        // LWW 胜者压过对端真实内容更新——置顶一次就让整条记录抢跑同步。
         if current_pinned == 0 {
             let max_pinned_order: i64 = conn.query_row(
                 "SELECT COALESCE(MAX(item_order), 0) FROM clipboard WHERE is_pinned = 1", [], |row| row.get(0)
             ).unwrap_or(0);
-            conn.execute("UPDATE clipboard SET is_pinned = 1, item_order = ?1, updated_at = ?2 WHERE id = ?3", params![max_pinned_order + 1, now, id])?;
+            conn.execute("UPDATE clipboard SET is_pinned = 1, item_order = ?1 WHERE id = ?2", params![max_pinned_order + 1, id])?;
             Ok(true)
         } else {
             let max_order: i64 = conn.query_row(
                 "SELECT COALESCE(MAX(item_order), 0) FROM clipboard WHERE is_pinned = 0", [], |row| row.get(0)
             ).unwrap_or(0);
-            conn.execute("UPDATE clipboard SET is_pinned = 0, item_order = ?1, updated_at = ?2 WHERE id = ?3", params![max_order + 1, now, id])?;
+            conn.execute("UPDATE clipboard SET is_pinned = 0, item_order = ?1 WHERE id = ?2", params![max_order + 1, id])?;
             Ok(false)
         }
     })
@@ -1590,6 +1593,47 @@ mod content_type_like_tests {
         assert!(
             fn_body.contains("where_clauses.join(\" AND \")"),
             "where_clauses 必须以 AND 拼接"
+        );
+    }
+
+    // 置顶/取消置顶必须与内容版本解耦:置顶切的是排序位与 is_pinned,不得
+    // 推进 updated_at。否则置顶一次就 bump 时间戳触发 WebDAV/LAN 差量推送,
+    // item_order 排序语义被当内容同步、互相踩踏,且记录以最大时间戳成为
+    // LWW 胜者压过对端真实内容更新。
+    #[test]
+    fn toggle_pin_does_not_bump_updated_at() {
+        let source = fs::read_to_string(format!(
+            "{}/src/services/database/clipboard.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读 clipboard.rs");
+        let body: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = body
+            .find("pub fn toggle_pin_clipboard_item")
+            .expect("找不到 toggle_pin_clipboard_item");
+        let after = &body[start..];
+        let end = after
+            .find("\nfn ")
+            .map(|i| start + i)
+            .unwrap_or_else(|| after.find("\npub fn ").map(|i| start + i).unwrap_or(body.len()));
+        let fn_body = &body[start..end];
+        // 置顶/取消置顶两条 UPDATE 都必须只写 is_pinned 与 item_order,不带
+        // updated_at 占位符。
+        assert!(
+            fn_body.matches("is_pinned = 1, item_order = ?1 WHERE").count() >= 1,
+            "置顶 UPDATE 必须只写 is_pinned + item_order"
+        );
+        assert!(
+            fn_body.matches("is_pinned = 0, item_order = ?1 WHERE").count() >= 1,
+            "取消置顶 UPDATE 必须只写 is_pinned + item_order"
+        );
+        assert!(
+            !fn_body.contains("updated_at = ?2"),
+            "置顶选不得推进 updated_at(排序与内容版本解耦)"
         );
     }
 }
