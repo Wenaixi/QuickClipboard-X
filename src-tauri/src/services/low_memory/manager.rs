@@ -30,6 +30,7 @@ const WEBVIEW_LABELS: &[&str] = &[
     "whiteboard",
     "annotation",
     "input-dialog",
+    "screenshot",
 ];
 
 const AUTO_LOW_MEMORY_WINDOW_LABELS: &[&str] = &[
@@ -340,6 +341,12 @@ fn destroy_all_webviews(app: &AppHandle) {
             let _ = window.destroy();
         }
     }
+
+    // 截图窗口被销毁后其会话不会自行结束——销毁不触发前端 Esc/关闭流程,
+    // 残留会话会让下次截图/OCR 因「处理中」拒入,且会话持有的临时 PNG 与
+    // 主窗口恢复计划悬空。先取消活跃会话走完整清理(删临时文件、按计划恢复
+    // 主窗口可见性),与输入框/快捷粘贴的「销毁即收敛静态状态」同对称语义。
+    let _ = crate::windows::screenshot_window::cancel_active_screenshot(app);
 
     // quickpaste 被 window.destroy() 销毁时不经过 hide_quickpaste_window
     // (唯一 set_visible(false) 入口),可见性静态标记会残留 true——退出低占用
@@ -877,6 +884,34 @@ mod tests {
             !restore_positions.is_empty()
                 && restore_positions.iter().all(|(i, _)| *i > pair_pos),
             "restore_edge_snap_on_startup 必须位于贴边隐藏分支内"
+        );
+    }
+
+    // 源码护栏:截图窗口必须进入销毁表,且销毁后必须取消活跃截图会话——
+    // 销毁不触发前端 Esc/关闭流程,残留会话会让下次截图因「处理中」拒入,
+    // 临时 PNG 与主窗口恢复计划悬空。
+    #[test]
+    fn low_memory_destroy_covers_screenshot_and_cancels_session() {
+        let src = strip_line_comments(&manager_source());
+        let prod = &src[..src.find("#[cfg(test)]").unwrap_or(src.len())];
+        let destroy_body = crate::services::system::hotkey::test_utils::fn_body(&src, "destroy_all_webviews");
+
+        assert!(
+            prod.contains("\"screenshot\""),
+            "screenshot 必须进入低内存销毁表(截图窗口开着时进入低占用必须销毁)"
+        );
+        assert!(
+            destroy_body.contains("cancel_active_screenshot(app)"),
+            "销毁截图窗口后必须取消活跃截图会话,收敛会话/临时文件/主窗口恢复计划"
+        );
+        // 销毁循环必须使用静态表(不得硬编码 get 到单个窗口)——与表覆盖断言互证。
+        let screenshot_in_table = prod
+            .find("\"screenshot\"")
+            .expect("缺 screenshot 表项")
+            < prod.find("#[cfg(test)]").unwrap_or(prod.len());
+        assert!(
+            screenshot_in_table,
+            "screenshot 必须出现在 WEBVIEW_LABELS 静态表内"
         );
     }
 
