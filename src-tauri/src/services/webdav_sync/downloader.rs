@@ -23,9 +23,22 @@ pub async fn download_all(
     report.pulled_favorites += remote_tombstone_report.pulled_favorites;
     report.pulled_groups += remote_tombstone_report.pulled_groups;
     report.pulled += remote_tombstone_report.pulled;
+    // 全量拉取的墓碑态必须「本地+远端取大」合并:本地删除但尚未推送的
+    // 墓碑若只按远端过滤,会在全量拉取时把已删记录复活并把本地墓碑清掉,
+    // 下一轮推送以「新数据」语义把删除在本地与云端双双恢复。
     let tombstone_states = if force_download {
-        super::tombstones_sync::remote_tombstone_states(client)
-            .await?
+        let mut merged = crate::services::database::sync_tombstone_states()?;
+        for (key, deleted_at) in super::tombstones_sync::remote_tombstone_states(client).await? {
+            merged
+                .entry(key)
+                .and_modify(|local| {
+                    if *local < deleted_at {
+                        *local = deleted_at;
+                    }
+                })
+                .or_insert(deleted_at);
+        }
+        merged
     } else {
         crate::services::database::sync_tombstone_states()?
     };
@@ -376,6 +389,40 @@ mod tests {
             err_extend_count >= 2,
             "download_all 两处图片下载调用都必须把错误并入 report.errors,实际 {}",
             err_extend_count
+        );
+    }
+
+    // 全量拉取不得丢掉本地未上传的墓碑:下载前墓碑态必须取本地+远端二者
+    // 的最大值,否则删除后尚未推送就手动「全部下载」会让已删记录复活并
+    // 清掉本地墓碑,下一轮自动推送又以新数据语义把删除重新上云。
+    #[test]
+    fn force_download_merges_local_and_remote_tombstones() {
+        let src = crate::services::system::hotkey::test_utils::strip_line_comments(
+            &crate::services::system::hotkey::test_utils::source_file(
+                "src/services/webdav_sync/downloader.rs",
+            ),
+        );
+        let start = src
+            .find("if force_download {")
+            .expect("缺 force_download 分支");
+        let end = src
+            .find("} else {\n        crate::services::database::sync_tombstone_states()?;\n    }")
+            .map(|i| i + 1)
+            .unwrap_or(src.len());
+        let body = &src[start..end];
+        // 必须先读本地墓碑(含未上传的新删除),不能只取远端。
+        assert!(
+            body.contains("crate::services::database::sync_tombstone_states()"),
+            "合并分支必须先读本地墓碑"
+        );
+        // 远端墓碑必须并入同一张表且取大:本地新于远端时不被远端覆盖。
+        assert!(
+            body.contains("remote_tombstone_states(client)"),
+            "合并分支必须拉取远端墓碑"
+        );
+        assert!(
+            body.contains("if *local < deleted_at"),
+            "同一条记录必须取本地/远端删除时间更大者"
         );
     }
 }
