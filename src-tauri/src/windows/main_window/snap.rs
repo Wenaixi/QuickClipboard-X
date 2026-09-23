@@ -855,6 +855,14 @@ pub fn show_snapped_window(
     save_snap_layout(resolved.edge, ratio, Some(resolved.monitor_id));
     crate::services::webdav_sync::notify_main_window_shown(window.app_handle().clone());
     let _ = super::refresh_always_on_top(window);
+    // 悬浮开启的隐藏触发条会无条件 set_always_on_top(true)(上边说该分支
+    // 保留触发条置顶语义),弹出后若不收敛,取消置顶的用户在 snapped+hover
+    // 下 Z 序仍被顶住——refresh 的 is_pinned 守卫只保证「未置顶不再顶回」,
+    // 不会清除隐藏路径已经在窗口上留下的 TOPMOST 样式。按用户实际偏好
+    // 双向收敛:未置顶时主动 set_always_on_top(false),让开关真正生效。
+    if !super::state::is_pinned() {
+        let _ = window.set_always_on_top(false);
+    }
 
     crate::input_monitor::enable_mouse_monitoring();
     match source {
@@ -1201,6 +1209,15 @@ mod tests {
             .or_else(|| after.find("\nfn "))
             .unwrap_or(after.len());
         let show_body = &after[..show_end_rel];
+        // 未置顶偏好下 show 必须主动清除 TOPMOST:悬浮开启的隐藏触发条会
+        // 无条件置顶,show 后若不按 is_pinned 收敛,取消置顶在 snapped+hover
+        // 下 z 序仍被顶住(refresh 的守卫只保证「不再顶回」不清残留)。
+        assert!(
+            show_body
+                .find("!super::state::is_pinned()")
+                .is_some_and(|p| show_body[p..].find("set_always_on_top(false)").is_some()),
+            "show_snapped_window 未置顶时不得保留 TOPMOST(隐藏触发条置顶必须按偏好收敛)"
+        );
         let cancel_pos = show_body
             .find("cancel_pending_animation()")
             .expect("show_snapped_window 必须显式调用 cancel_pending_animation 取消在飞 hide 动画");
