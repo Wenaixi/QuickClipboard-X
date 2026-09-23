@@ -37,6 +37,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT,
     WM_ACTIVATE, WM_CLOSE, WM_CREATE, WM_DESTROY, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEWHEEL,
     WM_MOUSEMOVE, WM_NCHITTEST, WM_RBUTTONUP, WS_POPUP, HTCLIENT, HTCAPTION,
+    WM_NCLBUTTONDBLCLK,
 };
 use windows::Win32::Foundation::RECT;
 
@@ -472,7 +473,10 @@ unsafe extern "system" fn pin_image_window_proc(
         // 双击关闭贴图:设置页「双击关闭当前贴图」承诺。WebView 版贴图窗口
         // 有双击关闭交互,GDI 迁移时未接线——双击走默认处理窗口无反应。
         // 反查标签后走统一关窗(数据清理 + WM_CLOSE),返回 0 吞掉消息。
-        WM_LBUTTONDBLCLK => {
+        // 注意:默认态(未锁定位置)WM_NCHITTEST 返回 HTCAPTION,整窗按标题栏
+        // 处理,鼠标消息派发为 NC 系(WM_NCLBUTTON*),client 的 WM_LBUTTONDBLCLK
+        // 只在锁定位置(HTCLIENT)时到达——两类双击都必须接线才能全覆盖。
+        WM_LBUTTONDBLCLK | WM_NCLBUTTONDBLCLK => {
             if let Some(label) = label_for_hwnd(hwnd) {
                 let _ = crate::windows::pin_image_window::close_pin_image_window(&label);
             }
@@ -829,6 +833,10 @@ mod tests {
         assert!(
             !seg.starts_with("WM_LBUTTONDBLCLK | WM_"),
             "WM_LBUTTONDBLCLK 不得再并入分组走默认处理"
+        );
+        assert!(
+            seg.contains("WM_NCLBUTTONDBLCLK"),
+            "双击必须同时处理 NC 系(WM_NCLBUTTONDBLCLK)——默认态 NCHITTEST=HTCAPTION             时双击派发为 NC 消息,只接 client 的 WM_LBUTTONDBLCLK 会让默认态双击失效"
         );
     }
 
