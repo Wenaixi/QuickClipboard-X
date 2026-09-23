@@ -83,7 +83,7 @@ function GroupEditModal({
 
               <div>
                 <label className="block text-sm font-medium text-qc-fg mb-2">
-                  颜色
+                  {t('groups.modal.colorLabel')}
                 </label>
                 <div className="flex gap-2">
                   <Tooltip content={t('groups.modal.customColor')} placement="top" asChild>

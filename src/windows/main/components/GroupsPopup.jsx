@@ -699,7 +699,7 @@ const GroupsPopup = forwardRef(({
           </div>
 
             <div className="mt-auto p-2 pt-1">
-              <Tooltip content={isSidebarCollapsed ? '展开分组栏' : '收起分组栏'} placement="right" asChild>
+              <Tooltip content={isSidebarCollapsed ? t('groups.sidebarExpand') : t('groups.sidebarCollapse')} placement="right" asChild>
                 <button
                   type="button"
                   onClick={handleToggleSidebarCollapse}
@@ -715,7 +715,7 @@ const GroupsPopup = forwardRef(({
                   />
                   {!isSidebarCollapsed && (
                     <span className="text-[12px] font-medium leading-none whitespace-nowrap">
-                      收起
+                      {t('groups.sidebarCollapse')}
                     </span>
                   )}
                 </button>

@@ -202,6 +202,8 @@
   },
   "groups": {
     "title": "分组",
+    "sidebarExpand": "展开分组栏",
+    "sidebarCollapse": "收起分组栏",
     "add": "新增",
     "edit": "编辑",
     "delete": "删除",
@@ -218,7 +220,8 @@
       "nameRequired": "请输入分组名称",
       "iconLabel": "选择图标",
       "saving": "保存中...",
-      "customColor": "自定义颜色"
+      "customColor": "自定义颜色",
+      "colorLabel": "颜色"
     },
     "imageDelete": {
       "title": "删除分组「{{name}}」",

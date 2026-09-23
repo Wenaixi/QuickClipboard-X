@@ -202,6 +202,8 @@
   },
   "groups": {
     "title": "Groups",
+    "sidebarExpand": "Expand Group Sidebar",
+    "sidebarCollapse": "Collapse Group Sidebar",
     "add": "Add",
     "edit": "Edit",
     "delete": "Delete",
@@ -218,7 +220,8 @@
       "nameRequired": "Please enter group name",
       "iconLabel": "Select Icon",
       "saving": "Saving...",
-      "customColor": "Custom Color"
+      "customColor": "Custom Color",
+      "colorLabel": "Color"
     },
     "imageDelete": {
       "title": "Delete group \"{{name}}\"",
