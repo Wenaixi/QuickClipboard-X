@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const hookPath = join(here, '../../shared/hooks/useItemCommon.jsx');
+const hookPath = join(here, '../../../shared/hooks/useItemCommon.jsx');
 const hook = readFileSync(hookPath, 'utf8');
 const bareHook = hook
   .split('\n')
@@ -18,8 +18,8 @@ const bareHook = hook
 
 const clipboardItemSrc = readFileSync(join(here, './ClipboardItem.jsx'), 'utf8');
 const favoriteItemSrc = readFileSync(join(here, './FavoriteItem.jsx'), 'utf8');
-const zh = JSON.parse(readFileSync(join(here, '../../shared/locales/zh-CN.json'), 'utf8'));
-const en = JSON.parse(readFileSync(join(here, '../../shared/locales/en-US.json'), 'utf8'));
+const zh = JSON.parse(readFileSync(join(here, '../../../shared/locales/zh-CN.json'), 'utf8'));
+const en = JSON.parse(readFileSync(join(here, '../../../shared/locales/en-US.json'), 'utf8'));
 
 test('formatTime 必须注入 t 渲染时间文案(截断锚点环绕 const t 判断)', () => {
   const tPos = bareHook.indexOf("typeof options.t === 'function' ? options.t : (key) => ''");

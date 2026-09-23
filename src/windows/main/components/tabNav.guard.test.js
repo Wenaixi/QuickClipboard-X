@@ -83,8 +83,8 @@ test('TabNavigation 侧边栏收起/展开/分组文案必须走语言包', () =
 });
 
 test('双语包必须含 tabNav 收起/展开/分组键与 filter 粘贴状态键', () => {
-  const zh = JSON.parse(readFileSync(join(here, '../../shared/locales/zh-CN.json'), 'utf8'));
-  const en = JSON.parse(readFileSync(join(here, '../../shared/locales/en-US.json'), 'utf8'));
+  const zh = JSON.parse(readFileSync(join(here, '../../../shared/locales/zh-CN.json'), 'utf8'));
+  const en = JSON.parse(readFileSync(join(here, '../../../shared/locales/en-US.json'), 'utf8'));
   for (const [pack, label] of [[zh, 'zh'], [en, 'en']]) {
     for (const key of ['collapseSidebar', 'expandSidebar', 'groups']) {
       assert.ok(
