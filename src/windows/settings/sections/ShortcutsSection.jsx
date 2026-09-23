@@ -192,27 +192,6 @@ function ShortcutsSection({ settings, onSettingChange, activeTab }) {
             <SettingItem label={t('settings.shortcuts.pinMenu')} description={t('settings.shortcuts.pinMenuDesc')}>
               <ReadonlyShortcut keys={[t('settings.shortcuts.pinKeys.rightClick')]} />
             </SettingItem>
-            <SettingItem label={t('settings.shortcuts.pinThumbnail')} description={t('settings.shortcuts.pinThumbnailDesc')}>
-              <ReadonlyShortcut keys={[t('settings.shortcuts.pinKeys.leftHold'), t('settings.shortcuts.pinKeys.rightClick')]} />
-            </SettingItem>
-            <SettingItem label={t('settings.shortcuts.pinZoom')} description={t('settings.shortcuts.pinZoomDesc')}>
-              <ReadonlyShortcut keys={[t('settings.shortcuts.pinKeys.scroll')]} />
-            </SettingItem>
-            <SettingItem label={t('settings.shortcuts.pinZoomFast')} description={t('settings.shortcuts.pinZoomFastDesc')}>
-              <ReadonlyShortcut keys={['Shift', t('settings.shortcuts.pinKeys.scroll')]} />
-            </SettingItem>
-            <SettingItem label={t('settings.shortcuts.pinZoomFine')} description={t('settings.shortcuts.pinZoomFineDesc')}>
-              <ReadonlyShortcut keys={['Ctrl', t('settings.shortcuts.pinKeys.scroll')]} />
-            </SettingItem>
-            <SettingItem label={t('settings.shortcuts.pinInnerZoom')} description={t('settings.shortcuts.pinInnerZoomDesc')}>
-              <ReadonlyShortcut keys={['Alt', t('settings.shortcuts.pinKeys.scroll')]} />
-            </SettingItem>
-            <SettingItem label={t('settings.shortcuts.pinInnerZoomFast')} description={t('settings.shortcuts.pinInnerZoomFastDesc')}>
-              <ReadonlyShortcut keys={['Alt', 'Shift', t('settings.shortcuts.pinKeys.scroll')]} />
-            </SettingItem>
-            <SettingItem label={t('settings.shortcuts.pinInnerDrag')} description={t('settings.shortcuts.pinInnerDragDesc')}>
-              <ReadonlyShortcut keys={['Alt', t('settings.shortcuts.pinKeys.leftDrag')]} />
-            </SettingItem>
           </SettingsSection>
         );
 
