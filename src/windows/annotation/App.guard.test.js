@@ -177,6 +177,19 @@ test('编辑器文本工具必须用自绘浮层替代 window.prompt(WebView2 pr
     bareSource.includes('window.prompt') === false,
     '不得再使用 window.prompt(WebView2 对 prompt 支持不可靠,必须自绘浮层)',
   );
+  // 浮层必须受控可输入:value 接真实状态、onChange 接真实 setter,且
+  // allowEmpty=false 禁止空文本提交——历史上浮层钉死 value=""+onChange
+  // 空操作,输入框全程锁定、文本工具不可用(仅校验 setTextDraft 开关
+  // 与无 prompt 的旧护栏漏掉了这条)。
+  assert.ok(
+    appSource.includes('onChange={setTextInputValue}') &&
+      appSource.includes('allowEmpty={false}'),
+    '文本浮层必须受控可输入且禁止空提交(否则文本标注不可用)',
+  );
+  assert.ok(
+    appSource.includes("const [textInputValue, setTextInputValue] = useState('')"),
+    '必须声明文本浮层受控输入状态',
+  );
 });
 
 test('编辑器多指针只认首指,undo 先清草稿', () => {

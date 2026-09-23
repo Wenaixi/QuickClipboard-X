@@ -142,6 +142,9 @@ function AnnotationApp() {
   // 文本标注输入浮层状态:非空时渲染 SimpleInputDialog,确认后提交文本
   // 图层,取消/Esc 则丢弃——替代 window.prompt(WebView2 可能返回 null)。
   const [textDraft, setTextDraft] = useState(null);
+  // 文本标注浮层的受控输入值:每次打开浮层清零、确认/取消后清空,
+  // 避免上一次输入残留到下一次文本标注。
+  const [textInputValue, setTextInputValue] = useState('');
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -315,6 +318,7 @@ function AnnotationApp() {
     // 对 prompt 支持有别于常规浏览器,可能返回 null 让文本标注静默失效)。
     if (draft.type === 'text') {
       setTextDraft({ x: draft.start.x, y: draft.start.y });
+      setTextInputValue('');
       draw();
       return;
     }
@@ -432,8 +436,8 @@ function AnnotationApp() {
         {textDraft && (
           <SimpleInputDialog
             title={t('annotation.textPrompt', { defaultValue: '输入标注文本' })}
-            value=""
-            onChange={() => {}}
+            value={textInputValue}
+            onChange={setTextInputValue}
             onConfirm={(label) => {
               const trimmed = (label || '').trim();
               if (trimmed) {
@@ -450,6 +454,7 @@ function AnnotationApp() {
             placeholder=""
             confirmText={t('annotation.confirmText', { defaultValue: '确认' })}
             cancelText={t('annotation.cancel', { defaultValue: '取消' })}
+            allowEmpty={false}
           />
         )}
       </div>
