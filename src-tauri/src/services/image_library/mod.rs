@@ -685,14 +685,16 @@ pub fn get_image_list(group: &str, offset: usize, limit: usize) -> Result<ImageL
 
     let total = entries.len();
 
-    let mut sorted_entries = entries;
-    sorted_entries.sort_by(|a, b| {
-        let time_a = a.metadata().and_then(|m| m.modified()).ok();
-        let time_b = b.metadata().and_then(|m| m.modified()).ok();
-        time_b.cmp(&time_a)
-    });
+    // 修改时间只在遍历开始时统查一次,比较器内不再重复 stat——万图时把
+    // 排序从「每比较两次文件系统调用」降为「每条目一次」,大幅削减卡顿。
+    let mut indexed: Vec<(Option<std::time::SystemTime>, fs::DirEntry)> = entries
+        .into_iter()
+        .map(|entry| (entry.metadata().ok().and_then(|m| m.modified().ok()), entry))
+        .collect();
 
-    for entry in sorted_entries.into_iter().skip(offset).take(limit) {
+    indexed.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.file_name().cmp(&b.1.file_name())));
+
+    for (_, entry) in indexed.into_iter().skip(offset).take(limit) {
         let path = entry.path();
         let filename = entry.file_name().to_string_lossy().to_string();
         let metadata = entry.metadata().ok();
@@ -944,5 +946,44 @@ mod tests {
             !rename_body.contains("fs::rename(&old_path, &new_path)\n        .map_err"),
             "扩展名校验必须早于实际重命名(stack 检验:校验先于 rename)"
         );
+    }
+
+    // 图库列表排序必须把修改时间提前提取(比较器内不得重复 stat):
+    // 万图时比较器内每次比较两次 metadata() 会产生约 26 万次文件系统调用,
+    // 主线程同步命令下滚动图库整段阻塞。排序改索引元组后仅每条目一次。
+    #[test]
+    fn image_list_extracts_modified_time_before_sort() {
+        let src = stripped_source();
+        let list_start = src.find("pub fn get_image_list").expect("缺 get_image_list");
+        let list_end = src.find("pub fn get_image_count").expect("缺 get_image_count");
+        let list_body = &src[list_start..list_end];
+        // 修改时间必须提前提取进元组(每条目一次),不再留在比较器内。
+        assert!(
+            list_body.contains("(entry.metadata().ok().and_then(|m| m.modified().ok()), entry)"),
+            "修改时间必须在排序前提取进索引元组"
+        );
+        assert!(
+            list_body.contains("b.0.cmp(&a.0)"),
+            "排序必须按已提取的时间键比较(索引元组),不得在比较器内重新 stat"
+        );
+        // 命令层列表/计数必须拆 spawn_blocking,避免主线程整段阻塞。
+        let cmd_source = std::fs::read_to_string(format!(
+            "{}/src/commands/image_library.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读取图库命令源码失败");
+        let cmd = cmd_source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        for cmd_name in ["il_get_image_list", "il_get_image_count"] {
+            let start = cmd.find(&format!("pub async fn {cmd_name}")).expect("命令必须 async");
+            let body = &cmd[start..start + 500];
+            assert!(
+                body.contains("tokio::task::spawn_blocking"),
+                "{cmd_name} 必须拆 spawn_blocking(主线程同步扫描会冻结 UI)"
+            );
+        }
     }
 }

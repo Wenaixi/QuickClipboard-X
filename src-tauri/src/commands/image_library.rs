@@ -76,13 +76,24 @@ pub async fn il_save_image(payload: SaveImagePayload) -> Result<image_library::I
 }
 
 #[tauri::command]
-pub fn il_get_image_list(payload: GetImageListPayload) -> Result<image_library::ImageListResult, String> {
-    image_library::get_image_list(&payload.group, payload.offset, payload.limit)
+pub async fn il_get_image_list(payload: GetImageListPayload) -> Result<image_library::ImageListResult, String> {
+    let group = payload.group;
+    let offset = payload.offset;
+    let limit = payload.limit;
+    // 列表读取全目录 read_dir + 按修改时间全量排序,万图时单次可达数十万次
+    // 文件系统调用。拆 spawn_blocking 避免整段阻塞主线程(与 il_save_image
+    // 同构);用 tokio 非阻塞 await 让出当前线程。
+    tokio::task::spawn_blocking(move || image_library::get_image_list(&group, offset, limit))
+        .await
+        .map_err(|e| format!("任务执行失败: {}", e))?
 }
 
 #[tauri::command]
-pub fn il_get_image_count(payload: GetImageCountPayload) -> Result<usize, String> {
-    image_library::get_image_count(&payload.group)
+pub async fn il_get_image_count(payload: GetImageCountPayload) -> Result<usize, String> {
+    let group = payload.group;
+    tokio::task::spawn_blocking(move || image_library::get_image_count(&group))
+        .await
+        .map_err(|e| format!("任务执行失败: {}", e))?
 }
 
 #[tauri::command]
