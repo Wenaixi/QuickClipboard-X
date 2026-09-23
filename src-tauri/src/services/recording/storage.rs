@@ -1,7 +1,7 @@
 // R4 屏幕录制产物管理：录制结束后由调用方把帧序列编码为 PNG 单帧
 // 快照（录制结果是逐帧 RGBA），落剪贴板历史走既有截图存储链路
 // encode_and_store_png_bytes + copy_screenshot（剪贴板图片 + 历史入库）。
-// GIF 字节由 gif_writer 单独负责编码；本模块只管产物落历史。
+// GIF 字节由 gif_writer 单独负责编码；本模块负责产物落历史与 GIF 落盘。
 
 use crate::services::screenshot::{encode_and_store_png_bytes, StoredScreenshot};
 
@@ -35,6 +35,7 @@ fn validate_result(result: &RecordingResult) -> Result<(), String> {
 /// 录制产物落剪贴板历史：把首帧 RGBA 编码为 PNG 走内容寻址落盘
 /// （复用截图存储），再走 copy_screenshot 语义（剪贴板图片 + 暂停
 /// 监听 + 历史入库 + 事件通知）。单帧即录制代表帧，历史可预览/复制。
+/// 完成后把 GIF 动图写入数据目录 recordings/，产物闭环不再只留在内存。
 pub fn store_recording_to_history(
     app: &tauri::AppHandle,
     result: &RecordingResult,
@@ -46,7 +47,23 @@ pub fn store_recording_to_history(
         .map_err(|error| format!("录制产物写入剪贴板失败: {error}"))?;
     crate::services::screenshot::actions::emit_screenshot_history_update(app, clipboard_id)
         .map_err(|error| format!("录制产物历史事件通知失败: {error}"))?;
+    persist_gif(result)?;
     Ok(stored)
+}
+
+// 把 GIF 字节写入数据目录 recordings/。录制动图随记录持久化,不再只在
+// 内存缓冲里编码后无处安放(停止录制后用户在文件系统也能取回动图)。
+fn persist_gif(result: &RecordingResult) -> Result<(), String> {
+    let data_dir = crate::services::get_data_directory()
+        .map_err(|error| format!("获取数据目录失败: {error}"))?;
+    let recordings_dir = data_dir.join("recordings");
+    std::fs::create_dir_all(&recordings_dir)
+        .map_err(|error| format!("创建录制动图目录失败: {error}"))?;
+    let file_name = format!("record-{}.gif", chrono::Utc::now().timestamp_millis());
+    let target = recordings_dir.join(file_name);
+    std::fs::write(&target, &result.gif_bytes)
+        .map_err(|error| format!("写入录制动图失败: {error}"))?;
+    Ok(())
 }
 
 // 把首帧 RGBA 编码为 PNG 快照（复用截图编码器：encode_and_store_png_bytes
@@ -109,6 +126,47 @@ mod tests {
         assert!(
             source.contains("emit_screenshot_history_update(app, clipboard_id)"),
             "历史事件必须用 copy 的真实记录 ID"
+        );
+    }
+
+    // 录制动图必须落盘持久化:gif_writer 编码出的 GIF 字节不能只在内存
+    // 缓冲里编码后无处安放——停止录制后用户应在文件系统能取回动图。
+    #[test]
+    fn recording_persists_gif_to_data_dir() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/recording/storage.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读取录制存储源码失败");
+        // 存储入口必须先落历史再把动图落盘(闭环:快照入历史 + 动图持久化)。
+        let store_body = {
+            let start = source
+                .find("pub fn store_recording_to_history")
+                .expect("缺 store_recording_to_history");
+            let end = source
+                .find("// 把首帧 RGBA 编码为 PNG 快照")
+                .expect("缺 encode_snapshot 注释");
+            &source[start..end]
+        };
+        assert!(
+            store_body.contains("persist_gif(result)"),
+            "落历史后必须把 GIF 动图落盘"
+        );
+        // 动图落盘必须写到数据目录 recordings/ 下,带独立子目录不污染图片库。
+        let persist_body = {
+            let start = source
+                .find("fn persist_gif(result: &RecordingResult)")
+                .expect("缺 persist_gif");
+            let end = start + 900;
+            &source[start..end]
+        };
+        assert!(
+            persist_body.contains("data_dir.join(\"recordings\")"),
+            "GIF 必须落盘到数据目录 recordings/"
+        );
+        assert!(
+            persist_body.contains("std::fs::write(&target, &result.gif_bytes)"),
+            "必须把 GIF 字节写入落盘文件"
         );
     }
 }
