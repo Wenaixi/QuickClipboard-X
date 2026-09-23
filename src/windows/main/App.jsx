@@ -224,6 +224,14 @@ function App() {
       });
       const unlisten6 = await listen('window-hide-animation', handleWindowHide);
       const unlisten7 = await listen('edge-snap-hide', handleWindowHide);
+      // 数字快捷键越界反馈:列表项不足时后端 emit 本事件,弹 toast 提示
+      // 用户该数字位没有对应剪贴板项,不再静默无反应。
+      const unlisten8 = await listen('number-shortcut-unavailable', event => {
+        toast.error(String(event.payload || t('hotkeys.numberShortcutUnavailable')), {
+          ...WEBDAV_TOAST_CONFIG,
+          duration: 3000,
+        });
+      });
 
       return () => {
         unlisten1();
@@ -233,6 +241,7 @@ function App() {
         unlisten5();
         unlisten6();
         unlisten7();
+        unlisten8();
       };
     };
     let cleanup = setupListeners();

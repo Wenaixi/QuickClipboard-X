@@ -684,6 +684,7 @@
       "enableNumberShortcutsDesc": "Use shortcut + number to quickly operate clipboard items",
       "numberShortcutsModifier": "Number Shortcut Modifier",
       "numberShortcutsModifierDesc": "Choose modifier key combination for number shortcuts",
+      "numberShortcutUnavailable": "Not enough clipboard items for this number key",
       "number": "Number",
       "mouseShortcutsTitle": "Mouse Shortcuts",
       "mouseShortcutsDesc": "Quickly operate clipboard with mouse",

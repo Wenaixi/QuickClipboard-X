@@ -705,7 +705,7 @@ pub fn register_number_shortcuts(modifier: &str) -> Result<(), String> {
                             if try_activate_key(&key_id) {
                                 // 首次按下
                                 let key_id = key_id.clone();
-                                if let Err(e) = handle_number_shortcut_press(index) {
+                                if let Err(e) = handle_number_shortcut_press(app, index) {
                                     eprintln!("执行数字快捷键 {} 失败: {}", index + 1, e);
                                     deactivate_key(&key_id);
                                 }
@@ -805,7 +805,7 @@ pub fn unregister_number_shortcuts() {
 }
 
 // 首次按下
-fn handle_number_shortcut_press(index: usize) -> Result<(), String> {
+fn handle_number_shortcut_press(app: &tauri::AppHandle, index: usize) -> Result<(), String> {
     use crate::services::database::{query_clipboard_items, get_clipboard_item_by_id, QueryParams};
     use crate::services::paste::paste_handler::paste_clipboard_item_with_update;
     use crate::services::paste::keyboard;
@@ -829,13 +829,24 @@ fn handle_number_shortcut_press(index: usize) -> Result<(), String> {
     })?
     .items;
 
-    let item = items.get(index).ok_or_else(|| {
-        format!(
-            "剪贴板项索引 {} 超出范围（共 {} 项）",
-            index + 1,
-            items.len()
-        )
-    })?;
+    let item = match items.get(index) {
+        Some(item) => item,
+        None => {
+            // 数字快捷键越界静默失败:列表只有 N 项时按 Ctrl+M 完全无感知,
+            // 与「失败静默」家族(LAN 推送/自动更新已修)同族漏网。通知主窗口
+            // 弹 toast,让用户知道该数字位没有对应剪贴板项。
+            use tauri::Emitter;
+            let _ = app.emit(
+                "number-shortcut-unavailable",
+                format!(
+                    "剪贴板项索引 {} 超出范围（共 {} 项）",
+                    index + 1,
+                    items.len()
+                ),
+            );
+            return Err(format!("剪贴板项索引 {} 超出范围（共 {} 项）", index + 1, items.len()));
+        }
+    };
 
     let full_item = get_clipboard_item_by_id(item.id)?
         .ok_or_else(|| format!("剪贴板项 {} 不存在", item.id))?;
@@ -1244,6 +1255,36 @@ mod tests {
                 "{name} 必须过低内存恢复守卫,否则低占用下直接注入粘贴"
             );
         }
+    }
+
+    // 数字快捷键越界必须通知前端:列表只有 N 项时按 Ctrl+M 完全静默无感知,
+    // 与「失败静默」家族(LAN 推送/自动更新已修)同族漏网。护栏断言越界
+    // 分支必须 emit number-shortcut-unavailable 事件(调用方签名带 app)。
+    #[test]
+    fn number_shortcut_out_of_range_emits_frontend_event() {
+        let src = strip_line_comments(&global_source());
+        let start = src
+            .find("fn handle_number_shortcut_press(app:")
+            .expect("handle_number_shortcut_press 必须接收 app(用于 emit 通知)");
+        let end = src[start..]
+            .find("
+}
+")
+            .map(|i| start + i)
+            .unwrap_or(src.len());
+        let body = &src[start..end];
+        assert!(
+            body.contains("items.get(index)"),
+            "越界判定必须走 items.get 边界检查"
+        );
+        assert!(
+            body.contains("number-shortcut-unavailable"),
+            "越界分支必须 emit number-shortcut-unavailable 事件通知前端"
+        );
+        assert!(
+            body.contains("app.emit("),
+            "通知必须经 app.emit 发出"
+        );
     }
 
     // reload 注册截图热键必须受 screenshot_enabled 守卫：
