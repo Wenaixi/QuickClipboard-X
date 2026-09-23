@@ -52,7 +52,8 @@
     "weekdayFriday": "Friday",
     "weekdaySaturday": "Saturday",
     "fileCount": "files",
-    "error": "Operation failed"
+    "error": "Operation failed",
+    "lines": "lines"
   },
   "errors": {
     "operationFailed": "Operation failed. Please try again later.",
@@ -148,7 +149,9 @@
     "fileNotFound": "File not found",
     "pickColor": "Pick color",
     "eyeDropperUnsupported": "EyeDropper is not supported in this environment",
-    "colorUpdateFailed": "Failed to update color"
+    "colorUpdateFailed": "Failed to update color",
+    "fileParseError": "Failed to parse file data",
+    "noFileInfo": "No file info"
   },
   "favorites": {
     "title": "Favorites",
@@ -1173,7 +1176,9 @@
       "share": "Share & Recommend",
       "donate": "Support & Donate",
       "clickToCopyVersion": "Click to copy version",
-      "versionCopied": "Version copied to clipboard"
+      "versionCopied": "Version copied to clipboard",
+      "wechatQrAlt": "WeChat donation QR",
+      "wechatTitle": "WeChat Donation"
     }
   },
   "footer": {

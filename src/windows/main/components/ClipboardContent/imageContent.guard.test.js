@@ -30,6 +30,17 @@ test('ImageContent 必须定义 image_id 白名单正则', () => {
   );
 });
 
+test('ImageContent 加载中文案必须走 common.loading', () => {
+  assert.ok(
+    code.includes("t('common.loading')"),
+    '加载中必须走 common.loading 键',
+  );
+  assert.ok(
+    !code.includes('>加载中...</span>'),
+    '加载文案不得残留裸中文',
+  );
+});
+
 test('ImageContent 拼 clipboard_images 路径前必须经过白名单校验', () => {
   const whitelistPos = code.indexOf('IMAGE_ID_WHITELIST.test(imageId)');
   const pathPos = code.indexOf('${normalizedDataDir}/clipboard_images/${imageId}.png');

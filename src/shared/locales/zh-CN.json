@@ -52,7 +52,8 @@
     "weekdayFriday": "周五",
     "weekdaySaturday": "周六",
     "fileCount": "个文件",
-    "error": "操作失败"
+    "error": "操作失败",
+    "lines": "行"
   },
   "errors": {
     "operationFailed": "操作失败，请稍后重试",
@@ -148,7 +149,9 @@
     "fileNotFound": "文件不存在",
     "pickColor": "选择颜色",
     "eyeDropperUnsupported": "当前环境不支持 EyeDropper 取色器",
-    "colorUpdateFailed": "更新颜色失败"
+    "colorUpdateFailed": "更新颜色失败",
+    "fileParseError": "文件数据解析错误",
+    "noFileInfo": "无文件信息"
   },
   "favorites": {
     "title": "收藏",
@@ -1173,7 +1176,9 @@
       "share": "推荐分享",
       "donate": "赞赏支持",
       "clickToCopyVersion": "点击复制版本号",
-      "versionCopied": "版本号已复制到剪贴板"
+      "versionCopied": "版本号已复制到剪贴板",
+      "wechatQrAlt": "微信赞赏码",
+      "wechatTitle": "微信赞赏"
     }
   },
   "footer": {

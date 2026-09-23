@@ -75,13 +75,13 @@ function FileContent({
   } catch (error) {
     console.error('解析文件数据失败:', error);
     return <div className="text-sm text-red-500">
-      文件数据解析错误
+      {t('clipboard.fileParseError')}
     </div>;
   }
-  
+
   if (!filesData || !filesData.files || filesData.files.length === 0) {
     return <div className="text-sm text-qc-fg-muted">
-      无文件信息
+      {t('clipboard.noFileInfo')}
     </div>;
   }
 
@@ -132,7 +132,7 @@ function FileContent({
       const totalCount = filesData.files.length;
       const title = exists ? buildTitle(firstFile) : `${firstFile.name}\n${t('clipboard.fileNotFound', '文件不存在')}`;
       const metaText = exists ? formatFileSize(firstFile.size || 0) : t('clipboard.fileNotFound', '文件不存在');
-      const countText = totalCount > 1 ? t('clipboard.fileCount', { count: totalCount, defaultValue: `共 ${totalCount} 个文件` }) : null;
+      const countText = totalCount > 1 ? t('common.fileCount', { count: totalCount, defaultValue: `共 ${totalCount} 个文件` }) : null;
 
       return <div
         className={`w-full h-full flex items-center gap-1.5 px-0.5 overflow-hidden ${exists ? '' : 'opacity-70'}`}

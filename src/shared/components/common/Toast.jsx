@@ -1,5 +1,6 @@
 import '@tabler/icons-webfont/dist/tabler-icons.min.css';
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { TOAST_POSITIONS, TOAST_SIZES } from '@shared/store/toastStore';
 
 const EXIT_DURATION_MS = 220;
@@ -95,6 +96,9 @@ function Toast({
   align = 'start',
   onClose
 }) {
+  const {
+    t
+  } = useTranslation();
   const [phase, setPhase] = useState('enter');
   const currentType = TOAST_TYPE_CONFIG[type] || TOAST_TYPE_CONFIG.info;
   const currentSize = TOAST_SIZE_CONFIG[size] || TOAST_SIZE_CONFIG[TOAST_SIZES.MEDIUM];
@@ -199,7 +203,7 @@ function Toast({
                 'hover:bg-qc-hover hover:text-qc-fg focus:outline-none focus:ring-2 focus:ring-qc-border-strong',
                 currentSize.closeButton
               ].join(' ')}
-              aria-label="关闭提示"
+              aria-label={t('common.close')}
             >
               <i className="ti ti-x" style={{ fontSize: currentSize.closeIcon }} />
             </button>

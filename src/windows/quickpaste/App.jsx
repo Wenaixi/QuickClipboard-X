@@ -305,7 +305,7 @@ function QuickPasteWindow() {
         <div className="w-full flex items-center">
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 bg-qc-fg-subtle rounded-full animate-pulse" />
-            <span className="text-xs text-qc-fg-muted">加载中...</span>
+            <span className="text-xs text-qc-fg-muted">{t('common.loading')}</span>
           </div>
         </div>
       );

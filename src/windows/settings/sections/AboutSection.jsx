@@ -223,17 +223,17 @@ function AboutSection({
               onMouseLeave={() => setShowQROverlay(false)}
             >
               <div className="w-50 h-50 bg-gradient-to-br from-qc-panel to-qc-panel-2 rounded-xl flex items-center justify-center border border-qc-border">
-                <img src={wxzsm} alt="微信赞赏码" className="w-full h-full object-contain rounded-lg" />
+                <img src={wxzsm} alt={t("settings.about.wechatQrAlt")} className="w-full h-full object-contain rounded-lg" />
               </div>
               <div className="absolute -top-2 -right-2 w-7 h-7 bg-green-500 rounded-full flex items-center justify-center">
                 <i className="ti ti-brand-wechat text-white"></i>
               </div>
-              <p className="text-sm text-qc-fg-muted text-center mt-2">微信赞赏</p>
+              <p className="text-sm text-qc-fg-muted text-center mt-2">{t("settings.about.wechatTitle")}</p>
               
               {showQROverlay && (
                 <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-10 bg-qc-surface rounded-xl shadow-2xl p-4 border border-qc-border">
                   <div className="w-56 h-56 bg-qc-surface rounded-lg">
-                    <img src={wxzsm} alt="微信赞赏码" className="w-full h-full object-contain" />
+                    <img src={wxzsm} alt={t("settings.about.wechatQrAlt")} className="w-full h-full object-contain" />
                   </div>
                 </div>
               )}

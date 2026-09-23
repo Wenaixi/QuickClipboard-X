@@ -185,7 +185,7 @@ function ImageContent({ item, maxContentHeightPx }) {
 
   if (loading) {
     return <div className={`w-full ${isXSmallHeight ? 'h-full px-2' : 'min-h-[80px]'} bg-qc-panel-2 rounded flex items-center justify-center overflow-hidden`} style={autoContainerStyle}>
-      <span className="text-sm text-qc-fg-muted">加载中...</span>
+      <span className="text-sm text-qc-fg-muted">{t('common.loading')}</span>
     </div>;
   }
   if (error) {

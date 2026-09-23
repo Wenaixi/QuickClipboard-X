@@ -814,7 +814,7 @@ const EmojiTab = forwardRef(function EmojiTab({ emojiMode, onEmojiModeChange, on
               </button>
             </Tooltip>
             {skinVariants && (
-              <Tooltip content="选择肤色" placement="left" asChild>
+              <Tooltip content={t('emoji.chooseSkinTone', t('emoji.skinTone'))} placement="left" asChild>
                 <button
                   onClick={(e) =>
                     handleSkinPickerOpen(e, baseChar, skinVariants, item, section.catId)

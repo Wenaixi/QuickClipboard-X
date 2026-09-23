@@ -32,7 +32,7 @@ function SettingsHeader({ onNavigate }) {
         <SettingsSearch onNavigate={onNavigate} className="w-80" />
 
         <div className="flex items-center gap-0.5">
-          <Tooltip content="最小化" placement="bottom" asChild>
+          <Tooltip content={t('common.minimize')} placement="bottom" asChild>
             <button onClick={handleMinimize} className="h-10 w-10 inline-flex items-center justify-center hover:bg-qc-hover rounded-lg transition-colors">
               <i className="ti ti-minus text-qc-fg-muted" style={{
               fontSize: 16
@@ -40,7 +40,7 @@ function SettingsHeader({ onNavigate }) {
             </button>
           </Tooltip>
 
-          <Tooltip content="最大化" placement="bottom" asChild>
+          <Tooltip content={t('common.maximize')} placement="bottom" asChild>
             <button onClick={handleMaximize} className="h-10 w-10 inline-flex items-center justify-center hover:bg-qc-hover rounded-lg transition-colors">
               <i className="ti ti-square text-qc-fg-muted" style={{
               fontSize: 16
@@ -48,7 +48,7 @@ function SettingsHeader({ onNavigate }) {
             </button>
           </Tooltip>
 
-          <Tooltip content="关闭" placement="bottom" asChild>
+          <Tooltip content={t('common.close')} placement="bottom" asChild>
             <button onClick={handleClose} className="h-10 w-10 inline-flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors">
               <i className="ti ti-x text-qc-fg-muted hover:text-red-600" style={{
               fontSize: 16
