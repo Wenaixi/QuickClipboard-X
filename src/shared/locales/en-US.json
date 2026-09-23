@@ -1527,5 +1527,10 @@
     "fileUnknownName": "Untitled file",
     "fileNoPath": "No path info",
     "fileStoredPath": "Stored path: {{path}}"
+  },
+  "tabNav": {
+    "groups": "Groups",
+    "collapseSidebar": "Collapse sidebar",
+    "expandSidebar": "Expand sidebar"
   }
 }

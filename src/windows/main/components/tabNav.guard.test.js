@@ -66,3 +66,36 @@ test('App.jsx 不得残留 isCompactFilters 死链路(merge 咬掉消费方后�
   const code = strip(app);
   assert.doesNotMatch(code, /isCompactFilters/, 'isCompactFilters state/mediaQuery/监听必须整体删除');
 });
+
+test('粘贴状态过滤 label 必须走语言包(未粘贴/已粘贴 en 用户可见,不得裸中文)', () => {
+  const code = strip(tabNav);
+  assert.match(code, /label: t\('filter\.unpasted'\)/, '未粘贴 label 必须走 filter.unpasted 键');
+  assert.match(code, /label: t\('filter\.pasted'\)/, '已粘贴 label 必须走 filter.pasted 键');
+});
+
+test('TabNavigation 侧边栏收起/展开/分组文案必须走语言包', () => {
+  const code = strip(tabNav);
+  assert.match(code, /t\('tabNav\.collapseSidebar'\)/, '收起侧边栏 tooltip 必须走 tabNav.collapseSidebar');
+  assert.match(code, /t\('tabNav\.expandSidebar'\)/, '展开侧边栏 tooltip 必须走 tabNav.expandSidebar');
+  assert.match(code, /t\('tabNav\.groups'\)/, '分组 tooltip/文本必须走 tabNav.groups');
+  // 该文件不得残留裸"收起/展开"tooltip 字面(侧边栏收起按钮文案)。
+  assert.doesNotMatch(code, /content=\{sidebarShowLabel \? '收起侧边栏'/, '收起侧边栏 tooltip 不得裸中文');
+});
+
+test('双语包必须含 tabNav 收起/展开/分组键与 filter 粘贴状态键', () => {
+  const zh = JSON.parse(readFileSync(join(here, '../../shared/locales/zh-CN.json'), 'utf8'));
+  const en = JSON.parse(readFileSync(join(here, '../../shared/locales/en-US.json'), 'utf8'));
+  for (const [pack, label] of [[zh, 'zh'], [en, 'en']]) {
+    for (const key of ['collapseSidebar', 'expandSidebar', 'groups']) {
+      assert.ok(
+        pack.tabNav && typeof pack.tabNav[key] === 'string' && pack.tabNav[key].length > 0,
+        `${label} tabNav.${key} 必须存在且非空`,
+      );
+    }
+    assert.ok(pack.filter && typeof pack.filter.unpasted === 'string', `${label} filter.unpasted 必须存在`);
+    assert.ok(pack.filter && typeof pack.filter.pasted === 'string', `${label} filter.pasted 必须存在`);
+  }
+  // en 值必须是英文(界面文案,非数据)。
+  assert.strictEqual(en.tabNav.groups, 'Groups');
+  assert.strictEqual(en.filter.pasted, 'Pasted');
+});

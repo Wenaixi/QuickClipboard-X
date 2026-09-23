@@ -1527,5 +1527,10 @@
     "fileUnknownName": "未命名文件",
     "fileNoPath": "无路径信息",
     "fileStoredPath": "存储路径：{{path}}"
+  },
+  "tabNav": {
+    "groups": "分组",
+    "collapseSidebar": "收起侧边栏",
+    "expandSidebar": "展开侧边栏"
   }
 }

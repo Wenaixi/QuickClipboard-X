@@ -160,8 +160,8 @@ function TabNavigation({
   }];
 
   // 粘贴状态过滤(上游 v0.5 新功能,6dd9fa12 合并时定义被咬掉,引用残留):
-  const pasteFilters = [{ id: 'unpasted', label: '未粘贴', icon: 'ti ti-clipboard-x' }, {
-    id: 'pasted', label: '已粘贴', icon: 'ti ti-clipboard-check'
+  const pasteFilters = [{ id: 'unpasted', label: t('filter.unpasted') || '未粘贴', icon: 'ti ti-clipboard-x' }, {
+    id: 'pasted', label: t('filter.pasted') || '已粘贴', icon: 'ti ti-clipboard-check'
   }];
   const selectedFilters = String(contentFilter || 'all')
     .split(',')
@@ -625,7 +625,7 @@ function TabNavigation({
                 style={{ backgroundColor: 'var(--bg-titlebar-border, var(--qc-border-strong))', opacity: 0.95 }}
               />
               <div className="px-2 py-2">
-                <Tooltip content="分组" placement="right" asChild>
+                <Tooltip content={t('tabNav.groups') || '分组'} placement="right" asChild>
                   <button
                     type="button"
                     onClick={() => groupsPopupRef.current?.togglePopup?.()}
@@ -646,7 +646,7 @@ function TabNavigation({
                     <i className="ti ti-folders" style={{ fontSize: 16 }} />
                     {sidebarShowLabel && (
                       <span className="text-[12px] font-medium leading-none whitespace-nowrap">
-                        分组
+                        {t('tabNav.groups') || '分组'}
                       </span>
                     )}
                   </button>
@@ -655,7 +655,7 @@ function TabNavigation({
             </>
 
           <div className="mt-auto p-2 pt-1">
-            <Tooltip content={sidebarShowLabel ? '收起侧边栏' : '展开侧边栏'} placement="right" asChild>
+            <Tooltip content={sidebarShowLabel ? (t('tabNav.collapseSidebar') || '收起侧边栏') : (t('tabNav.expandSidebar') || '展开侧边栏')} placement="right" asChild>
               <button
                 type="button"
                 onClick={() => setIsSidebarCollapsed(prev => !prev)}
@@ -671,7 +671,7 @@ function TabNavigation({
                 />
                 {sidebarShowLabel && (
                   <span className="text-[12px] font-medium leading-none whitespace-nowrap">
-                    收起
+                    {t('tabNav.collapseSidebar') || '收起'}
                   </span>
                 )}
               </button>
