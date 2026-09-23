@@ -441,17 +441,33 @@ fn get_existing_group_dir(group: &str) -> Result<(String, PathBuf), String> {
     Ok((group, dir))
 }
 
-fn is_supported_image_file(path: &Path) -> bool {
-    let ext = path
-        .extension()
+// 可入库扩展名(INGESTIBLE):WebView2 可渲染 + image crate 可解码(或 Chromium
+// 原生支持)。TIFF/HEIC 双链全断(WebView2 不渲染、image::open 无 feature),
+// 存进无法消费的文件只有害处——保存侧拒收,旧文件仍可列表可见可删。
+fn is_ingestible_image_ext(ext: &str) -> bool {
+    matches!(
+        ext,
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "avif" | "svg" |
+        "ico" | "jfif"
+    )
+}
+
+// 可列表扩展名(LISTABLE):INGESTIBLE + TIFF/HEIC(存量文件可见可删,避免
+// 「不可见仍占盘」状态污染,与 rename_image 拒绝该模式同口径)。
+fn is_listable_image_ext(ext: &str) -> bool {
+    is_ingestible_image_ext(ext) || matches!(ext, "tiff" | "tif" | "heic" | "heif")
+}
+
+fn ext_of(path: &Path) -> String {
+    path.extension()
         .and_then(|e| e.to_str())
         .map(|e| e.to_lowercase())
-        .unwrap_or_default();
-    matches!(
-        ext.as_str(),
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "avif" | "svg" |
-        "ico" | "tiff" | "tif" | "heic" | "heif" | "jfif"
-    )
+        .unwrap_or_default()
+}
+
+// 图库列表/计数走 LISTABLE:旧 TIFF/HEIC 仍可见可删,不产生不可见占盘。
+fn is_supported_image_file(path: &Path) -> bool {
+    is_listable_image_ext(&ext_of(path))
 }
 
 fn count_images_in_dir(dir: &Path) -> usize {
@@ -625,6 +641,20 @@ fn move_to_recycle_bin(path: &Path, action: &str) -> Result<(), String> {
 pub fn save_image(group: &str, filename: &str, data: &[u8]) -> Result<ImageInfo, String> {
     let (group, target_dir) = get_existing_group_dir(group)?;
 
+    // 保存侧只接收 INGESTIBLE 格式:TIFF/HEIC 的粘贴链(image::open 无
+    // feature)与渲染链(WebView2)全断,存进无法消费的文件只有害处。
+    let ext = Path::new(filename)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+    if !ext.is_empty() && !is_ingestible_image_ext(&ext) {
+        return Err(format!(
+            "不支持保存 {} 格式图片(仅支持常见可渲染图片格式)",
+            ext
+        ));
+    }
+
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| e.to_string())?
@@ -765,8 +795,10 @@ pub fn rename_image(group: &str, old_filename: &str, new_filename: &str) -> Resu
     // 新文件名扩展名必须仍是受支持的图片格式:图库列表按扩展名白名单过滤
     // (is_supported_image_file),若放行把 a.png 改成 a.txt,rename 成功但条目
     // 从图库彻底隐藏(不可见仍占盘),属可规避的状态污染。重命名不改变图片
-    // 本体,仅文件名,后缀必须保持图片类别。
-    if !is_supported_image_file(&new_path) {
+    // 本体,仅文件名,后缀必须保持图片类别。列表走 LISTABLE(旧 TIFF/HEIC
+    // 可见可删),但改名不得把可入库格式改成不可入库格式。
+    let new_ext = ext_of(&new_path);
+    if !is_listable_image_ext(&new_ext) || !is_ingestible_image_ext(&ext_of(&old_path)) {
         return Err("仅支持常见图片格式的重命名".to_string());
     }
 
@@ -935,8 +967,12 @@ mod tests {
         let rename_end = src.find("pub fn move_image_to_group").expect("缺 move_image_to_group");
         let rename_body = &src[rename_start..rename_end];
         assert!(
-            rename_body.contains("is_supported_image_file(&new_path)"),
-            "rename_image 必须校验新文件名扩展名为受支持图片格式"
+            rename_body.contains("is_listable_image_ext(&new_ext)"),
+            "rename_image 必须校验新文件名扩展名为可列表图片格式"
+        );
+        assert!(
+            rename_body.contains("is_ingestible_image_ext(&ext_of(&old_path))"),
+            "rename_image 不得把可入库格式改成不可入库格式(源可入库才允许)"
         );
         assert!(
             rename_body.contains("仅支持常见图片格式的重命名"),
@@ -945,6 +981,53 @@ mod tests {
         assert!(
             !rename_body.contains("fs::rename(&old_path, &new_path)\n        .map_err"),
             "扩展名校验必须早于实际重命名(stack 检验:校验先于 rename)"
+        );
+    }
+
+    // 保存侧只接收 INGESTIBLE 格式:TIFF/HEIC 粘贴链(image::open 无 feature)
+    // 与渲染链(WebView2)全断,入库即破图+粘贴失败。save_image 必须按
+    // INGESTIBLE 拒收;列表白名单保持 LISTABLE(旧文件可见可删)。
+    #[test]
+    fn save_rejects_non_ingestible_formats_but_list_keeps_them() {
+        let src = stripped_source();
+        // 可入库白名单必须排除 TIFF/HEIC。
+        let ingest_body = {
+            let start = src.find("fn is_ingestible_image_ext").expect("缺 INGESTIBLE");
+            let end = src.find("fn is_listable_image_ext").expect("缺 LISTABLE");
+            &src[start..end]
+        };
+        assert!(
+            ingest_body.contains("\"png\" | \"jpg\" | \"jpeg\" | \"gif\" | \"webp\" | \"bmp\" | \"avif\" | \"svg\" |"),
+            "INGESTIBLE 白名单必须保留全部可渲染格式"
+        );
+        assert!(
+            !ingest_body.contains("tiff") && !ingest_body.contains("heic"),
+            "INGESTIBLE 必须排除 TIFF/HEIC(双链全断)"
+        );
+        // 可列表白名单必须含 TIFF/HEIC(存量可见可删)。
+        let listable_body = {
+            let start = src.find("fn is_listable_image_ext").expect("缺 LISTABLE");
+            let end = start + 400;
+            &src[start..end]
+        };
+        assert!(
+            listable_body.contains("is_ingestible_image_ext(ext)"),
+            "LISTABLE 必须复用 INGESTIBLE"
+        );
+        assert!(
+            listable_body.contains("tiff\" | \"tif\" | \"heic\" | \"heif\""),
+            "LISTABLE 必须保留 TIFF/HEIC 供存量可见可删"
+        );
+        // save_image 必须用 INGESTIBLE 拒收非入库格式。
+        let save_start = src.find("pub fn save_image").expect("缺 save_image");
+        let save_body = &src[save_start..save_start + 600];
+        assert!(
+            save_body.contains("is_ingestible_image_ext(&ext)"),
+            "save_image 必须按 INGESTIBLE 拒收 TIFF/HEIC"
+        );
+        assert!(
+            save_body.contains("不支持保存"),
+            "非入库格式必须返回明确错误"
         );
     }
 
