@@ -761,8 +761,7 @@ mod tests {
             "render_current 渲染闭包必须经 run_on_main_thread_result 在主线程执行"
         );
         assert!(
-            !body.split("
-").iter().any(|line| {
+            !body.lines().any(|line| {
                 line.contains("decode_and_premultiply_image(&path)")
                     && !line.contains("spawn_blocking")
                     && !line.contains("//")
