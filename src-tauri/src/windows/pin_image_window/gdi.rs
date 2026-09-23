@@ -409,11 +409,27 @@ fn premultiply(channel: u32, alpha: u32) -> u32 {
 /// 渲染当前状态到窗口:读取状态透明度并重渲染(菜单透明度档/阴影开关用)。
 /// 解码+预乘放阻塞线程池,GDI 渲染经主线程委托——窗口建在主线程,所有
 /// 对窗口的 UpdateLayeredWindow 必须与窗口线程一致(跨线程 GDI 操作无效)。
-pub(crate) fn render_current(label: &str, hwnd: HWND) -> Result<(), String> {
+/// 与 create_pin_image_window 同构:CPU 密集解码段放 spawn_blocking,
+/// 渲染闭包经 run_on_main_thread_result 在主线程执行,避免 4K 重解码
+/// 830 万像素占住 tokio worker(菜单快速切换透明度时卡顿)与跨线程 ULW。
+pub(crate) async fn render_current(
+    label: &str,
+    hwnd: HWND,
+    app: &tauri::AppHandle,
+) -> Result<(), String> {
     let state = pin_state(label);
     let path = crate::windows::pin_image_window::pin_image_file_path(label)?;
-    let (w, h, bgra) = decode_and_premultiply_image(&path)?;
-    render_premultiplied(hwnd, w, h, &bgra, state.opacity)
+    let opacity = state.opacity;
+    let hwnd_raw = hwnd.0 as isize;
+    let premultiplied = tokio::task::spawn_blocking(move || decode_and_premultiply_image(&path))
+        .await
+        .map_err(|e| format!("贴图解码线程失败: {e}"))??;
+    let (w, h, bgra) = premultiplied;
+    let app = app.clone();
+    run_on_main_thread_result(&app, move || {
+        render_premultiplied(HWND(hwnd_raw as *mut core::ffi::c_void), w, h, &bgra, opacity)
+    })
+    .await
 }
 
 /// 切换置顶:用 SetWindowPos 在 TOPMOST/NOTOPMOST 间切换(不抢焦点)
@@ -712,6 +728,47 @@ mod tests {
         assert!(
             render_body.contains("copy_from_slice(bgra)"),
             "GDI 渲染函数必须直接拷入预乘缓冲"
+        );
+    }
+
+    // 菜单重渲染路径(透明度档/阴影开关)与建窗同款双线程协议:render_current
+    // 必须 async,解码段走 spawn_blocking,渲染闭包经 run_on_main_thread_result
+    // 在主线程执行——否则 4K 重解码 830 万像素在 tokio worker 同步执行(菜单
+    // 快速切换透明度卡顿)且 UpdateLayeredWindow 跨线程 GDI 操作无效。
+    #[test]
+    fn render_current_uses_blocking_decode_and_main_thread_render() {
+        let stripped: String = gdi_source()
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("
+");
+        let start = stripped
+            .find("pub(crate) async fn render_current")
+            .expect("render_current 必须 async(双线程协议)");
+        let end = stripped[start..]
+            .find("
+}
+")
+            .map(|i| start + i)
+            .unwrap_or(stripped.len());
+        let body = &stripped[start..end];
+        assert!(
+            body.contains("spawn_blocking"),
+            "render_current 解码段必须走 spawn_blocking(CPU 密集段不得在 tokio worker 同步执行)"
+        );
+        assert!(
+            body.contains("run_on_main_thread_result"),
+            "render_current 渲染闭包必须经 run_on_main_thread_result 在主线程执行"
+        );
+        assert!(
+            !body.split("
+").iter().any(|line| {
+                line.contains("decode_and_premultiply_image(&path)")
+                    && !line.contains("spawn_blocking")
+                    && !line.contains("//")
+            }),
+            "解码不得在 render_current 体内直接同步调用(必须经 spawn_blocking 委托)"
         );
     }
 
