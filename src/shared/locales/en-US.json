@@ -645,6 +645,8 @@
       "screenshotQuickPinDesc": "Create pin image immediately after selection",
       "screenshotQuickOcr": "Quick Screenshot OCR",
       "screenshotQuickOcrDesc": "OCR recognize and copy text immediately after selection",
+      "recordingShortcut": "Screen Recording Hotkey",
+      "recordingShortcutDesc": "Start or stop screen recording. Press the same key again to stop",
       "screenshotInternalTitle": "Screenshot Internal Shortcuts",
       "screenshotInternalDesc": "Shortcuts inside screenshot window",
       "screenshotToolSwitch": "Switch Tool",

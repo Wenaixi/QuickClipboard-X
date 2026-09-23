@@ -138,6 +138,9 @@ function ShortcutsSection({ settings, onSettingChange, activeTab }) {
               <SettingItem label={t('settings.shortcuts.screenshotQuickOcr')} description={t('settings.shortcuts.screenshotQuickOcrDesc')}>
                 <ShortcutInput value={settings.screenshotQuickOcrShortcut} onChange={value => handleShortcutChange('screenshotQuickOcrShortcut', value)} onReset={() => handleShortcutChange('screenshotQuickOcrShortcut', '')} hasError={hasErrorStatus('screenshotQuickOcrShortcut', 'screenshot_quick_ocr')} errorMessage={getErrorMessage('screenshotQuickOcrShortcut', 'screenshot_quick_ocr')} />
               </SettingItem>
+              <SettingItem label={t('settings.shortcuts.recordingShortcut')} description={t('settings.shortcuts.recordingShortcutDesc')}>
+                <ShortcutInput value={settings.recordingShortcut} onChange={value => handleShortcutChange('recordingShortcut', value)} onReset={() => handleShortcutChange('recordingShortcut', 'Ctrl+Shift+R')} hasError={hasErrorStatus('recordingShortcut', 'recording')} errorMessage={getErrorMessage('recordingShortcut', 'recording')} />
+              </SettingItem>
             </SettingsSection>
             <SettingsSection title={t('settings.shortcuts.screenshotInternalTitle')} description={t('settings.shortcuts.screenshotInternalDesc')}>
               <SettingItem label={t('settings.shortcuts.screenshotToolSwitch')} description={t('settings.shortcuts.screenshotToolSwitchDesc')}>

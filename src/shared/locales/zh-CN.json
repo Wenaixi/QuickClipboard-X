@@ -645,6 +645,8 @@
       "screenshotQuickPinDesc": "选区完成后直接创建贴图",
       "screenshotQuickOcr": "快速截屏OCR",
       "screenshotQuickOcrDesc": "选区完成后直接OCR识别并复制文字",
+      "recordingShortcut": "屏幕录制热键",
+      "recordingShortcutDesc": "开始或停止屏幕录制，再次按同一热键即停止",
       "screenshotInternalTitle": "截屏内快捷键",
       "screenshotInternalDesc": "截屏窗口内的操作快捷键",
       "screenshotToolSwitch": "切换工具",
