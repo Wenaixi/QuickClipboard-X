@@ -71,7 +71,7 @@ export async function loadGroups() {
 }
 
 // 添加分组
-export async function addGroup(name, icon = 'ti ti-folder', color = '#ffffff') {
+export async function addGroup(name, icon = 'ti ti-folder', color = '#dc2626') {
   try {
     const newGroup = await apiAddGroup(name, icon, color)
     await loadGroups()
