@@ -15,6 +15,8 @@ pub struct TargetDataInfo {
     pub has_database: bool,
     pub has_images: bool,
     pub has_image_library: bool,
+    pub has_pin_images: bool,
+    pub has_app_icons: bool,
     pub database_size: u64,
     pub images_count: usize,
     pub images_size: u64,
@@ -26,6 +28,8 @@ pub fn check_target_has_data(target_dir: &Path) -> Result<TargetDataInfo, String
     let db_path = target_dir.join("quickclipboard.db");
     let images_dir = target_dir.join("clipboard_images");
     let image_library_dir = target_dir.join("image_library");
+    let pin_images_dir = target_dir.join("pin_images");
+    let app_icons_dir = target_dir.join("app_icons");
     
     let has_database = db_path.exists();
     let database_size = if has_database {
@@ -81,12 +85,43 @@ pub fn check_target_has_data(target_dir: &Path) -> Result<TargetDataInfo, String
     } else {
         (false, 0, 0)
     };
-    
+
+    // 贴图/应用图标目录同样计入「目标已有数据」:迁移冲突检测漏掉它们时,
+    // 目标目录只有贴图/图标会被 source_only 静默清走,用户无任何提示。
+    let (has_pin_images, _, _) = if pin_images_dir.exists() {
+        let mut count = 0usize;
+        if let Ok(entries) = fs::read_dir(&pin_images_dir) {
+            for entry in entries.flatten() {
+                if entry.path().is_file() {
+                    count += 1;
+                }
+            }
+        }
+        (count > 0, count, 0u64)
+    } else {
+        (false, 0, 0)
+    };
+    let (has_app_icons, _, _) = if app_icons_dir.exists() {
+        let mut count = 0usize;
+        if let Ok(entries) = fs::read_dir(&app_icons_dir) {
+            for entry in entries.flatten() {
+                if entry.path().is_file() {
+                    count += 1;
+                }
+            }
+        }
+        (count > 0, count, 0u64)
+    } else {
+        (false, 0, 0)
+    };
+
     Ok(TargetDataInfo {
-        has_data: has_database || has_images || has_image_library,
+        has_data: has_database || has_images || has_image_library || has_pin_images || has_app_icons,
         has_database,
         has_images,
         has_image_library,
+        has_pin_images,
+        has_app_icons,
         database_size,
         images_count,
         images_size,
@@ -1434,6 +1469,27 @@ mod tests {
             body.contains("add_dir_to_zip(base, &path, prefix, zip, options)"),
             "命中子目录必须递归调用自身"
         );
+    }
+
+    // 迁移冲突检测必须把贴图/应用图标目录计入「目标已有数据」:否则目标
+    // 目录只有贴图/图标时 has_data 误判为 false,source_only 静默删除目标
+    // 贴图与图标,用户无任何提示(仅备份能兜底)。
+    #[test]
+    fn check_target_has_data_includes_pin_images_and_app_icons() {
+        let src = strip_line_comments(&source_file("src/services/data_management/mod.rs"));
+        let body = fn_body(&src, "check_target_has_data");
+        // has_data 必须覆盖全部会被迁移清理的目录:数据库/图片/图库/贴图/图标。
+        assert!(
+            body.contains("has_database || has_images || has_image_library || has_pin_images || has_app_icons"),
+            "has_data 必须含贴图与图标目录"
+        );
+        // 必须声明这两个目录变量,否则上面的 OR 分支引用未定义变量编译失败。
+        for dir in ["pin_images_dir", "app_icons_dir"] {
+            assert!(
+                body.contains(&format!("target_dir.join(\"{}\")", dir.strip_suffix("_dir").unwrap())),
+                "必须探测 {dir} 目录",
+            );
+        }
     }
 
     // 关库早返不重开:export_data_zip close_database 后必须保证
