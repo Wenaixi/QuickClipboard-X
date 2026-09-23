@@ -249,7 +249,11 @@ async fn run_ai_action(
     if !settings.screenshot_ai_enabled {
         return Err("截图 AI 识别已关闭".to_string());
     }
-    if super::ai_vision::validate_configuration(&settings.ai_api_key, &settings.ai_base_url, &settings.ai_model).is_err() {
+    // AI API key 从系统凭据库取(keyring),settings.json 已不再存明文。
+    let ai_api_key = crate::services::secure_credentials::get_ai_api_key()
+        .map_err(|e| format!("读取 AI API key 失败: {e}"))?
+        .unwrap_or_default();
+    if super::ai_vision::validate_configuration(&ai_api_key, &settings.ai_base_url, &settings.ai_model).is_err() {
         return Err("截图 AI 识别尚未完成配置".to_string());
     }
     if !settings.screenshot_ai_cloud_confirmed {
@@ -268,7 +272,7 @@ async fn run_ai_action(
     }
     let result = recognize_image(
         &stored.absolute_path,
-        &settings.ai_api_key,
+        &ai_api_key,
         &settings.ai_base_url,
         &settings.ai_model,
         Some(&settings.screenshot_ai_prompt),

@@ -5,6 +5,16 @@ export async function reloadSettings() {
   return await invoke('reload_settings')
 }
 
+// 查询是否已配置 AI API key(keyring 探测,reload 不再回明文)
+export async function hasAiApiKey() {
+  return await invoke('has_ai_api_key')
+}
+
+// 清空 AI API key(keyring)
+export async function deleteAiApiKey() {
+  return await invoke('delete_ai_api_key')
+}
+
 // 保存设置
 export async function saveSettings(settings) {
   return await invoke('save_settings', { settings })

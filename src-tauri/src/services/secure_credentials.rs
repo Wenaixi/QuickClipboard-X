@@ -3,6 +3,42 @@ use sha2::{Digest, Sha256};
 
 const WEBDAV_SERVICE: &str = "quickclipboard.webdav";
 const WEBDAV_E2EE_SERVICE: &str = "quickclipboard.webdav.e2ee";
+const AI_SERVICE: &str = "quickclipboard.ai";
+
+// AI API key 是单键凭据(无 url/username 维度),账号固定为固定标签。
+pub fn get_ai_api_key() -> Result<Option<String>, String> {
+    match ai_entry()?.get_password() {
+        Ok(key) => Ok(Some(key)),
+        Err(KeyringError::NoEntry) => Ok(None),
+        Err(e) => Err(format!("读取 AI API key 系统凭据失败: {}", e)),
+    }
+}
+
+pub fn has_ai_api_key() -> Result<bool, String> {
+    get_ai_api_key().map(|key| key.is_some())
+}
+
+pub fn set_ai_api_key(key: &str) -> Result<(), String> {
+    if key.trim().is_empty() {
+        return delete_ai_api_key();
+    }
+    ai_entry()?
+        .set_password(key.trim())
+        .map_err(|e| format!("保存 AI API key 系统凭据失败: {}", e))
+}
+
+pub fn delete_ai_api_key() -> Result<(), String> {
+    let entry = ai_entry()?;
+    match entry.delete_credential() {
+        Ok(()) | Err(KeyringError::NoEntry) => Ok(()),
+        Err(e) => Err(format!("删除 AI API key 系统凭据失败: {}", e)),
+    }
+}
+
+fn ai_entry() -> Result<Entry, String> {
+    Entry::new(AI_SERVICE, "default")
+        .map_err(|e| format!("访问系统凭据库失败: {}", e))
+}
 
 pub fn get_webdav_password(url: &str, username: &str) -> Result<Option<String>, String> {
     let entry = webdav_entry(url, username)?;

@@ -83,6 +83,11 @@ pub fn save_settings(mut settings: AppSettings, app: tauri::AppHandle) -> Result
             &webdav_password,
         )?;
     }
+    // AI API key 同款:前端全量保存链把 key 取出来写系统凭据库,不落 settings.json。
+    let ai_api_key = std::mem::take(&mut settings.ai_api_key);
+    if !ai_api_key.is_empty() {
+        crate::services::secure_credentials::set_ai_api_key(&ai_api_key)?;
+    }
     if settings.settings_migration_version.is_none()
         || settings.settings_migration_version < old_settings.settings_migration_version
     {
@@ -188,8 +193,25 @@ pub fn save_settings(mut settings: AppSettings, app: tauri::AppHandle) -> Result
 }
 
 #[tauri::command]
+/// 查询是否已配置 AI API key:迁移 keyring 后 reload_settings 返回的设置
+/// JSON 不再含 aiApiKey 键(skip_serializing),前端需此命令感知「已配置」。
+#[tauri::command]
+pub fn has_ai_api_key() -> bool {
+    crate::services::secure_credentials::has_ai_api_key().unwrap_or(false)
+}
+
+/// 清空 AI API key(重置设置到默认时一并清系统凭据库,与截秘密码同款)。
+#[tauri::command]
+pub fn delete_ai_api_key() -> Result<(), String> {
+    crate::services::secure_credentials::delete_ai_api_key()
+}
+
+#[tauri::command]
 pub fn reset_settings_to_default(app: tauri::AppHandle) -> Result<(), String> {
     let defaults = AppSettings::default();
+    // 重置到默认同时清空 AI key 系统凭据库:keyring 里的 key 不随 settings.json
+    // 重置消失,显式删除避免「重置后旧凭据仍生效」。
+    crate::services::secure_credentials::delete_ai_api_key()?;
     save_settings(defaults, app)
 }
 

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from '@shared/store/toastStore';
+import { hasAiApiKey } from '@shared/api/settings';
 import SettingsSection from '../components/SettingsSection';
 import SettingItem from '../components/SettingItem';
 import Input from '@shared/components/ui/Input';
@@ -16,6 +17,23 @@ function AIConfigSection({
     t
   } = useTranslation();
   const [testing, setTesting] = useState(false);
+  // AI API key 已迁系统凭据库:reload_settings 不再返回明文 key,输入框
+  // 初始值为空串;「已配置」状态由后端 keyring 探测命令回读,参照
+  // WebdavSection 的 hasSavedWebdavPassword 先例,避免用户困惑于「我明明
+  // 填过 key 为什么框是空的」。
+  const [hasKey, setHasKey] = useState(false);
+  const [loadedKeyFlag, setLoadedKeyFlag] = useState(false);
+  if (!loadedKeyFlag) {
+    hasAiApiKey()
+      .then(saved => {
+        setLoadedKeyFlag(true);
+        setHasKey(Boolean(saved));
+      })
+      .catch(() => {
+        setLoadedKeyFlag(true);
+        setHasKey(false);
+      });
+  }
   // 推荐模型必须是视觉模型：Qwen2-7B-Instruct 会被后端 ensure_vision_model 拒绝
   // （含 instruct 且不含 vision/vl），列为推荐会让用户必然测试失败。
   const modelOptions = [{
@@ -47,7 +65,7 @@ function AIConfigSection({
   };
   return <SettingsSection title={t('settings.aiConfig.title')} description={t('settings.aiConfig.description')}>
       <SettingItem label={t('settings.aiConfig.apiKey')} description={t('settings.aiConfig.apiKeyDesc')}>
-        <Input type="password" value={settings.aiApiKey || ''} onChange={e => onSettingChange('aiApiKey', e.target.value)} placeholder={t('settings.aiConfig.apiKeyPlaceholder')} className="w-80" />
+        <Input type="password" value={settings.aiApiKey || ''} onChange={e => onSettingChange('aiApiKey', e.target.value)} placeholder={t(hasKey ? 'settings.aiConfig.apiKeyConfigured' : 'settings.aiConfig.apiKeyPlaceholder')} className="w-80" />
       </SettingItem>
 
       <SettingItem label={t('settings.aiConfig.model')} description={t('settings.aiConfig.modelDesc')}>

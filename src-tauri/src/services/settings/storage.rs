@@ -272,14 +272,28 @@ impl SettingsStorage {
                 settings.webdav_password.clear();
             }
         }
+        // AI API key 迁移:成功臂清内存明文;失败臂保留明文且**不置 migrated 标志、
+        // 不触发 save**——与 webdav 先例不同,这是红线:skip_serializing 落盘会抹掉
+        // 磁盘明文,「待下次重试」只对本进程内存成立,重启后 key 永久丢失。
+        // 失败时磁盘明文保持原样,下次启动可继续迁移。
+        let had_legacy_ai_api_key = !settings.ai_api_key.is_empty();
+        if had_legacy_ai_api_key {
+            match crate::services::secure_credentials::set_ai_api_key(&settings.ai_api_key) {
+                Ok(()) => settings.ai_api_key.clear(),
+                Err(e) => eprintln!("迁移 AI API key 到系统凭据库失败: {}", e),
+            }
+        }
         // 守不变量:手改/旧 JSON 可能留下 hide=false/hover=true 违规组合,
         // 加载时统一归一化,防止下次开启 hide 时意外弹出触发条
         settings.normalize_edge_hover_invariant();
         let normalized = settings.normalize_app_filter_blocklist();
+        // AI key 迁移成功才计入 migrated:失败臂保留明文不落盘,只有成功臂连同
+        // 其他迁移一起触发 save(此时内存已清,skip_serializing 不写磁盘)。
         let migrated = Self::migrate_settings(&mut settings)
             || normalized
             || has_legacy_lan_sync_settings
-            || had_legacy_webdav_password;
+            || had_legacy_webdav_password
+            || had_legacy_ai_api_key && settings.ai_api_key.is_empty();
 
         if migrated {
             let _ = Self::save(&settings);
@@ -757,6 +771,51 @@ mod tests {
         assert!(
             !body.contains("Err(e) => settings.webdav_password.clear()"),
             "迁移失败臂禁止清除明文密码(凭据库不可写时唯一副本被抹除)"
+        );
+    }
+
+    // AI API key 迁移红线(与 webdav 先例不同):迁移失败时**不得**因
+    // migrated 触发 save——skip_serializing 落盘会抹掉磁盘明文,「待下次
+    // 重试」只对本进程内存成立,重启后 key 永久丢失。失败臂必须保留明文
+    // 原样,且成功臂清空后 migrated 才计入。
+    #[test]
+    fn ai_key_failed_migration_does_not_trigger_save_which_would_erase_disk_plaintext() {
+        let source = std::fs::read_to_string(format!(
+            "{}/src/services/settings/storage.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("找不到 storage.rs");
+        let stripped: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        // 迁移块含失败臂保留明文 + 成功臂才 clear。
+        let has_ai_migration = source.contains("set_ai_api_key(&settings.ai_api_key)");
+        assert!(
+            has_ai_migration,
+            "load 必须迁移 AI API key 到系统凭据库"
+        );
+        assert!(
+            source.contains("Err(e) => eprintln!(\"迁移 AI API key 到系统凭据库失败\""),
+            "AI key 迁移失败臂必须保留明文(不 clear),由注释红线语义锁死"
+        );
+        // 关键红线:失败臂不允许走 `had_legacy_ai_api_key && settings.ai_api_key.is_empty()`
+        // 这一成功态路径触发 save;只有成功臂清空才计入 migrated(见 migrated 表达式)。
+        let migrated_pos = source.find("|| had_legacy_ai_api_key && settings.ai_api_key.is_empty();")
+            .expect("migrated 必须仅在成功清空后才计入 AI key 迁移");
+        assert!(
+            source[migrated_pos..]
+                .contains("if migrated {\n            let _ = Self::save(&settings);")
+                || source[migrated_pos..].contains("Self::save(&settings)"),
+            "save 触发必须严格依赖 migrated 成功态"
+        );
+        // 失败臂不修改明文:AI 迁移失败分支结构检查(成功才清空)。
+        let ok_clear = source.contains("Ok(()) => settings.ai_api_key.clear()");
+        assert!(ok_clear, "成功臂必须清内存明文(迁移完成)");
+        assert!(
+            !source.contains("Err(e) => settings.ai_api_key.clear()"),
+            "失败臂禁止清内存明文(否则 migrated 判定与磁盘抹除双失守)"
         );
     }
 }

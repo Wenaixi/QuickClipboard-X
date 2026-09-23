@@ -887,7 +887,8 @@
       "testDesc": "Test if current AI configuration works",
       "testButton": "Test Connection",
       "testSuccess": "AI configuration works",
-      "testFailed": "AI configuration test failed: {{error}}"
+      "testFailed": "AI configuration test failed: {{error}}",
+      "apiKeyConfigured": "Saved (system credential store)"
     },
     "translation": {
       "title": "AI Translation",

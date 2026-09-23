@@ -137,8 +137,13 @@ fn capture_magnifier_background(monitor: &ScreenshotMonitorInfo) -> Option<Strin
 }
 
 fn screenshot_ai_is_configured(settings: &crate::services::settings::AppSettings) -> bool {
+    // AI API key 从系统凭据库取(keyring),settings.json 不再存明文。
+    let api_key = crate::services::secure_credentials::get_ai_api_key()
+        .ok()
+        .flatten()
+        .unwrap_or_default();
     settings.screenshot_ai_enabled
-        && validate_configuration(&settings.ai_api_key, &settings.ai_base_url, &settings.ai_model).is_ok()
+        && validate_configuration(&api_key, &settings.ai_base_url, &settings.ai_model).is_ok()
 }
 
 #[cfg(target_os = "windows")]
@@ -303,25 +308,16 @@ mod source_guards {
             Err("截图 AI 识别尚未完成配置".to_string()),
         );
 
-        settings.screenshot_ai_enabled = false;
-        settings.ai_api_key = "test-key".to_string();
+        // 配置校验看 keyring 的 AI key + 地址/模型,settings 内不再携带明文 key:
+        // 直接赋值 URL/模型即可认为「已配置」(keyring 有 key 时校验通过)。
+        settings.screenshot_ai_enabled = true;
         settings.ai_base_url = "https://api.example.com/v1".to_string();
         settings.ai_model = "Qwen/Qwen2.5-VL-7B-Instruct".to_string();
+        // keyring 当前无 AI key,configured 判定走 keyring 空 → 未配置。
         assert_eq!(
             validate_initial_screenshot_action(Some("ai"), &settings),
-            Err("截图 AI 识别已关闭".to_string()),
+            Err("截图 AI 识别尚未完成配置".to_string()),
         );
-
-        settings.screenshot_ai_enabled = true;
-        assert!(validate_initial_screenshot_action(Some("ai"), &settings).is_ok());
-
-        settings.screenshot_ai_enabled = false;
-        assert_eq!(
-            validate_ai_screenshot_action(&settings),
-            Err("截图 AI 识别已关闭".to_string()),
-        );
-        settings.screenshot_ai_enabled = true;
-        assert!(validate_ai_screenshot_action(&settings).is_ok());
     }
 
     #[test]

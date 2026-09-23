@@ -245,6 +245,8 @@ pub fn run() {
                 commands::reload_settings,
                 commands::save_settings,
                 commands::reset_settings_to_default,
+                commands::has_ai_api_key,
+                commands::delete_ai_api_key,
                 commands::set_edge_hide_enabled,
                 commands::get_all_windows_info_cmd,
                 commands::is_portable_mode,

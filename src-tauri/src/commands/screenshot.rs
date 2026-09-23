@@ -121,8 +121,14 @@ fn screenshot_ai_config_is_valid(api_key: &str, base_url: &str, model: &str) -> 
 #[tauri::command]
 pub fn get_screenshot_ai_config_status() -> bool {
     let settings = crate::services::settings::get_settings();
+    // AI API key 已迁系统凭据库(skip_serializing 不再进 settings.json),
+    // 校验/测试时从 keyring 取 key,取不到视为未配置(与空 key 同语义)。
+    let api_key = crate::services::secure_credentials::get_ai_api_key()
+        .ok()
+        .flatten()
+        .unwrap_or_default();
     screenshot_ai_config_is_valid(
-        &settings.ai_api_key,
+        &api_key,
         &settings.ai_base_url,
         &settings.ai_model,
     )
@@ -131,8 +137,11 @@ pub fn get_screenshot_ai_config_status() -> bool {
 #[tauri::command]
 pub async fn test_screenshot_ai_config() -> Result<(), String> {
     let settings = crate::services::settings::get_settings();
+    let api_key = crate::services::secure_credentials::get_ai_api_key()
+        .map_err(|e| e)?
+        .unwrap_or_default();
     crate::services::screenshot::test_configuration(
-        &settings.ai_api_key,
+        &api_key,
         &settings.ai_base_url,
         &settings.ai_model,
     )

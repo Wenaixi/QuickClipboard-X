@@ -100,6 +100,9 @@ pub struct AppSettings {
 
     // AI翻译设置
     pub ai_translation_enabled: bool,
+    // AI API key 是凭据,不进 settings.json 明文落盘(与 webdav_password 同款
+    // 安全基线):落盘/回读跳过,由系统凭据库(keyring)存取,load 时迁移旧明文。
+    #[serde(default, skip_serializing)]
     pub ai_api_key: String,
     pub ai_model: String,
     pub ai_base_url: String,
