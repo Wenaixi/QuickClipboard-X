@@ -296,6 +296,19 @@ function start() {
       undo();
     }
   });
+  // 关闭请求确认:Esc 主路径已拦截,但 Alt+F4/系统关闭走 onCloseRequested——
+  // 有未保存形状时先确认再放行,与 Esc/保存成功路径同口径(不确认则
+  // 拦截关闭,避免按 Alt+F4 静默丢全部绘制)。保存成功路径在 shape 弹栈
+  // 后 close(),不受影响(与 textEditor hasChangesRef 复位同语义)。
+  window.onCloseRequested(async (event) => {
+    if (shapes.length > 0 || drawing) {
+      const confirmed = await showConfirm(
+        i18n.t('whiteboard.confirmDiscardMessage'),
+        i18n.t('whiteboard.confirmDiscardTitle'),
+      );
+      if (!confirmed) event.preventDefault();
+    }
+  });
   // 默认钢笔激活。
   document.getElementById('tool-pen')?.classList.add('active');
   document.getElementById('color-0')?.classList.add('active');

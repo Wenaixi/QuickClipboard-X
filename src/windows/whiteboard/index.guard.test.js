@@ -181,6 +181,27 @@ test('白板 Esc 有未保存内容必须先确认再关窗', () => {
   );
 });
 
+// Alt+F4/系统关闭走 onCloseRequested(区别于 Esc 的 keydown)——白板此前
+// 只有 Esc 有确认,按 Alt+F4 仍会静默丢未保存内容。护栏锁定:注册关闭
+// 请求回调、未保存判定一致、未确认必须 preventDefault 拦截。
+test('白板 Alt+F4 等关闭请求必须先确认,未确认 preventDefault 拦截', () => {
+  const closePos = bare.indexOf('onCloseRequested(async (event) =>');
+  assert.ok(closePos !== -1, '必须注册 onCloseRequested 关闭请求回调');
+  const confirmBody = bare.slice(closePos, closePos + 400);
+  assert.ok(
+    confirmBody.includes('shapes.length > 0 || drawing'),
+    '关闭请求回调必须判定有未保存形状或正在绘制',
+  );
+  assert.ok(
+    confirmBody.includes('showConfirm('),
+    '有未保存内容时关闭请求必须走 showConfirm 确认',
+  );
+  assert.ok(
+    confirmBody.includes('if (!confirmed) event.preventDefault()'),
+    '未确认必须 preventDefault 拦截关闭,不得静默丢弃',
+  );
+});
+
 test('白板工具按钮文本走语言包(i18n.t)不再静态中文', () => {
   const setup = bodyOf('function setupToolButtons', 'function startDraw');
   assert.ok(
