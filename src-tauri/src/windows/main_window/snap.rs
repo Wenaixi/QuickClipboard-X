@@ -979,6 +979,14 @@ pub fn is_window_snapped() -> bool {
 pub fn restore_edge_snap_on_startup(window: &WebviewWindow) -> Result<(), String> {
     let settings = crate::get_settings();
 
+    // 启动/重建后的置顶形态初始化:窗口以 alwaysOnTop:true 建窗(tauri.conf/
+    // WebviewWindowBuilder),但置顶偏好 is_pinned 默认 false——守卫下 refresh
+    // 不再无条件 TOPMOST,也无路径纠正,导致标题栏「未固定」而窗口实际置顶的
+    // 永久分歧。此函数是启动/重建后统一入口,未置顶偏好必须主动清除 TOPMOST。
+    if !super::state::is_pinned() {
+        let _ = window.set_always_on_top(false);
+    }
+
     if !settings.edge_hide_enabled {
         return Ok(());
     }
@@ -1039,6 +1047,27 @@ mod tests {
 
     // snap.rs 自身源码缓存:多个源码字面护栏共享,避免每测一次 IO
     static SNAP_SOURCE: OnceLock<String> = OnceLock::new();
+
+    // 启动/重建后的置顶形态初始化:主窗口 alwaysOnTop:true 建窗但置顶偏好
+    // is_pinned 默认 false,R129 守卫后 refresh 不再无条件 TOPMOST 也无路径
+    // 纠正,标题栏「未固定」而窗口实际置顶的永久分歧。restore_edge_snap_on_startup
+    // 是启动/重建后统一入口,未置顶偏好必须主动清除 TOPMOST(早返分支前执行)。
+    #[test]
+    fn restore_edge_snap_on_startup_converges_topmost_by_pin_preference() {
+        let src = strip_line_comments(snap_source());
+        let start = src
+            .find("pub fn restore_edge_snap_on_startup")
+            .expect("缺 restore_edge_snap_on_startup");
+        let after = &src[start..];
+        let body = &after[..after.find("
+pub fn ").unwrap_or(after.len())];
+        let pre_return = &body[..body.find("if !settings.edge_hide_enabled").unwrap_or(body.len())];
+        assert!(
+            pre_return.contains("!super::state::is_pinned()")
+                && pre_return.contains("set_always_on_top(false)"),
+            "启动/重建后必须按置顶偏好初始化 z 序:未置顶时清除 alwaysOnTop 建窗留下的 TOPMOST"
+        );
+    }
 
     fn snap_source() -> &'static str {
         SNAP_SOURCE.get_or_init(|| {
