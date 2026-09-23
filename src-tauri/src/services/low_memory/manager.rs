@@ -430,23 +430,23 @@ fn recreate_main_window(app: &AppHandle) -> Result<(), String> {
     .shadow(false)
     .always_on_top(true)
     .skip_taskbar(true)
-    .visible(false) 
+    .visible(false)
     .resizable(true)
     .maximizable(false)
     .minimizable(false)
     .center()
     .focused(false)
     .visible_on_all_workspaces(true)
-    .disable_drag_drop_handler() 
+    .disable_drag_drop_handler()
     .build()
     .map_err(|e| format!("重建主窗口失败: {}", e))?;
 
     if settings.remember_window_size {
         crate::windows::main_window::apply_saved_window_size(&window, width, height);
     }
-    
+
     let _ = window.set_focusable(false);
-    
+
     #[cfg(debug_assertions)]
     let _ = window.open_devtools();
 
@@ -459,9 +459,20 @@ fn recreate_main_window(app: &AppHandle) -> Result<(), String> {
 
     crate::init_edge_monitor(window.clone());
 
-    let _ = crate::windows::main_window::restore_edge_snap_on_startup(&window);
-
-    crate::input_monitor::enable_mouse_monitoring();
+    // 退出低占用后主窗口以 .visible(false) 重建,restore_edge_snap_on_startup
+    // 仅在贴边隐藏配置下把窗口置为隐藏态并 disable 监听;非贴边用户该调用
+    // 早返,窗口保持普通隐藏。此时上面无条件 enable 的导航键/鼠标监控会
+    // 残留全局注册(recreate 前的 disable 无人对称关闭)——按窗口实际形态
+    // 对称恢复:不是 snapped 隐藏态就按「隐藏窗口」语义关闭监听,与
+    // hide_normal_window 的 disable 口径一致,避免退出低占用后持续截获
+    // 前台应用的导航键输入。
+    let state = crate::windows::main_window::get_window_state();
+    if !(state.is_snapped && state.is_hidden) {
+        crate::input_monitor::disable_navigation_keys();
+        crate::input_monitor::disable_mouse_monitoring();
+    } else {
+        let _ = crate::windows::main_window::restore_edge_snap_on_startup(&window);
+    }
 
     Ok(())
 }
@@ -827,6 +838,45 @@ mod tests {
         assert!(
             body.contains("starts_with(crate::windows::transfer_shelf::LABEL_PREFIX)"),
             "自动检测必须把 transfer-shelf 前缀的文件盒窗口纳入可见性扫描"
+        );
+    }
+
+    // 源码护栏:退出低占用重建主窗口后,非贴边隐藏形态必须按「隐藏窗口」
+    // 语义关闭导航键/鼠标监听(与 hide_normal_window 的 disable 口径一致),
+    // 只对贴边隐藏形态保留 enable——否则无条件 enable 残留全局注册,
+    // 导航键持续截获前台应用输入。断言:recreate 内必须读取窗口形态,
+    // 且 restore_edge_snap_on_startup 只能出现在贴边隐藏分支。
+    #[test]
+    fn recreate_main_window_only_keeps_io_for_snapped_hidden_form() {
+        let src = strip_line_comments(&manager_source());
+        let start = src
+            .find("fn recreate_main_window(app: &AppHandle)")
+            .expect("缺 recreate_main_window");
+        let rest = &src[start..];
+        let end = rest.find("\n}\n").map(|i| start + i).unwrap_or(src.len());
+        let b = &src[start..end];
+        assert!(
+            b.contains("get_window_state()"),
+            "重建后必须读取主窗口形态,按实际形态对称恢复监听"
+        );
+        assert!(
+            b.contains("is_snapped && state.is_hidden"),
+            "必须用「贴边隐藏」双条件判定是否保留监听"
+        );
+        assert!(
+            b.contains("disable_navigation_keys()"),
+            "非贴边隐藏形态必须关闭导航键监听(与 hide_normal_window 对称)"
+        );
+        // restore_edge_snap_on_startup 必须只保留在贴边隐藏分支:
+        // 无条件调用会把它从主路径删除,导致非贴边用户永远不恢复隐藏态。
+        let restore_positions = b.match_indices("restore_edge_snap_on_startup").collect::<Vec<_>>();
+        let pair_pos = b
+            .find("is_snapped && state.is_hidden")
+            .expect("缺贴边隐藏条件");
+        assert!(
+            !restore_positions.is_empty()
+                && restore_positions.iter().all(|(i, _)| *i > pair_pos),
+            "restore_edge_snap_on_startup 必须位于贴边隐藏分支内"
         );
     }
 
