@@ -420,6 +420,10 @@ const ClipboardList = forwardRef(({
 
     const { startIndex, endIndex } = currentRangeRef.current;
     const shouldLoadInitialPage = itemsCount === 0 && startIndex === 0 && endIndex === 0;
+    // 兜底重载:重挂载后若 loadingRanges 仍残留旧 range(上一次挂载异步未收尾),
+    // 直接调 loadMissingRange 可能命中重叠守卫拒绝加载,导致列表只剩骨架。
+    // 先清空 loadingRanges 再补可见范围,保证首屏必定发起真实请求。
+    clipboardStore.loadingRanges = new Set();
     loadMissingRange(
       startIndex,
       shouldLoadInitialPage ? Math.min(49, clipSnap.totalCount - 1) : endIndex,

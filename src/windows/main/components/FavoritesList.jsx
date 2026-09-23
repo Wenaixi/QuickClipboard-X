@@ -336,9 +336,12 @@ const FavoritesList = forwardRef(({
   }, [favSnap.totalCount, favSnap.items, groupsSnap.currentGroup]);
 
   const itemsCount = Object.keys(favSnap.items).length;
-  
+
   useEffect(() => {
     if (favSnap.totalCount > 0 && itemsCount === 0) {
+      // 与剪贴板列表同案:重挂载后若 loadingRanges 残留旧 range,先清空再补
+      // 可见范围,避免命中重叠守卫导致首屏只剩骨架占位。
+      favoritesStore.loadingRanges = new Set();
       const {
         startIndex,
         endIndex

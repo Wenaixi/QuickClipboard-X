@@ -497,9 +497,10 @@ export async function loadFavoritesRange(startIndex, endIndex, groupName = null,
       favoritesStore.error = err.message || '加载失败'
     }
   } finally {
-    if (isFavoritesRequestCurrent(requestVersion, requestFilter, requestContentType, requestPasteStatus, requestGroupName)) {
-      favoritesStore.removeLoadingRange(startIndex, endIndex)
-    }
+    // 与剪贴板 store 同案:loadingRanges 跨挂载周期共享,过期请求不清理会
+    // 让下次挂载命中重叠守卫拒绝重载,列表只剩 totalCount 骨架占位。无条件
+    // 移除已登记的 range。
+    favoritesStore.removeLoadingRange(startIndex, endIndex)
   }
 }
 

@@ -553,9 +553,12 @@ export async function loadClipboardRange(startIndex, endIndex, requestContext = 
       clipboardStore.error = err.message || '加载失败'
     }
   } finally {
-    if (isClipboardRequestCurrent(requestVersion, requestFilter, requestContentType, requestPasteStatus)) {
-      clipboardStore.removeLoadingRange(startIndex, endIndex)
-    }
+    // loadingRanges 是跨挂载周期共享的全局 Set:请求过期(切标签/参数变化)后
+    // 若不清理已登记的 range,下次挂载命中 hasOverlappingLoadingRange 会拒绝
+    // 重新加载,列表只剩 totalCount 骨架占位(「第一个没有任何内容」的根因)。
+    // 因此无论请求是否过期都必须移除 range,setItemsInRange 已在 current 分支
+    // 做过,这里统一兜底防止泄漏。
+    clipboardStore.removeLoadingRange(startIndex, endIndex)
   }
 }
 
