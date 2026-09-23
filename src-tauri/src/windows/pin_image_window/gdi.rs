@@ -426,7 +426,7 @@ pub(crate) async fn render_current(
         .map_err(|e| format!("贴图解码线程失败: {e}"))??;
     let (w, h, bgra) = premultiplied;
     let app = app.clone();
-    run_on_main_thread_result(&app, move || {
+    crate::windows::pin_image_window::run_on_main_thread_result(&app, move || {
         render_premultiplied(HWND(hwnd_raw as *mut core::ffi::c_void), w, h, &bgra, opacity)
     })
     .await

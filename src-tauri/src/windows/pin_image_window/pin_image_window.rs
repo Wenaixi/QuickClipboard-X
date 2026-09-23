@@ -302,7 +302,7 @@ async fn create_pin_image_window(
 // 在主线程执行同步闭包并返回结果(oneshot 传值)。GDI 窗口创建/渲染必须
 // 落在有消息泵的主线程;async 命令运行在 tokio worker,不能直接建窗。
 // 闭包内所有非 Send 对象(HWND 等)一律转 isize 进出。
-async fn run_on_main_thread_result<T, F>(app: &AppHandle, task: F) -> Result<T, String>
+pub(crate) async fn run_on_main_thread_result<T, F>(app: &AppHandle, task: F) -> Result<T, String>
 where
     T: Send + 'static,
     F: FnOnce() -> Result<T, String> + Send + 'static,
