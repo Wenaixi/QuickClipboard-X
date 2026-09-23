@@ -127,7 +127,7 @@ async fn run_copy_pin_action(
     crate::windows::pin_image_window::pin_image_from_file(
         app.clone(),
         pin_path.to_string_lossy().to_string(),
-        None, None, None, None, None, None, None, None, None, None, None,
+        None, None, None, None, None, None, None, None, None, None,
     )
     .await
     .map_err(|e| format!("贴图失败: {e}"))?;
@@ -207,7 +207,7 @@ async fn run_pin_action(
     crate::windows::pin_image_window::pin_image_from_file(
         app.clone(),
         pin_path.to_string_lossy().to_string(),
-        None, None, None, None, None, None, None, None, None, None, None,
+        None, None, None, None, None, None, None, None, None, None,
     )
     .await
     .map_err(|e| format!("贴图失败: {e}"))?;
