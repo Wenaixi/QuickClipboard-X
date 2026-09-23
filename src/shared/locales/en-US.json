@@ -41,7 +41,18 @@
     "title": "Title",
     "type": "Type",
     "source": "Source",
-    "time": "Time"
+    "time": "Time",
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "weekdaySunday": "Sunday",
+    "weekdayMonday": "Monday",
+    "weekdayTuesday": "Tuesday",
+    "weekdayWednesday": "Wednesday",
+    "weekdayThursday": "Thursday",
+    "weekdayFriday": "Friday",
+    "weekdaySaturday": "Saturday",
+    "fileCount": "files",
+    "error": "Operation failed"
   },
   "errors": {
     "operationFailed": "Operation failed. Please try again later.",

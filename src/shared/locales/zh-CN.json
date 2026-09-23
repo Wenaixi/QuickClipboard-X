@@ -41,7 +41,18 @@
     "title": "标题",
     "type": "类型",
     "source": "来源",
-    "time": "时间"
+    "time": "时间",
+    "today": "今天",
+    "yesterday": "昨天",
+    "weekdaySunday": "周日",
+    "weekdayMonday": "周一",
+    "weekdayTuesday": "周二",
+    "weekdayWednesday": "周三",
+    "weekdayThursday": "周四",
+    "weekdayFriday": "周五",
+    "weekdaySaturday": "周六",
+    "fileCount": "个文件",
+    "error": "操作失败"
   },
   "errors": {
     "operationFailed": "操作失败，请稍后重试",

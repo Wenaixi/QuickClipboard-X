@@ -77,7 +77,7 @@ function FavoriteItem({
     formatTime,
     renderContent,
     searchKeyword
-  } = useItemCommon(item, { isFavorite: true });
+  } = useItemCommon(item, { isFavorite: true, t });
   const { isBackground } = useTheme();
   const isFileType = renderType === 'file';
   const isImageType = renderType === 'image';

@@ -102,18 +102,27 @@ export function useItemCommon(item, options = {}) {
     const timeFormat = `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
     let timeStr = '';
 
+    // 今天/昨天/周X 文案必须走语言包:剪贴板与收藏列表每行时间戳 en 用户
+    // 100% 暴露,裸中文会让英文界面混入中文。t 由调用组件(ClipboardItem/
+    // FavoriteItem)经 options.t 注入;未注入时回退中文,与原行为一致。
+    const t = typeof options.t === 'function' ? options.t : (key) => '';
+    const todayLabel = t('common.today');
+    const yesterdayLabel = t('common.yesterday');
+    const weekDays = ['common.weekdaySunday', 'common.weekdayMonday', 'common.weekdayTuesday', 'common.weekdayWednesday', 'common.weekdayThursday', 'common.weekdayFriday', 'common.weekdaySaturday']
+      .map(key => t(key));
+
     // 今天
     if (recordDate.getTime() === today.getTime()) {
-      timeStr = `今天 ${timeFormat}`;
+      timeStr = `${todayLabel || '今天'} ${timeFormat}`;
     }
     // 昨天
     else if (recordDate.getTime() === yesterday.getTime()) {
-      timeStr = `昨天 ${timeFormat}`;
+      timeStr = `${yesterdayLabel || '昨天'} ${timeFormat}`;
     }
     // 一周内
     else if (recordDate >= oneWeekAgo) {
-      const days = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-      timeStr = `${days[date.getDay()]} ${timeFormat}`;
+      const dayLabel = weekDays[date.getDay()] || '';
+      timeStr = `${dayLabel || ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()]} ${timeFormat}`;
     }
     // 更早的日期
     else {
@@ -126,7 +135,8 @@ export function useItemCommon(item, options = {}) {
         if (item.content?.startsWith('files:')) {
           const filesData = JSON.parse(item.content.substring(6));
           const fileCount = filesData.files?.length || 0;
-          timeStr += ` • ${fileCount} 个文件`;
+          const fileCountLabel = t('common.fileCount');
+          timeStr += ` • ${fileCount} ${fileCountLabel || '个文件'}`;
         }
       } catch (e) {
         // 解析失败，只显示时间

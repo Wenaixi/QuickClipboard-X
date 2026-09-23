@@ -80,8 +80,7 @@ function ClipboardItem({
     renderType,
     formatTime,
     renderContent
-  } = useItemCommon(item);
-  const { isBackground } = useTheme();
+  } = useItemCommon(item, { t });
   const isFileType = renderType === 'file';
   const isImageType = renderType === 'image';
   const isImageOrFileType = isFileType || isImageType;
