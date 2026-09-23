@@ -25,9 +25,9 @@ test('设置页已渲染屏幕录制热键输入入口', () => {
   );
 });
 
-test('录制热键输入必须走 onSettingChange 保存与 recording 后端状态', () => {
+test('录制热键输入必须走 handleShortcutChange 保存与 recording 后端状态', () => {
   assert.ok(
-    sectionSource.includes(`onSettingChange('recordingShortcut', value)`),
+    sectionSource.includes(`handleShortcutChange('recordingShortcut', value)`),
     '录制热键必须保存到 recordingShortcut 字段'
   );
   assert.ok(

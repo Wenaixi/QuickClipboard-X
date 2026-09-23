@@ -16,7 +16,7 @@
     "test:screenshot": "node --test src/windows/screenshot/*.test.js",
     "test:annotation": "node --test src/windows/annotation/*.test.js",
     "test:emoji-kb": "node --test src/windows/main/components/emoji/*.test.js",
-    "test:mouse-guard": "node --test src/shared/hooks/useSortable.guard.test.js src/shared/hooks/htmlLayout.guard.test.js src/windows/main/components/tabNav.guard.test.js src/windows/main/components/clipboardList.guard.test.js src/shared/components/ui/slider.guard.test.js src/shared/components/common/tooltip.guard.test.js src/shared/components/ui/soundVolume.guard.test.js src/shared/components/ui/edgeHideOffset.guard.test.js src/shared/api/clipboard.guard.test.js src/shared/api/tools.guard.test.js",
+    "test:mouse-guard": "node --test src/shared/hooks/useSortable.guard.test.js src/shared/hooks/htmlLayout.guard.test.js src/windows/main/components/tabNav.guard.test.js src/windows/main/components/clipboardList.guard.test.js src/shared/components/ui/slider.guard.test.js src/shared/components/common/tooltip.guard.test.js src/shared/components/ui/soundVolume.guard.test.js src/shared/components/ui/edgeHideOffset.guard.test.js src/shared/api/clipboard.guard.test.js src/shared/api/tools.guard.test.js src/windows/settings/sections/ShortcutsSection.guard.test.js src/windows/settings/sections/ShortcutsSection.pinPromises.guard.test.js",
     "test:text-editor": "node --test src/windows/textEditor/*.test.js",
     "test:clipboard-content": "node --test src/windows/main/components/ClipboardContent/*.test.js"
   },
