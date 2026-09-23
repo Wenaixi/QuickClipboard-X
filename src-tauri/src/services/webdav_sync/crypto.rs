@@ -402,6 +402,15 @@ fn validate_config(config: &WebdavE2eeConfig) -> Result<(), String> {
     if config.kdf.memory_kib == 0 || config.kdf.iterations == 0 || config.kdf.parallelism == 0 {
         return Err("WebDAV 云端加密 KDF 参数无效".to_string());
     }
+    // KDF 参数必须有工程上限:配置来自云端 .qc-e2ee.json,服务器被篡改/
+    // 配错时可下推超大 memoryKiB,首次派生一次性分配数 GB 内存轻则卡顿
+    // 重则 OOM。拒超过 1GiB 内存/10 轮迭代/4 路并行的配置。
+    if config.kdf.memory_kib > 1 << 20
+        || config.kdf.iterations > 10
+        || config.kdf.parallelism > 4
+    {
+        return Err("WebDAV 云端加密 KDF 参数超出允许范围".to_string());
+    }
     Ok(())
 }
 
@@ -522,5 +531,34 @@ mod tests {
         write_task.await.unwrap().unwrap();
         read_task.await.unwrap().unwrap();
         assert_eq!(out, plaintext);
+    }
+
+    // 云端 KDF 配置必须被上限校验:配置来自 .qc-e2ee.json,服务器被篡改/
+    // 配错时可下推超大 memoryKiB,首次派生一次性分配数 GB 内存。validate_config
+    // 必须拒绝超上限,护栏锁死上限字面与拒绝分支(整行精确匹配,防子串绕过)。
+    #[test]
+    fn validate_config_rejects_excessive_kdf_parameters() {
+        let src = std::fs::read_to_string(format!(
+            "{}/src/services/webdav_sync/crypto.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读 crypto.rs");
+        let start = src
+            .find("fn validate_config(config: &WebdavE2eeConfig)")
+            .expect("缺 validate_config");
+        let end = start + 260;
+        let body = &src[start..end];
+        // 整行匹配:把条件行包进前缀/后缀注释、加 false 短路等任何改法都会
+        // 改变整行字面,护栏见红——防子串仍然命中的护栏绕过。
+        for line in [
+            "    if config.kdf.memory_kib > 1 << 20",
+            "        || config.kdf.iterations > 10",
+            "        || config.kdf.parallelism > 4",
+        ] {
+            assert!(
+                body.contains(line),
+                "KDF 上限条件行必须原样存在:{line}"
+            );
+        }
     }
 }
