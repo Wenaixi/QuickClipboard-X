@@ -212,7 +212,8 @@
     "moveToGroupFailed": "移动分组失败",
     "noImageGroup": "请先创建图库分组",
     "renameFailed": "重命名失败",
-    "uploading": "正在添加 {{current}}/{{total}}..."
+    "uploading": "正在添加 {{current}}/{{total}}...",
+    "someImagesRejected": "已忽略 {{count}} 个不支持格式的图片"
   },
   "groups": {
     "title": "分组",

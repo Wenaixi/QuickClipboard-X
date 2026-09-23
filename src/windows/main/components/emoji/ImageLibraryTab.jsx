@@ -19,6 +19,10 @@ const IMAGE_GAP_PX = 8;
 const IMAGE_HORIZONTAL_PADDING_PX = 16;
 const IMAGE_PREFETCH_COUNT = 20;
 
+// 破图占位图标(灰色 SVG data URI,不引外部资源):TIFF/HEIC 等 WebView2
+// 不可解码格式/文件被外部删除时 tile 显示占位而非 broken image 静默。
+const IMG_PLACEHOLDER_SRC = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3QgeD0iMyIgeT0iMyIgd2lkdGg9IjE4IiBoZWlnaHQ9IjE4IiBmaWxsPSIjQ0NDQ0NDIi8+Cjwvc3ZnPgo=';
+
 const getImageItemGroup = (item) => item?.group || item?.category || '';
 const getImageItemKey = (item) => {
   if (!item || item.loading || !item.filename) return '';
@@ -322,6 +326,12 @@ function ImageTile({
               className="w-full h-full object-cover pointer-events-none"
               loading="lazy"
               draggable={false}
+              onError={e => {
+                // 破图兜底:TIFF/HEIC 等 WebView2 不可解码格式/文件被外部删除时
+                // 显示占位图标而非 broken image 静默无反馈(对齐历史条目守卫)。
+                e.target.onerror = null;
+                e.target.src = IMG_PLACEHOLDER_SRC;
+              }}
             />
           )}
 
@@ -685,7 +695,18 @@ const ImageLibraryTab = forwardRef(function ImageLibraryTab({
     }
 
     const files = Array.from(e.dataTransfer.files);
-    const imageFiles = files.filter(f => f.type.startsWith('image/'));
+    // 前端拖入按扩展名+MIME 双判:TIFF/HEIC 的 MIME 也以 image/ 开头但后端
+    // 已拒收(INGESTIBLE),此处一并过滤给明确提示;空 MIME 的真实图片转按
+    // 扩展名判定,避免「空 MIME 静默丢弃」。
+    const UNSUPPORTED_UPLOAD_EXTS = ['tif', 'tiff', 'heic', 'heif'];
+    const imageFiles = files.filter(f => {
+      const lowerName = (f.name || '').toLowerCase();
+      const ext = lowerName.split('.').pop() || '';
+      if (UNSUPPORTED_UPLOAD_EXTS.includes(ext)) return false;
+      if (f.type.startsWith('image/')) return true;
+      return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'avif', 'svg', 'ico', 'jfif'].includes(ext);
+    });
+    const rejectedCount = files.length - imageFiles.length;
 
     if (imageFiles.length === 0) {
       toast.warning(t('emoji.noValidImages'), {
@@ -693,6 +714,12 @@ const ImageLibraryTab = forwardRef(function ImageLibraryTab({
         position: TOAST_POSITIONS.BOTTOM_RIGHT
       });
       return;
+    }
+    if (rejectedCount > 0) {
+      toast.warning(t('emoji.someImagesRejected', { count: rejectedCount }), {
+        size: TOAST_SIZES.EXTRA_SMALL,
+        position: TOAST_POSITIONS.BOTTOM_RIGHT
+      });
     }
 
     const myToken = uploadTokenRef.current + 1;

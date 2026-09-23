@@ -212,7 +212,8 @@
     "moveToGroupFailed": "Failed to move group",
     "noImageGroup": "Create an image group first",
     "renameFailed": "Rename failed",
-    "uploading": "Adding {{current}}/{{total}}..."
+    "uploading": "Adding {{current}}/{{total}}...",
+    "someImagesRejected": "Ignored {{count}} image(s) in unsupported format"
   },
   "groups": {
     "title": "Groups",
