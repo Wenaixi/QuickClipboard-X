@@ -968,6 +968,11 @@ pub fn restore_from_snap(window: &WebviewWindow) -> Result<(), String> {
     // 否则鼠标无法操作窗口(唤出后只能快捷键)。
     let _ = window.set_ignore_cursor_events(false);
     clear_snap();
+    // 恢复自由窗口后停止边缘监控:edge_monitor 线程循环在 !is_snapped 分支
+    // 只 sleep(100ms) continue 不自行退出,stop 置 MONITORING_ACTIVE=false +
+    // bump 代号,线程下一轮检测后退出——否则恢复普通模式下 10Hz 空转线程常驻
+    // (下次 check_snap/贴边才退)。
+    crate::windows::main_window::stop_edge_monitoring();
     Ok(())
 }
 
@@ -1093,6 +1098,28 @@ pub fn ").unwrap_or(after.len())];
             .expect("restore_from_snap 必须清理贴边状态");
         assert!(cancel < position, "取消动画必须位于 set_position 之前");
         assert!(cancel < clear, "取消动画必须位于 clear_snap 之前");
+    }
+
+    // 恢复自由窗口必须停止边缘监控:edge_monitor 线程循环在 !is_snapped 分支
+    // 只 sleep(100ms) continue 不自行退出,stop 置 MONITORING_ACTIVE=false +
+    // bump 代号线程才退——缺 stop 则恢复普通模式下 10Hz 空转线程常驻。
+    #[test]
+    fn restore_from_snap_stops_edge_monitoring() {
+        let body = strip_line_comments(fn_body(snap_source(), "restore_from_snap"));
+        assert!(
+            body.contains("stop_edge_monitoring()"),
+            "restore_from_snap 必须停止边缘监控,否则空转线程常驻"
+        );
+        let stop = body
+            .find("stop_edge_monitoring()")
+            .expect("缺 stop_edge_monitoring");
+        let clear = body
+            .find("clear_snap();")
+            .expect("缺 clear_snap");
+        assert!(
+            clear < stop,
+            "必须先 clear_snap 再 stop_edge_monitoring(停止监控前清理贴边状态)"
+        );
     }
 
 
