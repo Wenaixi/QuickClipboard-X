@@ -414,13 +414,12 @@ fn premultiply(channel: u32, alpha: u32) -> u32 {
 /// 830 万像素占住 tokio worker(菜单快速切换透明度时卡顿)与跨线程 ULW。
 pub(crate) async fn render_current(
     label: &str,
-    hwnd: HWND,
+    hwnd_raw: isize,
     app: &tauri::AppHandle,
 ) -> Result<(), String> {
     let state = pin_state(label);
     let path = crate::windows::pin_image_window::pin_image_file_path(label)?;
     let opacity = state.opacity;
-    let hwnd_raw = hwnd.0 as isize;
     let premultiplied = tokio::task::spawn_blocking(move || decode_and_premultiply_image(&path))
         .await
         .map_err(|e| format!("贴图解码线程失败: {e}"))??;

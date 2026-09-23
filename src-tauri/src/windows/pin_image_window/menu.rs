@@ -175,7 +175,7 @@ pub(crate) async fn handle_pin_menu_action(label: &str, hwnd_raw: isize, id: usi
         gdi::set_pin_state(label, state);
         persist_state_preferences(label);
         let app = gdi::app_handle().ok_or_else(|| "贴图窗口句柄不可用".to_string())?;
-        return gdi::render_current(label, hwnd, &app).await;
+        return gdi::render_current(label, hwnd_raw, &app).await;
     }
 
     match id {
@@ -240,7 +240,7 @@ pub(crate) async fn handle_pin_menu_action(label: &str, hwnd_raw: isize, id: usi
             persist_state_preferences(label);
             if let Some(hwnd) = gdi::find_gdi_window(label) {
                 let app = gdi::app_handle().ok_or_else(|| "贴图窗口句柄不可用".to_string())?;
-                let _ = gdi::render_current(label, hwnd, &app).await;
+                let _ = gdi::render_current(label, hwnd.0 as isize, &app).await;
             }
             Ok(())
         }
