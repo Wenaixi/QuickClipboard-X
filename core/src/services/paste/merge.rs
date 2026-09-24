@@ -417,4 +417,48 @@ mod tests {
             "normalize_image_content 必须白名单校验 image_id"
         );
     }
+
+    // HTML 转义:五个特殊字符全部替换,防合并 HTML 注入破坏外层结构。
+    #[test]
+    fn escape_html_escapes_all_five_special_chars() {
+        assert_eq!(
+            escape_html("<a href=\"x\">&'\""),
+            "&lt;a href=&quot;x&quot;&gt;&amp;&#39;&quot;"
+        );
+        assert_eq!(escape_html("普通文本"), "普通文本");
+    }
+
+    // 纯文本转 HTML:换行归一化为 <br />,段落保留可读。
+    #[test]
+    fn plain_text_to_html_joins_lines_with_breaks() {
+        assert_eq!(plain_text_to_html("第一行\r\n第二行\r第三行\n第四行"), "第一行<br />第二行<br />第三行<br />第四行");
+        assert_eq!(plain_text_to_html("无换行"), "无换行");
+        assert_eq!(plain_text_to_html("<b>"), "&lt;b&gt;", "HTML 文本转义优先于换行");
+    }
+
+    // 合并块包装:每段包成统一 margin 的 div,合并 HTML 结构稳定。
+    #[test]
+    fn wrap_merge_html_block_wraps_with_stable_margin() {
+        assert_eq!(
+            wrap_merge_html_block("<p>x</p>"),
+            "<div style=\"margin:0 0 12px 0;\"><p>x</p></div>"
+        );
+    }
+
+    // files: 哈希载荷:路径序列化 + name 提取 + operation=copy,供监听器
+    // 预置哈希去重合并粘贴。
+    #[test]
+    fn build_files_hash_payload_builds_copy_json() {
+        let payload = build_files_hash_payload(&[
+            r"C:\clipboard_images\a.png".to_string(),
+            r"C:\clipboard_images\b.png".to_string(),
+        ])
+        .expect("文件哈希载荷构建成功");
+        assert!(payload.starts_with("files:"));
+        let data: FilesData = serde_json::from_str(&payload[6..]).unwrap();
+        assert_eq!(data.files.len(), 2);
+        assert_eq!(data.files[0].name, "a.png");
+        assert_eq!(data.files[1].name, "b.png");
+        assert_eq!(data.operation, "copy");
+    }
 }
