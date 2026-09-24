@@ -78,3 +78,34 @@ pub fn save_app_icon(exe_path: &str) -> Option<String> {
 
     Some(hash)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::calculate_icon_hash;
+
+    // 图标哈希是可复用缓存键:同一数据哈希稳定且长度为 16 十六进制字符。
+    #[test]
+    fn icon_hash_is_stable_and_16_hex_chars() {
+        let data = b"icon-bytes";
+        let h1 = calculate_icon_hash(data);
+        let h2 = calculate_icon_hash(data);
+        assert_eq!(h1, h2, "同一图标数据哈希必须稳定");
+        assert_eq!(h1.len(), 16, "哈希取前 16 位十六进制");
+        assert!(h1.chars().all(|c| c.is_ascii_hexdigit()), "必须是十六进制字符");
+    }
+
+    // 不同图标数据必须映射到不同哈希,否则缓存互相覆盖。
+    #[test]
+    fn icon_hash_differs_for_different_data() {
+        let h1 = calculate_icon_hash(b"first");
+        let h2 = calculate_icon_hash(b"second");
+        assert_ne!(h1, h2, "不同图标数据必须生成不同哈希");
+    }
+
+    // 空数据也可哈希(哈希函数对任意输入定义完整,不 panic)。
+    #[test]
+    fn icon_hash_handles_empty_data() {
+        let h = calculate_icon_hash(b"");
+        assert_eq!(h.len(), 16);
+    }
+}
