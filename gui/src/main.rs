@@ -3,8 +3,8 @@
 use eframe::egui;
 use quickclipboard_core::services::clipboard::start_clipboard_monitor;
 use quickclipboard_core::services::database::{
-    clear_clipboard_history, init_database, query_clipboard_items, query_favorites, ClipboardItem,
-    FavoriteItem, FavoritesQueryParams, QueryParams,
+    clear_clipboard_history, delete_clipboard_item, init_database, query_clipboard_items,
+    query_favorites, ClipboardItem, FavoriteItem, FavoritesQueryParams, QueryParams,
 };
 use quickclipboard_core::services::paste::{
     copy_clipboard_item, copy_favorite_item, paste_clipboard_item_with_update,
@@ -205,11 +205,20 @@ impl eframe::App for RefactorShell {
                                         Err(e) => self.status = format!("粘贴失败: {}", e),
                                     }
                                 }
-                                if ui.small_button("复制").clicked() {
+                            if ui.small_button("复制").clicked() {
                                     let clone = item.clone();
                                     match copy_clipboard_item(&clone) {
                                         Ok(()) => self.status = format!("已复制到系统剪贴板: id={}", item.id),
                                         Err(e) => self.status = format!("复制失败: {}", e),
+                                    }
+                                }
+                                if ui.small_button("删除").clicked() {
+                                    match delete_clipboard_item(item.id) {
+                                        Ok(()) => {
+                                            self.status = format!("已删除: id={}", item.id);
+                                            self.load_history();
+                                        }
+                                        Err(e) => self.status = format!("删除失败: {}", e),
                                     }
                                 }
                             });
