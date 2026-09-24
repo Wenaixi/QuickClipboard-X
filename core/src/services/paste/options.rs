@@ -214,3 +214,85 @@ fn is_pure_image_item(item: &ClipboardItem) -> bool {
 
     is_image_only_html(item.html_content.as_deref())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::database::{ClipboardDataItem, ClipboardItem};
+
+    fn item(content: &str, content_type: &str) -> ClipboardItem {
+        ClipboardItem {
+            id: 1,
+            uuid: None,
+            favorite_id: None,
+            source_device_id: None,
+            is_remote: false,
+            content: content.to_string(),
+            html_content: None,
+            content_type: content_type.to_string(),
+            image_id: None,
+            item_order: 1,
+            is_pinned: false,
+            paste_count: 0,
+            source_app: None,
+            source_icon_hash: None,
+            char_count: None,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    fn data_item(format_name: &str, is_primary: bool) -> ClipboardDataItem {
+        ClipboardDataItem {
+            id: 1,
+            target_kind: "clipboard".to_string(),
+            target_id: "1".to_string(),
+            format_name: format_name.to_string(),
+            raw_data: Vec::new(),
+            is_primary,
+            format_order: 0,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    // 纯图片项只给 ImageBundle 一个选项。
+    #[test]
+    fn pure_image_item_returns_only_image_bundle() {
+        let mut it = item("", "image");
+        it.image_id = Some("abc-123".to_string());
+        let opts = build_paste_options(&it, &[]);
+        assert_eq!(opts.len(), 1);
+        assert_eq!(opts[0].id, PasteAction::ImageBundle.id());
+        assert!(opts[0].is_primary);
+    }
+
+    // 纯文件项只给 File 一个选项。
+    #[test]
+    fn pure_file_item_returns_only_file() {
+        let it = item("files:{\"files\":[{\"path\":\"a.txt\"}]}", "file");
+        let opts = build_paste_options(&it, &[]);
+        assert_eq!(opts.len(), 1);
+        assert_eq!(opts[0].id, PasteAction::File.id());
+    }
+
+    // 文本项按 raw_formats 决定 plain/html/rtf 选项,primary 由 is_primary 标志决定。
+    #[test]
+    fn text_item_builds_semantic_options() {
+        let it = item("hello", "text");
+        let raw = vec![data_item("CF_UNICODETEXT", true)];
+        let opts = build_paste_options(&it, &raw);
+        assert!(opts.iter().any(|o| o.id == PasteAction::PlainText.id()), "文本项应含纯文本选项");
+        assert!(opts.iter().any(|o| o.id == PasteAction::AllFormats.id()), "多格式应含全部格式选项");
+    }
+
+    // 默认粘贴动作:图片→ImageBundle,文件→File,纯文本→PlainText。
+    #[test]
+    fn resolve_default_paste_action_prefers_rich_semantics() {
+        let mut img = item("", "image");
+        img.image_id = Some("x".to_string());
+        assert_eq!(resolve_default_paste_action(&img, &[]), PasteAction::ImageBundle);
+        assert_eq!(resolve_default_paste_action(&item("files:{}", "file"), &[]), PasteAction::File);
+        assert_eq!(resolve_default_paste_action(&item("hello", "text"), &[]), PasteAction::PlainText);
+    }
+}
