@@ -20,11 +20,28 @@ image.workspace = true
 base64.workspace = true
 tokio.workspace = true
 
+# 剪贴板监听（与 src-tauri 同源同版本）
+clipboard-rs = { git = "https://github.com/ChurchTao/clipboard-rs", tag = "v0.3.2" }
+# 键盘模拟（仅非 Windows 分支引用）
+enigo = "0.6.1"
+# 音效播放
+rodio = "0.17"
+# 文件图标提取
+file_icon_provider = { git = "https://github.com/iohannrabeson/file_icon_provider" }
+
 # 只开 core 实际用到的 feature，避免增量编译面膨胀
 [target.'cfg(windows)'.dependencies]
 keyring = { version = "3.6.3", features = ["windows-native"] }
 windows = { version = "0.62", features = [
-    "Win32_Storage_FileSystem",
     "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 windows-core.workspace = true

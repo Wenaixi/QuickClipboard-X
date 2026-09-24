@@ -1,12 +1,16 @@
+pub mod clipboard;
 pub mod database;
 pub mod paste;
 pub mod secure_credentials;
 pub mod settings;
+pub mod sound;
 pub mod store;
 pub mod sync_transfer;
+pub mod system;
 pub mod webdav_sync;
 
 pub use settings::{AppSettings, get_settings, update_settings, get_data_directory};
+pub use sound::{AppSounds, mark_paste_operation};
 
 pub fn normalize_path_for_hash(path: &str) -> String {
     let normalized = path.replace("\\", "/");

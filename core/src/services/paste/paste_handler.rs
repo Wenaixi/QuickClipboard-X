@@ -1,0 +1,970 @@
+use clipboard_rs::{ClipboardContent as RsClipboardContent, ClipboardContext};
+
+use crate::services::database::{get_clipboard_data_items, ClipboardDataItem, ClipboardItem};
+use crate::utils::cf_html::generate_cf_html;
+
+use super::clipboard_content::{set_clipboard_contents, set_clipboard_files, set_clipboard_image_file};
+use super::keyboard::simulate_paste;
+use super::options::{resolve_default_paste_action, PasteAction};
+use super::text::paste_text;
+
+fn emit_paste_count_updated(id: i64) {
+    crate::events::post(crate::events::AppEvent::PasteCountUpdated(id));
+}
+
+fn emit_favorite_paste_count_updated(id: &str) {
+    crate::events::post(crate::events::AppEvent::FavoritePasteCountUpdated(id.to_string()));
+}
+
+// 直接粘贴文本
+pub fn paste_text_direct(text: &str) -> Result<(), String> {
+    crate::services::clipboard::set_last_hash_text(text);
+
+    crate::services::mark_paste_operation();
+    let _monitor_guard = crate::services::clipboard::pause_clipboard_monitor_for(1000);
+
+    let ctx = ClipboardContext::new().map_err(|e| format!("创建剪贴板上下文失败: {}", e))?;
+
+    paste_text(&ctx, text)?;
+
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    simulate_paste()?;
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    crate::services::AppSounds::play_paste_on_success();
+    Ok(())
+}
+
+// 粘贴图片文件（不记录到历史）
+pub fn paste_image_file(file_path: &str) -> Result<(), String> {
+    use std::path::Path;
+
+    let path = Path::new(file_path);
+    if !path.exists() {
+        return Err(format!("图片文件不存在: {}", file_path));
+    }
+
+    crate::services::clipboard::set_last_hash_file(file_path);
+    crate::services::mark_paste_operation();
+    let _monitor_guard = crate::services::clipboard::pause_clipboard_monitor_for(1000);
+
+    set_clipboard_image_file(file_path)?;
+
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    simulate_paste()?;
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    crate::services::AppSounds::play_paste_on_success();
+
+    Ok(())
+}
+
+// 直接复制剪贴板项到系统剪贴板（不触发粘贴）
+pub fn copy_clipboard_item(item: &ClipboardItem) -> Result<(), String> {
+    paste_item_internal(item, Some(item.id), None, None, false, false)
+}
+
+// 直接复制收藏项到系统剪贴板（不触发粘贴）
+pub fn copy_favorite_item(item: &ClipboardItem, favorite_id: &str) -> Result<(), String> {
+    paste_item_internal(
+        item,
+        None,
+        Some(favorite_id.to_string()),
+        None,
+        false,
+        false,
+    )
+}
+
+// 粘贴剪贴板项并自动转换旧格式（更新 clipboard 表）
+pub fn paste_clipboard_item_with_update(item: &ClipboardItem) -> Result<(), String> {
+    let result = paste_item_internal(item, Some(item.id), None, None, true, true);
+    if result.is_ok() {
+        let _ = crate::services::database::increment_paste_count(item.id);
+        emit_paste_count_updated(item.id);
+    }
+    result
+}
+
+// 粘贴收藏项并自动转换旧格式（更新 favorites 表）
+pub fn paste_favorite_item_with_update(
+    item: &ClipboardItem,
+    favorite_id: &str,
+) -> Result<(), String> {
+    let result = paste_item_internal(item, None, Some(favorite_id.to_string()), None, true, true);
+    if result.is_ok() {
+        let _ = crate::services::database::increment_favorite_paste_count(favorite_id);
+        emit_favorite_paste_count_updated(favorite_id);
+    }
+    result
+}
+
+// 粘贴剪贴板项（指定动作）
+pub fn paste_clipboard_item_with_format(
+    item: &ClipboardItem,
+    action: Option<PasteAction>,
+) -> Result<(), String> {
+    let result = paste_item_internal(item, Some(item.id), None, action, true, false);
+    if result.is_ok() {
+        let _ = crate::services::database::increment_paste_count(item.id);
+        emit_paste_count_updated(item.id);
+    }
+    result
+}
+
+// 粘贴收藏项（指定动作）
+pub fn paste_favorite_item_with_format(
+    item: &ClipboardItem,
+    favorite_id: &str,
+    action: Option<PasteAction>,
+) -> Result<(), String> {
+    let result = paste_item_internal(
+        item,
+        None,
+        Some(favorite_id.to_string()),
+        action,
+        true,
+        false,
+    );
+    if result.is_ok() {
+        let _ = crate::services::database::increment_favorite_paste_count(favorite_id);
+        emit_favorite_paste_count_updated(favorite_id);
+    }
+    result
+}
+
+fn paste_item_internal(
+    item: &ClipboardItem,
+    clipboard_id: Option<i64>,
+    favorite_id: Option<String>,
+    action: Option<PasteAction>,
+    simulate: bool,
+    update_item: bool,
+) -> Result<(), String> {
+    let raw_formats = load_raw_formats(clipboard_id, favorite_id.as_deref())?;
+    let resolved_action = action.unwrap_or_else(|| {
+        if simulate {
+            resolve_default_paste_action(item, &raw_formats)
+        } else {
+            resolve_copy_action(item, &raw_formats)
+        }
+    });
+
+    let payload = build_payload_from_action(item, &raw_formats, resolved_action.clone())?;
+
+    if payload.is_empty() {
+        return Err("没有可写入剪贴板的数据".to_string());
+    }
+
+    let _monitor_guard =
+        crate::services::clipboard::pause_clipboard_monitor_for(if simulate { 1000 } else { 500 });
+    crate::services::clipboard::set_last_hash_contents(&payload);
+    crate::services::mark_paste_operation();
+
+    if resolved_action == PasteAction::ImageBundle {
+        set_clipboard_image_file(&resolve_item_image_path(item)?)?;
+    } else {
+        let ctx = ClipboardContext::new().map_err(|e| format!("创建剪贴板上下文失败: {}", e))?;
+        if let [RsClipboardContent::Files(paths)] = payload.as_slice() {
+            set_clipboard_files(&ctx, paths.clone())?;
+        } else {
+            set_clipboard_contents(&ctx, payload)?;
+        }
+    }
+
+    if update_item {
+        if let Some(id) = clipboard_id {
+            if item
+                .content_type
+                .split(',')
+                .next()
+                .unwrap_or(&item.content_type)
+                == "image"
+                && !item.content.starts_with("files:")
+            {
+                let new_content = convert_legacy_image_format(item)?;
+                update_item_content(Some(id), None, &new_content)?;
+            }
+        } else if let Some(id) = favorite_id.as_deref() {
+            if item
+                .content_type
+                .split(',')
+                .next()
+                .unwrap_or(&item.content_type)
+                == "image"
+                && !item.content.starts_with("files:")
+            {
+                let new_content = convert_legacy_image_format(item)?;
+                update_item_content(None, Some(id), &new_content)?;
+            }
+        }
+    }
+
+    if simulate {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        simulate_paste()?;
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        crate::services::AppSounds::play_paste_on_success();
+
+        // 粘贴后置顶:遵循 paste_to_top 设置,把本条 item_order 提到非置顶区
+        // 最前(不涉及 is_pinned 固定置顶)。此处在 paste_item_internal 统一
+        // 收口,覆盖所有粘贴入口(列表单击/数字快捷键/纯文本快捷键/quickpaste
+        // 后端路径),避免各入口手写置顶分叉;复制动作(simulate=false)不置顶。
+        if let Some(id) = clipboard_id {
+            if crate::services::settings::get_settings().paste_to_top {
+                let _ = crate::services::database::move_clipboard_item_to_top(id);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn load_raw_formats(
+    clipboard_id: Option<i64>,
+    favorite_id: Option<&str>,
+) -> Result<Vec<ClipboardDataItem>, String> {
+    if let Some(id) = clipboard_id {
+        return get_clipboard_data_items("clipboard", &id.to_string());
+    }
+
+    if let Some(id) = favorite_id {
+        return get_clipboard_data_items("favorite", id);
+    }
+
+    Ok(Vec::new())
+}
+
+fn resolve_copy_action(item: &ClipboardItem, raw_formats: &[ClipboardDataItem]) -> PasteAction {
+    let primary_type = item
+        .content_type
+        .split(',')
+        .next()
+        .unwrap_or(&item.content_type);
+
+    match primary_type {
+        "image" => PasteAction::ImageBundle,
+        "file" => PasteAction::File,
+        _ => {
+            if !raw_formats.is_empty() {
+                PasteAction::AllFormats
+            } else if item
+                .html_content
+                .as_deref()
+                .map(|html| !html.trim().is_empty())
+                .unwrap_or(false)
+            {
+                PasteAction::Html
+            } else {
+                PasteAction::PlainText
+            }
+        }
+    }
+}
+
+fn build_payload_from_action(
+    item: &ClipboardItem,
+    raw_formats: &[ClipboardDataItem],
+    action: PasteAction,
+) -> Result<Vec<RsClipboardContent>, String> {
+    match action {
+        PasteAction::PlainText => build_plain_text_payload(item, raw_formats),
+        PasteAction::Html => build_html_payload(item, raw_formats),
+        PasteAction::Rtf => build_rtf_payload(item, raw_formats),
+        PasteAction::AllFormats => build_all_formats_payload(item, raw_formats),
+        PasteAction::ImageBundle => build_image_bundle_payload(item),
+        PasteAction::File => build_file_payload(item),
+    }
+}
+
+fn build_plain_text_payload(
+    item: &ClipboardItem,
+    raw_formats: &[ClipboardDataItem],
+) -> Result<Vec<RsClipboardContent>, String> {
+    if let Some(raw_text) = find_preferred_text_row(raw_formats) {
+        // CF_UNICODETEXT 的 raw_data 是 UTF-16LE 编码字节、CF_TEXT 是 ANSI 字节,
+        // 解码为 UTF-8 字符串推 Text 形态——与捕获侧纯文本识别为 Text 的哈希
+        // 口径一致,预置哈希才能命中自粘贴 fast-path 去重;HTML/RTF 等非纯文本
+        // 格式仍走 Other。
+        return Ok(vec![RsClipboardContent::Text(text_row_to_string(raw_text))]);
+    }
+
+    if item.content.starts_with("files:") {
+        return Err("当前条目没有可用的纯文本内容".to_string());
+    }
+
+    if item.content.trim().is_empty() {
+        return Err("当前条目没有可用的纯文本内容".to_string());
+    }
+
+    Ok(vec![RsClipboardContent::Text(item.content.clone())])
+}
+
+fn build_html_payload(
+    item: &ClipboardItem,
+    raw_formats: &[ClipboardDataItem],
+) -> Result<Vec<RsClipboardContent>, String> {
+    let mut payload = build_plain_text_payload(item, raw_formats).unwrap_or_default();
+
+    if let Some(row) = find_raw_row(raw_formats, "HTML Format") {
+        payload.push(RsClipboardContent::Other(
+            row.format_name.clone(),
+            row.raw_data.clone(),
+        ));
+        return Ok(payload);
+    }
+
+    if let Some(html) = item
+        .html_content
+        .as_deref()
+        .filter(|html| !html.trim().is_empty())
+    {
+        // 远端同步的 html_content 未经净化入库(LAN/WebDAV 对端不可信),
+        // 粘贴出口必须做标签/属性白名单净化——否则原文经 CF_HTML 写系统
+        // 剪贴板后,目标应用(Office/浏览器)解析内嵌脚本/事件属性可能执行,
+        // 构成跨信任边界转发风险。
+        payload.push(RsClipboardContent::Html(generate_cf_html(&sanitize_html_for_paste(html))));
+        return Ok(payload);
+    }
+
+    if payload.is_empty() {
+        return Err("当前条目没有可用的 HTML 内容".to_string());
+    }
+
+    Ok(payload)
+}
+
+fn build_rtf_payload(
+    item: &ClipboardItem,
+    raw_formats: &[ClipboardDataItem],
+) -> Result<Vec<RsClipboardContent>, String> {
+    let mut payload = build_plain_text_payload(item, raw_formats).unwrap_or_default();
+
+    if let Some(row) = find_raw_row(raw_formats, "Rich Text Format") {
+        payload.push(RsClipboardContent::Other(
+            row.format_name.clone(),
+            row.raw_data.clone(),
+        ));
+        return Ok(payload);
+    }
+
+    if payload.is_empty() {
+        return Err("当前条目没有可用的 RTF 内容".to_string());
+    }
+
+    Ok(payload)
+}
+
+fn build_all_formats_payload(
+    item: &ClipboardItem,
+    raw_formats: &[ClipboardDataItem],
+) -> Result<Vec<RsClipboardContent>, String> {
+    if raw_formats.is_empty() {
+        return build_legacy_all_formats_payload(item);
+    }
+
+    let mut payload = Vec::new();
+
+    for row in raw_formats {
+        if row.format_name == crate::services::clipboard::INTERNAL_IMAGE_PATH_FORMAT {
+            continue;
+        }
+
+        // 文本格式行优先进 Text 形态([u8] 按 UTF-16LE 解码成 UTF-8 字符串)
+        // ——与捕获侧纯文本识别为 Text 的哈希口径对齐,预置哈希才能命中
+        // 自粘贴 fast-path;HTML/RTF/HDROP 等非纯文本格式仍走 Other。
+        if matches!(row.format_name.as_str(), "CF_UNICODETEXT" | "CF_TEXT") {
+            payload.push(RsClipboardContent::Text(text_row_to_string(row)));
+        } else {
+            payload.push(RsClipboardContent::Other(
+                row.format_name.clone(),
+                row.raw_data.clone(),
+            ));
+        }
+    }
+
+    // 多格式粘贴时兜底写入标准文本，确保只能接收纯文本的目标可粘贴
+    if !item.content.starts_with("files:")
+        && !item.content.trim().is_empty()
+        && !payload_has_plain_text(&payload)
+    {
+        payload.push(RsClipboardContent::Text(item.content.clone()));
+    }
+
+    if item
+        .content_type
+        .split(',')
+        .any(|value| value.trim() == "image")
+    {
+        append_unique_payload(&mut payload, build_file_payload(item)?);
+    }
+
+    if payload.is_empty() {
+        return build_legacy_all_formats_payload(item);
+    }
+
+    Ok(payload)
+}
+
+fn payload_has_plain_text(payload: &[RsClipboardContent]) -> bool {
+    payload.iter().any(|entry| match entry {
+        RsClipboardContent::Text(_) => true,
+        RsClipboardContent::Other(name, _) => {
+            matches!(name.as_str(), "CF_UNICODETEXT" | "CF_TEXT")
+        }
+        _ => false,
+    })
+}
+
+fn build_legacy_all_formats_payload(
+    item: &ClipboardItem,
+) -> Result<Vec<RsClipboardContent>, String> {
+    let primary_type = item
+        .content_type
+        .split(',')
+        .next()
+        .unwrap_or(&item.content_type);
+
+    match primary_type {
+        "image" => build_image_bundle_payload(item),
+        "file" => build_file_payload(item),
+        _ => {
+            let mut payload = Vec::new();
+
+            if !item.content.starts_with("files:") && !item.content.trim().is_empty() {
+                payload.push(RsClipboardContent::Text(item.content.clone()));
+            }
+
+            if let Some(html) = item
+                .html_content
+                .as_deref()
+                .filter(|html| !html.trim().is_empty())
+            {
+                // 与 build_html_payload 同款:远端 html_content 粘贴出口净化,
+                // 防止内嵌脚本/事件属性经剪贴板转发到目标应用执行。
+                payload.push(RsClipboardContent::Html(generate_cf_html(&sanitize_html_for_paste(html))));
+            }
+
+            if item
+                .content_type
+                .split(',')
+                .any(|value| value.trim() == "image")
+            {
+                append_unique_payload(&mut payload, build_file_payload(item)?);
+            }
+
+            if payload.is_empty() {
+                Err("没有可写入剪贴板的数据".to_string())
+            } else {
+                Ok(payload)
+            }
+        }
+    }
+}
+
+fn build_image_bundle_payload(item: &ClipboardItem) -> Result<Vec<RsClipboardContent>, String> {
+    build_file_payload(item)
+}
+
+fn build_file_payload(item: &ClipboardItem) -> Result<Vec<RsClipboardContent>, String> {
+    if item.content.starts_with("files:") {
+        let paths = super::clipboard_content::parse_files_content_existing(&item.content)?;
+        return Ok(vec![RsClipboardContent::Files(paths)]);
+    }
+
+    let image_path = resolve_item_image_path(item)?;
+    Ok(vec![RsClipboardContent::Files(vec![image_path])])
+}
+
+fn resolve_item_image_path(item: &ClipboardItem) -> Result<String, String> {
+    if item.content.starts_with("files:") {
+        let paths = super::clipboard_content::parse_files_content_existing(&item.content)?;
+        if let Some(path) = paths.into_iter().next() {
+            return Ok(path);
+        }
+    }
+
+    let image_id = item
+        .image_id
+        .as_deref()
+        .and_then(|ids| ids.split(',').map(|s| s.trim()).find(|s| !s.is_empty()))
+        .ok_or_else(|| "当前条目没有可用的图片缓存".to_string())?;
+
+    // 路径白名单:image_id 会直接拼进 `{image_id}.png` 路径,必须过滤
+    // 掉 `..` 等目录穿越段。image_id 可能来自 LAN/WebDAV 同步的远端记录
+    // (clipboard.rs upsert_history_records 原文写库不校验),不可信任。
+    if !crate::services::webdav_sync::image_id::is_valid_image_id(image_id) {
+        return Err(format!("图片 ID 不合法,已拒绝访问: {}", image_id));
+    }
+
+    let image_path = crate::services::get_data_directory()?
+        .join("clipboard_images")
+        .join(format!("{}.png", image_id));
+
+    if !image_path.exists() {
+        return Err(format!("图片文件不存在: {}", image_path.display()));
+    }
+
+    Ok(image_path.to_string_lossy().to_string())
+}
+
+fn find_preferred_text_row<'a>(
+    raw_formats: &'a [ClipboardDataItem],
+) -> Option<&'a ClipboardDataItem> {
+    raw_formats
+        .iter()
+        .find(|row| {
+            row.is_primary && matches!(row.format_name.as_str(), "CF_UNICODETEXT" | "CF_TEXT")
+        })
+        .or_else(|| find_raw_row(raw_formats, "CF_UNICODETEXT"))
+        .or_else(|| find_raw_row(raw_formats, "CF_TEXT"))
+}
+
+// 把剪贴板文本格式行解码成 UTF-8 字符串:CF_UNICODETEXT 的 raw_data 是
+// UTF-16LE 编码字节,CF_TEXT 是 ANSI 字节(系统活动代码页,中文环境即
+// GBK)。CF_TEXT 若按 UTF-8 lossy 解码,非 ASCII 全变 U+FFFD 乱码——先用
+// MultiByteToWideChar 按 CP_ACP 转 UTF-16 再转 UTF-8;极少数无法映射的
+// 字节才保底逐字节转字符(极端非法编码也不阻塞粘贴)。
+fn text_row_to_string(row: &ClipboardDataItem) -> String {
+    if row.format_name == "CF_UNICODETEXT" {
+        let units: Vec<u16> = row
+            .raw_data
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+        let trimmed = units.as_slice();
+        let utf16 = String::from_utf16_lossy(trimmed);
+        String::from_utf16(trimmed).unwrap_or(utf16)
+    } else {
+        decode_ansi_text(&row.raw_data)
+    }
+}
+
+// ANSI 字节 → UTF-8:按系统活动代码页(GetACP,中文环境 CP936/GBK)经
+// MultiByteToWideChar 转 UTF-16 再转 UTF-8。直接 from_utf8_lossy 会把
+// GBK 字节当 UTF-8 解,非 ASCII 全变 U+FFFD。转码失败时退回 lossy 保底,
+// 极端非法编码也不阻塞粘贴。CP_ACP=0 让系统使用活动代码页。
+fn decode_ansi_text(raw_data: &[u8]) -> String {
+    unsafe {
+        // MultiByteToWideChar 与 GetACP 同在 Win32_Globalization 模块
+        // (CP_ACP=0 让系统使用活动代码页,中文环境 CP936/GBK)。
+        use windows::Win32::Globalization::{GetACP, MultiByteToWideChar, CP_ACP};
+        let wide_len = MultiByteToWideChar(CP_ACP, Default::default(), raw_data, None);
+        if wide_len <= 0 {
+            return String::from_utf8_lossy(raw_data).into_owned();
+        }
+        let mut wide = vec![0u16; wide_len as usize];
+        let written = MultiByteToWideChar(CP_ACP, Default::default(), raw_data, Some(&mut wide));
+        if written <= 0 {
+            return String::from_utf8_lossy(raw_data).into_owned();
+        }
+        wide.truncate(written as usize);
+        String::from_utf16_lossy(&wide)
+    }
+}
+
+// 粘贴出口 HTML 白名单净化:远端同步的 html_content 未经净化入库,经
+// CF_HTML 写系统剪贴板后由目标应用解析。仅保留无执行能力的标签与属性,
+// 剥除 script/iframe/embed/object 与全部事件处理器;普通富文本(加粗/
+// 斜体/下划线/标题/列表/链接/图片)不受影响。纯字符串级过滤,不引入
+// HTML 解析器依赖。
+fn sanitize_html_for_paste(html: &str) -> String {
+    let mut cleaned = String::with_capacity(html.len());
+    let bytes = html.as_bytes();
+    let mut i = 0;
+    let mut text_only = String::new();
+    let mut in_tag = false;
+    let mut tag_start = 0;
+
+    while i < bytes.len() {
+        match bytes[i] {
+            b'<' if !in_tag => {
+                if !text_only.is_empty() {
+                    cleaned.push_str(&text_only);
+                    text_only.clear();
+                }
+                in_tag = true;
+                tag_start = i;
+            }
+            b'>' if in_tag => {
+                let tag = html[tag_start + 1..i].trim();
+                if let Some(clean) = sanitize_tag(tag) {
+                    cleaned.push('<');
+                    cleaned.push_str(&clean);
+                    cleaned.push('>');
+                }
+                in_tag = false;
+            }
+            _ if !in_tag => {
+                text_only.push(bytes[i] as char);
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    if in_tag {
+        // 未闭合的 `<` 视作普通文本(不补标签,避免注入半截标签)。
+        cleaned.push('<');
+        cleaned.push_str(&html[tag_start + 1..]);
+    } else if !text_only.is_empty() {
+        cleaned.push_str(&text_only);
+    }
+    cleaned
+}
+
+// 单个标签名 + 属性的白名单过滤:只放行标签,属性仅保留 href/src/srcset/
+// alt/title/width/height/colspan/rowspan/start/type(仅用于列表),全部
+// 事件属性(on*)与 javascript: 协议一律剥除。
+fn sanitize_tag(raw_tag: &str) -> Option<String> {
+    let raw_tag = raw_tag.trim();
+    if raw_tag.is_empty() {
+        return None;
+    }
+    let (is_closing, rest) = match raw_tag.strip_prefix('/') {
+        Some(rest) => (true, rest),
+        None => (false, raw_tag),
+    };
+    let mut parts = rest.splitn(2, char::is_whitespace);
+    let tag_name = parts.next()?.trim().to_ascii_lowercase();
+    if !matches!(
+        tag_name.as_str(),
+        "p" | "br" | "b" | "strong" | "i" | "em" | "u" | "s" | "h1" | "h2" | "h3"
+            | "ul" | "ol" | "li" | "a" | "img" | "span" | "div" | "blockquote"
+            | "pre" | "code" | "table" | "thead" | "tbody" | "tr" | "th" | "td"
+            | "font" | "sub" | "sup" | "hr"
+    ) {
+        return None;
+    }
+    if is_closing {
+        return Some(format!("/{}", tag_name));
+    }
+    let mut attrs = String::new();
+    if let Some(attr_part) = parts.next() {
+        for attr in attr_part.split(|c: char| c.is_whitespace()).filter(|a| !a.is_empty()) {
+            let lower = attr.to_ascii_lowercase();
+            if lower.starts_with("on") {
+                continue;
+            }
+            if lower.starts_with("href=") || lower.starts_with("src=") || lower.starts_with("srcset=") {
+                if lower.contains("javascript:") {
+                    continue;
+                }
+            }
+            if matches!(
+                lower.split('=').next().unwrap_or(""),
+                "href" | "src" | "srcset" | "alt" | "title" | "width" | "height"
+                    | "colspan" | "rowspan" | "start" | "type" | "style"
+            ) {
+                attrs.push(' ');
+                attrs.push_str(attr);
+            }
+        }
+    }
+    Some(format!("{}{}", tag_name, attrs))
+}
+
+fn find_raw_row<'a>(
+    raw_formats: &'a [ClipboardDataItem],
+    format_name: &str,
+) -> Option<&'a ClipboardDataItem> {
+    raw_formats
+        .iter()
+        .find(|row| row.format_name == format_name)
+}
+
+fn append_unique_payload(payload: &mut Vec<RsClipboardContent>, extra: Vec<RsClipboardContent>) {
+    for item in extra {
+        let exists = payload
+            .iter()
+            .any(|current| same_payload_kind(current, &item));
+        if !exists {
+            payload.push(item);
+        }
+    }
+}
+
+fn same_payload_kind(left: &RsClipboardContent, right: &RsClipboardContent) -> bool {
+    match (left, right) {
+        (RsClipboardContent::Text(_), RsClipboardContent::Text(_)) => true,
+        (RsClipboardContent::Html(_), RsClipboardContent::Html(_)) => true,
+        (RsClipboardContent::Rtf(_), RsClipboardContent::Rtf(_)) => true,
+        (RsClipboardContent::Files(_), RsClipboardContent::Files(_)) => true,
+        (RsClipboardContent::Image(_), RsClipboardContent::Image(_)) => true,
+        (RsClipboardContent::Other(left_name, _), RsClipboardContent::Other(right_name, _)) => {
+            left_name == right_name
+        }
+        _ => false,
+    }
+}
+
+// 转换旧格式图片为新格式（更新 clipboard 表）
+fn convert_legacy_image_format(item: &ClipboardItem) -> Result<String, String> {
+    use crate::services::get_data_directory;
+
+    let image_id = item
+        .image_id
+        .as_deref()
+        .or_else(|| item.content.strip_prefix("image:"))
+        .ok_or("无法获取图片ID")?;
+
+    // 与 resolve_item_image_path 同款白名单,image_id 不可信,防目录穿越。
+    if !crate::services::webdav_sync::image_id::is_valid_image_id(image_id) {
+        return Err(format!("图片 ID 不合法,已拒绝访问: {}", image_id));
+    }
+
+    let image_path = get_data_directory()?
+        .join("clipboard_images")
+        .join(format!("{}.png", image_id));
+
+    if !image_path.exists() {
+        return Err(format!("图片文件不存在: {}", image_path.display()));
+    }
+
+    let file_data = serde_json::json!({
+        "files": [{
+            "path": image_path.to_str().ok_or("路径转换失败")?,
+            "name": format!("{}.png", image_id),
+            "size": std::fs::metadata(&image_path).map(|m| m.len()).unwrap_or(0),
+            "is_directory": false,
+            "file_type": "PNG"
+        }],
+        "operation": "copy"
+    });
+
+    Ok(format!("files:{}", file_data))
+}
+
+// 更新条目内容并刷新时间戳
+fn update_item_content(
+    clipboard_id: Option<i64>,
+    favorite_id: Option<&str>,
+    new_content: &str,
+) -> Result<(), String> {
+    use crate::services::database::connection::with_connection;
+    use rusqlite::params;
+
+    with_connection(|conn| {
+        let now = chrono::Local::now().timestamp();
+
+        if let Some(id) = clipboard_id {
+            // 只刷新内容与更新时间;created_at 是历史时间轴锚点,
+            // 重置成当前时间会让旧条目跳到列表最前。
+            conn.execute(
+                "UPDATE clipboard SET content = ?, updated_at = ? WHERE id = ?",
+                params![new_content, now, id],
+            )?;
+        } else if let Some(id) = favorite_id {
+            conn.execute(
+                "UPDATE favorites SET content = ?, updated_at = ? WHERE id = ?",
+                params![new_content, now, id],
+            )?;
+        }
+        Ok(())
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::{fn_body, source_file, strip_line_comments};
+
+    fn paste_source() -> String {
+        strip_line_comments(&source_file("src/services/paste/paste_handler.rs"))
+    }
+
+    // 粘贴后置顶必须统一在 paste_item_internal 成功路径收口(遵循 paste_to_top
+    // 设置)——数字快捷键/纯文本快捷键/quickpaste 后端路径都经此函数,若各入口
+    // 手写置顶会分叉;复制动作(simulate=false)不置顶。护栏断言:函数体内必须
+    // 含 paste_to_top 判断与 move_clipboard_item_to_top 调用,且俱在 simulate 块内。
+    #[test]
+    fn paste_to_top_is_centralized_in_paste_item_internal() {
+        let src = paste_source();
+        let body = fn_body(&src, "paste_item_internal");
+        let sim_start = body
+            .find("if simulate {")
+            .expect("paste_item_internal 必须含模拟粘贴块");
+        let sim_end = body
+            .find("\n    }\n\n    Ok(())")
+            .expect("模拟粘贴块必须以 Ok(()) 结束");
+        let sim_block = &body[sim_start..sim_end];
+        assert!(
+            sim_block.contains("get_settings().paste_to_top"),
+            "粘贴后置顶必须读取 paste_to_top 设置"
+        );
+        assert!(
+            !sim_block.contains("!crate::services::settings::get_settings().paste_to_top"),
+            "paste_to_top 判断不得被反转(条件反转会让置顶永远不执行)"
+        );
+        assert!(
+            sim_block.contains("move_clipboard_item_to_top(id)"),
+            "粘贴后置顶必须调 move_clipboard_item_to_top"
+        );
+        // 置顶只在模拟粘贴(simulate)成功后执行,复制动作不置顶。
+        let top = sim_block
+            .find("move_clipboard_item_to_top(id)")
+            .expect("缺置顶调用");
+        let play = sim_block
+            .find("play_paste_on_success")
+            .expect("缺粘贴成功音效");
+        assert!(
+            play < top,
+            "置顶必须在粘贴成功(音效)之后执行"
+        );
+    }
+
+    // white-list 必须同时覆盖 resolve_item_image_path 与 convert_legacy_image_format
+    #[test]
+    fn image_id_whitelist_covers_image_path_readers() {
+        let src = paste_source();
+        let resolve = fn_body(&src, "resolve_item_image_path");
+        assert!(
+            resolve.contains("is_valid_image_id(image_id)"),
+            "resolve_item_image_path 必须白名单校验 image_id"
+        );
+        let convert = fn_body(&src, "convert_legacy_image_format");
+        assert!(
+            convert.contains("is_valid_image_id(image_id)"),
+            "convert_legacy_image_format 必须白名单校验 image_id"
+        );
+        assert_eq!(
+            resolve.matches("join(\"clipboard_images\")").count(),
+            1,
+            "resolve 体只允许一处拼路径"
+        );
+    }
+
+    // 纯文本粘贴必须优先进 Text 形态:CF_UNICODETEXT/CF_TEXT 的原始字节与
+    // 捕获侧纯文本识别为 Text 的 UTF-8 文本哈希口径不一致,若继续用 Other
+    // 包装,预置哈希与捕获哈希必然失配,自粘贴 fast-path 失效、重复项落到
+    // find_duplicate_item 兜底把该项刷到首位,pasteToTop=false 设置失效。
+    #[test]
+    fn plain_text_payload_uses_text_variant_for_preferred_text_row() {
+        let src = paste_source();
+        let plain = fn_body(&src, "build_plain_text_payload");
+        assert!(
+            plain.contains("RsClipboardContent::Text("),
+            "纯文本路径必须推 Text 形态"
+        );
+        assert!(
+            plain.contains("text_row_to_string(raw_text)"),
+            "CF_UNICODETEXT 原始字节必须解码后进 Text"
+        );
+        assert_eq!(
+            plain.matches("RsClipboardContent::Other(").count(),
+            0,
+            "纯文本路径不得再用 Other 包装文本格式"
+        );
+
+        let all_formats = fn_body(&src, "build_all_formats_payload");
+        assert!(
+            all_formats.contains("text_row_to_string(row)"),
+            "多格式路径的文本行必须解码进 Text 形态"
+        );
+        assert!(
+            all_formats.contains("\"CF_UNICODETEXT\" | \"CF_TEXT\""),
+            "多格式路径必须按格式名判定文本行"
+        );
+
+        let decoder = fn_body(&src, "text_row_to_string");
+        assert!(
+            decoder.contains("String::from_utf16"),
+            "CF_UNICODETEXT 必须按 UTF-16 解码"
+        );
+        assert!(
+            decoder.contains("decode_ansi_text"),
+            "CF_TEXT(ANSI)必须走活动代码页转码,不得裸 from_utf8_lossy 乱码"
+        );
+        assert!(
+            !decoder.contains("String::from_utf8_lossy(&row.raw_data)"),
+            "CF_TEXT 分支禁止再按 UTF-8 lossy 直接解码(GBK 字节变 U+FFFD)"
+        );
+
+        let ansi_decoder = fn_body(&src, "decode_ansi_text");
+        assert!(
+            ansi_decoder.contains("MultiByteToWideChar"),
+            "ANSI 解码必须经 MultiByteToWideChar 转码"
+        );
+        assert!(
+            ansi_decoder.contains("CP_ACP"),
+            "ANSI 解码必须用 CP_ACP(系统活动代码页,中文环境 GBK)"
+        );
+        assert!(
+            ansi_decoder.contains("GetACP") || ansi_decoder.contains("CP_ACP"),
+            "ANSI 解码必须引用系统活动代码页来源"
+        );
+    }
+
+    // 远端 html_content 粘贴出口净化护栏:build_html_payload 与
+    // build_legacy_all_formats_payload 两个 fallback 分支写剪贴板前必须
+    // 经 sanitize_html_for_paste 白名单净化——LAN/WebDAV 对端不可信,原文
+    // 经 CF_HTML 转发到目标应用(Office/浏览器)可能执行内嵌脚本/事件属性。
+    #[test]
+    fn remote_html_paythrough_is_sanitized_before_paste() {
+        let src = paste_source();
+        let html_body = fn_body(&src, "build_html_payload");
+        assert!(
+            html_body.contains("sanitize_html_for_paste(html)"),
+            "build_html_payload 的 html fallback 必须经白名单净化后写剪贴板"
+        );
+        assert!(
+            !html_body.contains("generate_cf_html(html))"),
+            "build_html_payload 禁止对远端 html 原文包 CF_HTML(未经净化)"
+        );
+        let legacy_body = fn_body(&src, "build_legacy_all_formats_payload");
+        assert!(
+            legacy_body.contains("sanitize_html_for_paste(html)"),
+            "legacy 多格式路径的 html fallback 必须同样净化"
+        );
+        assert!(
+            !legacy_body.contains("generate_cf_html(html)"),
+            "legacy 路径禁止对远端 html 原文包 CF_HTML"
+        );
+        let sanitizer = fn_body(&src, "sanitize_html_for_paste");
+        assert!(
+            src.contains("fn sanitize_tag"),
+            "必须提供标签白名单过滤函数"
+        );
+        assert!(
+            sanitizer.contains("on") && src.contains("starts_with(\"on\")"),
+            "净化必须剥除全部事件属性(on*)"
+        );
+        assert!(
+            src.contains("javascript:"),
+            "净化必须拒绝 javascript: 协议"
+        );
+    }
+
+    // 净化函数行为自检:普通富文本标签保留、script/iframe 与事件属性被剥除、
+    // javascript: 协议链接被剥除。
+    #[test]
+    fn sanitize_html_strips_executable_content() {
+        let input = r#"<p onclick="alert(1)">hello <b>world</b></p><script>alert(2)</script><a href="javascript:alert(3)">x</a><img src="a.png" onerror="alert(4)">"#;
+        let cleaned = sanitize_html_for_paste(input);
+        assert!(cleaned.contains("<b>"), "普通富文本标签必须保留");
+        assert!(cleaned.contains("hello"), "文本内容必须保留");
+        assert!(!cleaned.contains("script"), "script 标签必须剥除");
+        assert!(!cleaned.contains("onclick"), "事件属性必须剥除");
+        assert!(!cleaned.contains("onerror"), "事件属性必须剥除");
+        assert!(!cleaned.contains("javascript:"), "javascript: 协议必须剥除");
+    }
+
+    // 旧格式图片粘贴转换刷新条目内容时,只许动内容与更新时间——
+    // created_at 若被重置为当前时间,历史条目的时间轴会被整体后移,
+    // 按创建时间排序的历史列表里该条会跳到最前面,语义完全错误。
+    #[test]
+    fn clipboard_update_keeps_created_at_unchanged() {
+        let src = paste_source();
+        let body = fn_body(&src, "update_item_content");
+        assert!(
+            body.contains("UPDATE clipboard SET content = ?, updated_at = ? WHERE id = ?"),
+            "clipboard 分支不得把 created_at 重置为当前时间"
+        );
+        assert!(
+            !body.contains("created_at = ?"),
+            "clipboard 分支更新不得触碰 created_at"
+        );
+        assert_eq!(
+            body.matches("updated_at = ?").count(),
+            2,
+            "clipboard 与 favorites 两条 UPDATE 都应刷新 updated_at"
+        );
+    }
+}
