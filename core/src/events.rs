@@ -82,6 +82,15 @@ pub fn emit_clipboard_updated(event: ClipboardUpdatedEvent) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, MutexGuard};
+
+    // 事件总线是进程级全局单队列,两个测试并发跑会互相 drain 清空对方
+    // 投递的事件(§10.4 共享全局静态并发污染)。模块内串行化。
+    static SERIAL: Mutex<()> = Mutex::new(());
+
+    fn lock_serial() -> MutexGuard<'static, ()> {
+        SERIAL.lock().unwrap_or_else(|e| e.into_inner())
+    }
 
     // 事件总线必须能跨线程投递并按 FIFO 排空。
     // 注意:队列是进程级全局,其它测试(尤其 clipboard 相关)可能在同一
@@ -89,6 +98,7 @@ mod tests {
     // 本测试投递的两条必定按序出现即可。
     #[test]
     fn events_round_trip_in_order() {
+        let _g = lock_serial();
         post(AppEvent::PasteCountUpdated(1));
         post(AppEvent::FavoritePasteCountUpdated("fav".into()));
         let drained = drain();
@@ -107,6 +117,7 @@ mod tests {
     // drain 之后队列必须为空（不重复消费）
     #[test]
     fn drain_empties_queue() {
+        let _g = lock_serial();
         post(AppEvent::TrayMenuRefresh);
         let _ = drain();
         assert!(drain().is_empty(), "排空后再次 drain 必须为空");
