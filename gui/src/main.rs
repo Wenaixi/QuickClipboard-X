@@ -3,8 +3,8 @@
 use eframe::egui;
 use quickclipboard_core::services::clipboard::start_clipboard_monitor;
 use quickclipboard_core::services::database::{
-    init_database, query_clipboard_items, query_favorites, ClipboardItem, FavoriteItem,
-    FavoritesQueryParams, QueryParams,
+    clear_clipboard_history, init_database, query_clipboard_items, query_favorites, ClipboardItem,
+    FavoriteItem, FavoritesQueryParams, QueryParams,
 };
 use quickclipboard_core::services::paste::{
     copy_clipboard_item, copy_favorite_item, paste_clipboard_item_with_update,
@@ -53,6 +53,7 @@ struct RefactorShell {
     content_filter: String,
     tab: Tab,
     status: String,
+    confirm_clear: bool,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -113,6 +114,7 @@ impl Default for RefactorShell {
             content_filter: String::new(),
             tab: Tab::History,
             status: String::new(),
+            confirm_clear: false,
         }
     }
 }
@@ -151,6 +153,32 @@ impl eframe::App for RefactorShell {
                     Tab::History => self.load_history(),
                     Tab::Favorites => self.load_favorites(),
                 }
+            }
+            // 清空历史:二次点击确认(第一次点击变红提示,再点才执行),
+            // 避免误触清空全部剪贴板历史。
+            let clear_label = if self.confirm_clear { "确认清空全部历史?" } else { "清空历史" };
+            let clear_btn = egui::Button::new(clear_label)
+                .fill(if self.confirm_clear {
+                    egui::Color32::from_rgb(180, 40, 40)
+                } else {
+                    egui::Color32::TRANSPARENT
+                });
+            if ui.add(clear_btn).clicked() {
+                if self.confirm_clear {
+                    match clear_clipboard_history() {
+                        Ok(()) => {
+                            self.status = "已清空剪贴板历史".to_string();
+                            self.confirm_clear = false;
+                            self.load_history();
+                        }
+                        Err(e) => self.status = format!("清空历史失败: {}", e),
+                    }
+                } else {
+                    self.confirm_clear = true;
+                }
+            } else if self.confirm_clear {
+                // 第一次点击后未确认前,再次点其他按钮即放弃确认态
+                self.confirm_clear = false;
             }
             ui.label(format!("历史上限: {}", self.history_limit));
         });
