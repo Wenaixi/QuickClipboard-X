@@ -6,7 +6,9 @@ use quickclipboard_core::services::database::{
     init_database, query_clipboard_items, query_favorites, ClipboardItem, FavoriteItem,
     FavoritesQueryParams, QueryParams,
 };
-use quickclipboard_core::services::paste::{copy_clipboard_item, copy_favorite_item};
+use quickclipboard_core::services::paste::{
+    copy_clipboard_item, copy_favorite_item, paste_clipboard_item_with_update,
+};
 use quickclipboard_core::services::settings::{get_data_directory, get_settings};
 
 fn main() -> eframe::Result {
@@ -165,6 +167,13 @@ impl eframe::App for RefactorShell {
                                     item.content_type.split(',').next().unwrap_or("?"),
                                     preview
                                 ));
+                                if ui.small_button("粘贴").clicked() {
+                                    let clone = item.clone();
+                                    match paste_clipboard_item_with_update(&clone) {
+                                        Ok(()) => eprintln!("已粘贴: id={}", item.id),
+                                        Err(e) => eprintln!("粘贴失败: {}", e),
+                                    }
+                                }
                                 if ui.small_button("复制").clicked() {
                                     let clone = item.clone();
                                     match copy_clipboard_item(&clone) {
