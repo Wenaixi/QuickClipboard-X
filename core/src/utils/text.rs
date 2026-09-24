@@ -185,6 +185,65 @@ mod tests {
         assert!(excerpt.contains("关键字"));
     }
 
+    // 短文本不超过上限:原样返回,不加省略号(截断只对超限文本生效)。
+    #[test]
+    fn truncate_string_keeps_short_text_untouched() {
+        assert_eq!(truncate_string("abc".to_string(), 10), "abc");
+        assert_eq!(truncate_string("".to_string(), 10), "", "空串原样返回");
+    }
+
+    // 超长文本在字符边界截断并加「已截断」标注,长度受 max_len 约束。
+    #[test]
+    fn truncate_string_truncates_at_char_boundary() {
+        let long = format!("{}", "字".repeat(500));
+        let out = truncate_string(long, 100);
+        assert!(out.len() <= 100, "截断结果不得超过 max_len,实际 {}", out.len());
+        assert!(out.ends_with("...(内容过长已截断)"));
+    }
+
+    // 多字节字符时截断点必须落在字符边界:直接 s.get(..max_len) 会 panic,
+    // 这里验证 100 上限下「甲」连续文本仍安全返回。
+    #[test]
+    fn truncate_string_handles_multibyte_without_panicking() {
+        let long = format!("{}", "甲".repeat(100));
+        let out = truncate_string(long, 80);
+        assert!(out.len() <= 80);
+    }
+
+    // 截断点退化为 0(极短上限)时返回兜底标注而非 panic。
+    #[test]
+    fn truncate_string_degrades_to_placeholder_on_tiny_limit() {
+        let out = truncate_string("一些内容".to_string(), 1);
+        assert!(out.contains("已截断"));
+    }
+
+    // truncate_around_keyword 找不到关键词时回退到普通截断。
+    #[test]
+    fn truncate_around_keyword_falls_back_when_keyword_absent() {
+        let long = format!("{}", "无关键词文本".repeat(200));
+        let out = truncate_around_keyword(long, "不存在", 300);
+        assert!(out.len() <= 300);
+        assert!(out.ends_with("...") || out.contains("已截断"));
+    }
+
+    // truncate_around_keyword 超短 max_len 时:关键词范围放不下,回退普通截断,
+    // 且绝不 panic。
+    #[test]
+    fn truncate_around_keyword_handles_tiny_limit() {
+        let content = format!("{}目标{}", "前".repeat(100), "后".repeat(100));
+        let out = truncate_around_keyword(content, "目标", 5);
+        assert!(out.len() <= 5);
+    }
+
+    // find_keyword_range 大小写不敏感匹配的字节索引:关键词在原文的偏移
+    // 必须与 to_lowercase 后的偏移严格对应,否则中文/ASCII 混合截断会错位。
+    #[test]
+    fn truncate_around_keyword_matches_case_insensitively_in_ascii() {
+        let content = format!("{}Needle{}", "x".repeat(50), "y".repeat(50));
+        let out = truncate_around_keyword(content, "needle", 40);
+        assert!(out.contains("Needle"));
+    }
+
     #[test]
     fn calculate_char_count_text_only_for_textual_types() {
         let count = calculate_char_count("hello", "text").expect("text 应返回字符数");
