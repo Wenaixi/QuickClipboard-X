@@ -52,6 +52,7 @@ struct RefactorShell {
     search: String,
     content_filter: String,
     tab: Tab,
+    status: String,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -111,6 +112,7 @@ impl Default for RefactorShell {
             search: String::new(),
             content_filter: String::new(),
             tab: Tab::History,
+            status: String::new(),
         }
     }
 }
@@ -171,15 +173,15 @@ impl eframe::App for RefactorShell {
                                 if ui.small_button("粘贴").clicked() {
                                     let clone = item.clone();
                                     match paste_clipboard_item_with_update(&clone) {
-                                        Ok(()) => eprintln!("已粘贴: id={}", item.id),
-                                        Err(e) => eprintln!("粘贴失败: {}", e),
+                                        Ok(()) => self.status = format!("已粘贴: id={}", item.id),
+                                        Err(e) => self.status = format!("粘贴失败: {}", e),
                                     }
                                 }
                                 if ui.small_button("复制").clicked() {
                                     let clone = item.clone();
                                     match copy_clipboard_item(&clone) {
-                                        Ok(()) => eprintln!("已复制到系统剪贴板: id={}", item.id),
-                                        Err(e) => eprintln!("复制失败: {}", e),
+                                        Ok(()) => self.status = format!("已复制到系统剪贴板: id={}", item.id),
+                                        Err(e) => self.status = format!("复制失败: {}", e),
                                     }
                                 }
                             });
@@ -203,15 +205,15 @@ impl eframe::App for RefactorShell {
                                                                 if ui.small_button("粘贴").clicked() {
                                     let clone = item.clone();
                                     match paste_favorite_item_with_update(&clone, &item.id) {
-                                        Ok(()) => eprintln!("已粘贴收藏: id={}", item.id),
-                                        Err(e) => eprintln!("粘贴收藏失败: {}", e),
+                                        Ok(()) => self.status = format!("已粘贴收藏: id={}", item.id),
+                                        Err(e) => self.status = format!("粘贴收藏失败: {}", e),
                                     }
                                 }
                                 if ui.small_button("复制").clicked() {
                                     let clone = item.clone();
                                     match copy_favorite_item(&clone, &item.id) {
-                                        Ok(()) => eprintln!("已复制收藏到系统剪贴板: id={}", item.id),
-                                        Err(e) => eprintln!("复制收藏失败: {}", e),
+                                        Ok(()) => self.status = format!("已复制收藏到系统剪贴板: id={}", item.id),
+                                        Err(e) => self.status = format!("复制收藏失败: {}", e),
                                     }
                                 }
                             });
@@ -230,6 +232,10 @@ impl eframe::App for RefactorShell {
                 Tab::History => self.load_history(),
                 Tab::Favorites => self.load_favorites(),
             }
+        }
+        // 状态栏:展示最近一次操作结果(复制/粘贴成功或失败)。
+        if !self.status.is_empty() {
+            ui.label(&self.status);
         }
     }
 }
