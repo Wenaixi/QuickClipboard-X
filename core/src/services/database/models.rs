@@ -183,3 +183,56 @@ impl Default for FavoritesQueryParams {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // has_more:当且仅当 offset + 本页条数 < 总数时为真。
+    // 分页的"是否还有下一页"判定的唯一决策点。
+    #[test]
+    fn paginated_has_more_is_true_only_when_more_pages_exist() {
+        // 5 条总数,offset=0 取 3 条 → 还有 2 条
+        let r = PaginatedResult::new(5, vec![1i32, 2, 3], 0, 3);
+        assert!(r.has_more);
+        // 最后一页正好取满(offset=3 取 2 条,总数 5) → 无更多
+        let r = PaginatedResult::new(5, vec![4i32, 5], 3, 3);
+        assert!(!r.has_more, "末页必须 has_more=false");
+        // 空数据:第一条分页即空 → 无更多
+        let r = PaginatedResult::new(0, Vec::<i32>::new(), 0, 50);
+        assert!(!r.has_more);
+    }
+
+    // PaginatedResult 只读使用 new 构造,字段暴露为公开但仿真构造
+    // 一致性:offset/limit/total_count 原样透传。
+    #[test]
+    fn paginated_result_passthrough_fields() {
+        let r = PaginatedResult::new(100, vec!["a".to_string()], 0, 10);
+        assert_eq!(r.total_count, 100);
+        assert_eq!(r.offset, 0);
+        assert_eq!(r.limit, 10);
+        assert_eq!(r.items.len(), 1);
+    }
+
+    // QueryParams 默认值:首页 50 条、无过滤、无搜索。
+    #[test]
+    fn query_params_defaults_to_first_page_50() {
+        let p = QueryParams::default();
+        assert_eq!(p.offset, 0);
+        assert_eq!(p.limit, 50);
+        assert!(p.search.is_none());
+        assert!(p.content_type.is_none());
+        assert!(p.paste_status.is_none());
+    }
+
+    // FavoritesQueryParams 默认值:首页 50 条、无分组/搜索/过滤。
+    #[test]
+    fn favorites_query_params_defaults_to_all_groups_first_page() {
+        let p = FavoritesQueryParams::default();
+        assert_eq!(p.offset, 0);
+        assert_eq!(p.limit, 50);
+        assert!(p.group_name.is_none());
+        assert!(p.search.is_none());
+        assert!(p.content_type.is_none());
+    }
+}
+
