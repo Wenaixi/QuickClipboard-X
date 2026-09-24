@@ -268,7 +268,77 @@ pub fn simulate_paste() -> Result<(), String> {
     
     enigo.key(Key::Control, Direction::Release)
         .map_err(|e| format!("释放Ctrl失败: {}", e))?;
-    
+
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    // 串行化写 CURRENT_TRIGGER_KEY 的测试，防止并发跑时互相 take 干扰。
+    static SERIAL: Mutex<()> = Mutex::new(());
+
+    fn lock_serial() -> std::sync::MutexGuard<'static, ()> {
+        SERIAL.lock().unwrap_or_else(|error| error.into_inner())
+    }
+
+    // 单字母大写:快捷键最后一段的 ASCII 大写字母直接映射为虚拟键码。
+    #[test]
+    fn single_uppercase_letter_maps_to_vk() {
+        assert_eq!(parse_shortcut_key_vk("Ctrl+A"), Some(0x41), "Ctrl+A 应解析为 VK_A");
+        assert_eq!(parse_shortcut_key_vk("A"), Some(0x41));
+        assert_eq!(parse_shortcut_key_vk("Ctrl+Shift+V"), Some(0x56), "多段修饰键取最后一段");
+    }
+
+    // 单字母小写:不得识别为文本键(按键名规范要求大写,避免与字符语义混淆)。
+    #[test]
+    fn lowercase_letter_is_not_accepted() {
+        assert_eq!(parse_shortcut_key_vk("Ctrl+v"), None);
+    }
+
+    // 数字键:0-9 直接映射为 VK 0x30-0x39。
+    #[test]
+    fn digit_maps_to_vk() {
+        assert_eq!(parse_shortcut_key_vk("Ctrl+0"), Some(0x30));
+        assert_eq!(parse_shortcut_key_vk("9"), Some(0x39));
+    }
+
+    // 命名键:INSERT 映射 VK_INSERT, 功能键范围 F1-F24 合法(Windows 存在 VK_F13-F24)。
+    #[test]
+    fn named_keys_map_to_vk() {
+        assert_eq!(parse_shortcut_key_vk("Shift+Insert"), Some(0x2D), "INSERT 应为 VK_INSERT");
+        assert_eq!(parse_shortcut_key_vk("F1"), Some(0x70), "F1 应为 VK_F1");
+        assert_eq!(parse_shortcut_key_vk("F12"), Some(0x7B));
+        assert_eq!(parse_shortcut_key_vk("F13"), Some(0x7C), "F13 是合法功能键");
+        assert_eq!(parse_shortcut_key_vk("F24"), Some(0x87), "F24 是合法功能键上限");
+    }
+
+    // 越界 F25+ / 未知命名键 / 空段:一律 None,不得 panic。
+    #[test]
+    fn out_of_range_and_unknown_keys_are_rejected() {
+        assert_eq!(parse_shortcut_key_vk("F25"), None, "F25 超出功能键范围");
+        assert_eq!(parse_shortcut_key_vk("Esc"), None, "Esc 未纳入命名键映射");
+        assert_eq!(parse_shortcut_key_vk("Ctrl+"), None, "空尾段应拒绝");
+        assert_eq!(parse_shortcut_key_vk(""), None, "空串应拒绝");
+        assert_eq!(parse_shortcut_key_vk("INSERT+F1"), Some(0x70), "多段时取最后一段 F1");
+        assert_eq!(parse_shortcut_key_vk("F"), Some(0x46), "单字符按字母映射");
+    }
+
+    // 触发键 setter 是唯一外部接线入口:解析成功写入触发键,非法快捷键不改动当前值。
+    #[test]
+    fn trigger_key_setter_writes_only_on_valid_shortcut() {
+        let _g = lock_serial();
+        take_trigger_key();
+        assert_eq!(take_trigger_key(), None, "入参前不应有触发键残留");
+
+        set_trigger_key_from_shortcut("Ctrl+V");
+        assert_eq!(take_trigger_key(), Some(0x56), "合法快捷键应写入触发键");
+
+        set_trigger_key_from_shortcut("空格键");
+        assert_eq!(take_trigger_key(), None, "非法快捷键不得写入触发键");
+    }
 }
 
