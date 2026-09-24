@@ -352,3 +352,67 @@ pub fn set_clipboard_from_item(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 解析 files: 内容为路径列表:两条资源都依 resolve_stored_path 解析,
+    // 一条合法相对路径(禁止的父目录段输入解析为空串,http 协议路径不认识前缀原样返回)。
+    // 这里直接走合法格式路径,附一个解析失败格式的反证。
+    #[test]
+    fn parse_files_content_returns_resolved_paths() {
+        // 合法 files: 内容:两个合法相对路径条目。
+        let content =
+            r#"files:{"files":[{"path":"clipboard_images/a.png"},{"path":"pin_images/b.png"}]}"#;
+        let paths = parse_files_content(content).expect("合法 files: 内容应解析成功");
+        // resolve_stored_path 依赖运行数据目录,测试环境可能不可用:
+        // 只断言条目数量与 resolve_stored_path 返回串(可能为空串)。
+        assert_eq!(paths.len(), 2, "两个文件条目应解析为两条路径");
+    }
+
+    // 非法内容:非 files: 前缀与损坏 JSON 都返回 Err,不 panic。
+    #[test]
+    fn parse_files_content_rejects_invalid_content() {
+        assert!(parse_files_content("普通文本").is_err(), "非 files: 前缀应拒绝");
+        assert!(
+            parse_files_content("files:{broken json").is_err(),
+            "损坏 JSON 应拒绝,不 panic"
+        );
+    }
+
+    // 存在过滤:全部路径不存在时返回错误;部分存在时只返回存在的路径。
+    // resolve_stored_path 解析到空串的文件不存在,必然走 filter 丢弃。
+    #[test]
+    fn parse_files_content_existing_filters_missing_paths() {
+        let content = r#"files:{"files":[{"path":"clipboard_images/__missing_path__.png"}]}"#;
+        assert!(
+            parse_files_content_existing(content).is_err(),
+            "路径不存在应返回错误"
+        );
+    }
+
+    // 顶层 set_clipboard_from_item 分支语义:图片/文件类型必须解析出非空 files: 内容,
+    // 否则返回错误;合法 JSON 但文件列表为空时必报「无法解析文件内容」。
+    // (非 files: 前缀的 Err 已在 parse_files_content_rejects_invalid_content 覆盖,
+    // 这里验证的是 image 分支对空列表的拒绝——纯分支决策,不触碰系统剪贴板。)
+    #[test]
+    fn set_clipboard_from_item_dispatch_requires_files_content_for_image() {
+        // content_type 以 image 开头,content 是合法 files: 但空列表 → 必须报无法解析
+        match set_clipboard_from_item(
+            "image",
+            r#"files:{"files":[]}"#,
+            &None,
+            false,
+        ) {
+            Err(message) => {
+                assert!(
+                    message.contains("无法解析文件内容"),
+                    "image 类型 + 空文件列表应报无法解析,实际: {}",
+                    message
+                );
+            }
+            Ok(_) => panic!("image 类型 + 空文件列表必须返回错误"),
+        }
+    }
+}
