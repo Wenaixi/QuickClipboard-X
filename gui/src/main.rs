@@ -2,6 +2,7 @@
 
 use eframe::egui;
 use quickclipboard_core::services::database::{init_database, query_clipboard_items, ClipboardItem, QueryParams};
+use quickclipboard_core::services::paste::copy_clipboard_item;
 use quickclipboard_core::services::settings::{get_data_directory, get_settings};
 
 fn main() -> eframe::Result {
@@ -75,13 +76,22 @@ impl eframe::App for RefactorShell {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 for item in &self.items {
-                    let preview = item.content.chars().take(40).collect::<String>();
-                    let preview = if preview.is_empty() { "(空内容)" } else { &preview };
-                    ui.label(format!(
-                        "[{:>3}] {}",
-                        item.content_type.split(',').next().unwrap_or("?"),
-                        preview
-                    ));
+                    ui.horizontal(|ui| {
+                        let preview = item.content.chars().take(40).collect::<String>();
+                        let preview = if preview.is_empty() { "(空内容)" } else { &preview };
+                        ui.label(format!(
+                            "[{:>3}] {}",
+                            item.content_type.split(',').next().unwrap_or("?"),
+                            preview
+                        ));
+                        if ui.small_button("复制").clicked() {
+                            let clone = item.clone();
+                            match copy_clipboard_item(&clone) {
+                                Ok(()) => eprintln!("已复制到系统剪贴板: id={}", item.id),
+                                Err(e) => eprintln!("复制失败: {}", e),
+                            }
+                        }
+                    });
                 }
             });
         let _ = quickclipboard_core::events::drain();
