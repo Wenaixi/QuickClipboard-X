@@ -25,122 +25,23 @@ pub use settings::{AppSettings, get_settings, update_settings, get_data_director
 pub use notification::show_startup_notification;
 pub use system::hotkey;
 pub use sound::{SoundPlayer, AppSounds, mark_paste_operation};
-
-pub fn normalize_path_for_hash(path: &str) -> String {
-    let normalized = path.replace("\\", "/");
-    for prefix in ["clipboard_images/", "pin_images/"] {
-        if let Some(idx) = normalized.find(prefix) {
-            return normalized[idx..].to_string();
-        }
-    }
-    normalized
-}
+// 五个顶层纯函数与 core 逐字一致,re-export core 消除双份。
+pub use quickclipboard_core::services::{
+    is_portable_build, is_portable_runtime, normalize_path_for_hash, resolve_stored_path,
+    sanitize_remote_files_content,
+};
 
 // 检查路径是否含 . / .. 段——含父目录段的输入不得用于拼接解析，
 // 否则词法拼接后 starts_with(data_dir) 在 `..` 未折叠时必然通过，
 // 恶意同步记录可把 data_dir 之外任意路径解析出来。
 // 按分隔符拆段判断：`file..txt` 是单个 Normal 段算安全，
 // 只有独立成段的 `.`/`..` 才命中（LastIteration 等 Windows 特殊段不在此列）。
+#[allow(dead_code)]
 fn contains_parent_segments(path: &str) -> bool {
     use std::path::{Component, Path};
     Path::new(path)
         .components()
         .any(|c| matches!(c, Component::CurDir | Component::ParentDir))
-}
-
-// 解析存储的路径为实际绝对路径
-pub fn resolve_stored_path(stored_path: &str) -> String {
-    let normalized_input = stored_path.replace("/", "\\");
-
-    // 目录穿越防线：任何含 . / .. 段的输入直接返回空串，不参与拼接。
-    // 两条 `..` 折叠后的 starts_with(&data_dir) 词法比较在 Windows 上
-    // 无法可靠折叠（Path::starts_with 是组件级词法比较，Data 段不会展开），
-    // 统一在拼接前拦截父目录段最稳。返回空串而非原始输入——原始串带 ..
-    // 会被下游 fs::read 跟随，读到 data_dir 之外任意文件。
-    if contains_parent_segments(&normalized_input) {
-        return String::new();
-    }
-
-    if normalized_input.starts_with("clipboard_images\\")
-        || normalized_input.starts_with("pin_images\\")
-        || normalized_input.starts_with("image_library\\") {
-        if let Ok(data_dir) = get_data_directory() {
-            let candidate = data_dir.join(&normalized_input);
-            // 以三个固定子目录开头的拼接不可能越出 data_dir,
-            // 但仍校验解析路径确实落在 data_dir 之下(防御回归)
-            if candidate.starts_with(&data_dir) {
-                return candidate.to_string_lossy().to_string();
-            }
-        }
-    }
-
-    let search_path = stored_path.replace("\\", "/");
-    for prefix in ["clipboard_images/", "pin_images/", "image_library/"] {
-        if let Some(idx) = search_path.find(prefix) {
-            if let Ok(data_dir) = get_data_directory() {
-                let relative = search_path[idx..].replace("/", "\\");
-                let new_path = data_dir.join(&relative);
-                if new_path.exists() {
-                    if new_path.starts_with(&data_dir) {
-                        return new_path.to_string_lossy().to_string();
-                    }
-                }
-            }
-        }
-    }
-
-    stored_path.to_string()
-}
-
-// 远端同步记录(files: 内容)净化:仅保留应用管理的三个固定子目录相对路径。
-// 本地采集链路自身保证只存相对路径或本机已存在路径(processor collect_file_info),
-// 而 LAN 对端/WebDAV 下发的 content 完全不可信——恶意对端可下发本机绝对路径
-// 让 hydrate 时 resolve_stored_path 原样返回、exists() 探测到文件后经 asset 协议
-// 拉进渲染。绝对路径或含 .. 段路径的条目在写库前整条删除,净化幂等。
-pub fn sanitize_remote_files_content(content: &str) -> String {
-    if !content.starts_with("files:") {
-        return content.to_string();
-    }
-    let Ok(mut data) = serde_json::from_str::<crate::services::paste::FilesData>(&content[6..])
-    else {
-        // 解析不了的 files: 内容原样入库(前端同样解析失败,不会加载任何路径)
-        return content.to_string();
-    };
-    data.files.retain(|file| {
-        let normalized = file.path.replace("/", "\\");
-        !contains_parent_segments(&normalized)
-            && (normalized.starts_with("clipboard_images\\")
-                || normalized.starts_with("pin_images\\")
-                || normalized.starts_with("image_library\\"))
-    });
-    match serde_json::to_string(&data) {
-        Ok(json) => format!("files:{}", json),
-        Err(_) => content.to_string(),
-    }
-}
-
-pub fn is_portable_build() -> bool {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.file_name().and_then(|s| s.to_str()).map(|s| s.to_ascii_lowercase()))
-        .map(|name| name.contains("portable"))
-        .unwrap_or(false)
-}
-
-/// 统一便携运行时检测:exe 名含 portable,或同目录有 portable.flag / portable.txt。
-/// 所有调用点必须走这里,禁止各自内联 flag/txt 判定,避免语义漂移。
-pub fn is_portable_runtime() -> bool {
-    if is_portable_build() {
-        return true;
-    }
-    std::env::current_exe()
-        .ok()
-        .and_then(|exe| {
-            exe.parent().map(|p| {
-                p.join("portable.flag").exists() || p.join("portable.txt").exists()
-            })
-        })
-        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -151,13 +52,19 @@ mod tests {
     use crate::services::system::hotkey::test_utils::{source_file, strip_line_comments};
 
     fn bare_source(rel: &str) -> String {
-        strip_line_comments(&source_file(&format!("src/{rel}")))
+        // 路径以 ../../ 开头时直接拼接(读 core 内源码),否则走 src/ 前缀。
+        if rel.starts_with("../../") {
+            strip_line_comments(&source_file(rel))
+        } else {
+            strip_line_comments(&source_file(&format!("src/{rel}")))
+        }
     }
 
     #[test]
     fn is_portable_runtime_is_single_source_of_truth() {
-        // 1. helper 自身必须同时检查 flag + txt(语义完整)
-        let helper = bare_source("services/mod.rs");
+        // 1. helper 自身必须同时检查 flag + txt(语义完整);
+        // is_portable_runtime 已 re-export core,源码在 core crate。
+        let helper = bare_source("../../core/src/services/mod.rs");
         let fn_start = helper
             .find("pub fn is_portable_runtime")
             .expect("找不到 is_portable_runtime");
@@ -184,8 +91,9 @@ mod tests {
             ("windows/updater_window/creator.rs", "let mut is_portable"),
         ];
         // storage.rs: 私有 is_portable_mode 必须委托 helper,不得内联 join
+        // (storage.rs 已 re-export core,源码在 core crate)。
         {
-            let s = bare_source("services/settings/storage.rs");
+            let s = bare_source("../../core/src/services/settings/storage.rs");
             let start = s.find("fn is_portable_mode").expect("storage 缺 is_portable_mode");
             let end = s[start..]
                 .find("\n    fn ")
@@ -253,9 +161,10 @@ mod tests {
         // —— 不强制改,setup 语义是"若是 portable 构建则落 flag",不是 runtime 检测
     }
 
-    // 提取 resolve_stored_path 的函数体(剥注释后)
+    // 提取 resolve_stored_path 的函数体(剥注释后):本地实现已 re-export core,
+    // 源码在 core crate,护栏改读 core 内实现。
     fn resolve_stored_path_body() -> String {
-        let src = bare_source("services/mod.rs");
+        let src = bare_source("../../core/src/services/mod.rs");
         let start = src
             .find("pub fn resolve_stored_path")
             .expect("缺 resolve_stored_path");
@@ -271,7 +180,7 @@ mod tests {
         // 以固定子目录开头的输入必须解析回 data_dir 之下;含父目录段时回退原样
         // 注意 get_data_directory 依赖 app 状态,测试环境可能不可用,
         // 这里只验证纯函数式的分支决策(无 data_dir 时返回原串)。
-        let source = source_file("src/services/mod.rs");
+        let source = source_file("../../core/src/services/mod.rs");
         // 防御护栏:三个子目录前缀必须保持 starts_with(data_dir) 校验
         let count = source.matches(".starts_with(&data_dir)").count();
         assert!(
@@ -289,7 +198,7 @@ mod tests {
         // 读到 data_dir 之外任意文件。修复必须在拼接前拦截独立成段的
         // `.`/`..`(用 Component::ParentDir/CurDir,避免误伤 file..txt),
         // 拒绝时返回空串视为不存在。
-        let whole = bare_source("services/mod.rs");
+        let whole = bare_source("../../core/src/services/mod.rs");
         let helper_start = whole
             .find("fn contains_parent_segments")
             .expect("必须提供父目录段检测函数");
