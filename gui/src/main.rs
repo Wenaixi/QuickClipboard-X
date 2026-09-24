@@ -8,6 +8,7 @@ use quickclipboard_core::services::database::{
 };
 use quickclipboard_core::services::paste::{
     copy_clipboard_item, copy_favorite_item, paste_clipboard_item_with_update,
+    paste_favorite_item_with_update,
 };
 use quickclipboard_core::services::settings::{get_data_directory, get_settings};
 
@@ -199,6 +200,13 @@ impl eframe::App for RefactorShell {
                                     item.content_type.split(',').next().unwrap_or("?"),
                                     preview
                                 ));
+                                                                if ui.small_button("粘贴").clicked() {
+                                    let clone = item.clone();
+                                    match paste_favorite_item_with_update(&clone, &item.id) {
+                                        Ok(()) => eprintln!("已粘贴收藏: id={}", item.id),
+                                        Err(e) => eprintln!("粘贴收藏失败: {}", e),
+                                    }
+                                }
                                 if ui.small_button("复制").clicked() {
                                     let clone = item.clone();
                                     match copy_favorite_item(&clone, &item.id) {
