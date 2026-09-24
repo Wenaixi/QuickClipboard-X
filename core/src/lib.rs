@@ -1,9 +1,7 @@
-//! QuickClipboard 核心库（阶段 1 起承接 src-tauri/src/services 迁移）
+//! QuickClipboard 核心库（纯 Rust 重构版业务服务域）
 
-/// 占位：阶段 1 迁入剪贴板/数据库/设置等业务域
-pub fn placeholder() {}
-
-/// 连通性探针：供 gui 壳验证 core 库接线
-pub fn placeholder_exists() -> bool {
-    true
-}
+pub mod events;
+pub mod services;
+pub mod test_utils;
+pub mod utils;
+pub mod windows;

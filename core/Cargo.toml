@@ -5,3 +5,26 @@ edition.workspace = true
 description = "QuickClipboard 纯 Rust 重构核心库：业务服务域"
 
 [dependencies]
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+once_cell.workspace = true
+parking_lot.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+dirs.workspace = true
+regex.workspace = true
+sha2.workspace = true
+hex.workspace = true
+image.workspace = true
+base64.workspace = true
+tokio.workspace = true
+
+# 只开 core 实际用到的 feature，避免增量编译面膨胀
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3.6.3", features = ["windows-native"] }
+windows = { version = "0.62", features = [
+    "Win32_Storage_FileSystem",
+    "Win32_Foundation",
+] }
+windows-core.workspace = true

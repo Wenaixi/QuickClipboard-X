@@ -1,0 +1,1475 @@
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use super::models::{ClipboardDataSeed, FavoriteItem, PaginatedResult, FavoritesQueryParams};
+use super::connection::{with_connection, MAX_CONTENT_LENGTH};
+use crate::services::webdav_sync::types::{CloudRecord, CloudRecordMeta};
+use crate::utils::{is_textual_content_type, truncate_string, truncate_around_keyword, truncate_html, calculate_char_count};
+use rusqlite::{params, OptionalExtension};
+use chrono;
+
+// 字符数补齐后台线程的单飞守卫
+static FAVORITE_CHAR_COUNT_UPDATER_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+
+// 异步更新缺失的字符数
+pub fn update_missing_favorite_char_counts(items: Vec<(String, String, String)>) {
+    if items.is_empty() { return; }
+    // 单飞守卫:翻页过程中缺失 char_count 的行会不断经 query 收集到这里,
+    // 每页都 spawn 一个后台线程会堆积成串行抢 DB 锁的线程群。一次只允许
+    // 一个在飞线程处理,其余调用直接放弃(下次翻页仍会补齐,语义无损)。
+    if FAVORITE_CHAR_COUNT_UPDATER_IN_FLIGHT.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(move || {
+        let _ = with_connection(|conn| {
+            for (id, content, content_type) in items {
+                if let Some(char_count) = calculate_char_count(&content, &content_type) {
+                    conn.execute(
+                        "UPDATE favorites SET char_count = ?1 WHERE id = ?2",
+                        params![char_count, id],
+                    )?;
+                }
+            }
+            Ok(())
+        });
+        FAVORITE_CHAR_COUNT_UPDATER_IN_FLIGHT.store(false, Ordering::SeqCst);
+    });
+}
+
+pub fn webdav_list_favorite_records(device_id: &str) -> Result<Vec<CloudRecord>, String> {
+    with_connection(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id, COALESCE(source_device_id, ''), title, content, html_content, content_type,
+                    image_id, group_name, item_order, paste_count, char_count, created_at, updated_at
+             FROM favorites
+             ORDER BY item_order DESC, updated_at DESC, id DESC",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            let source_device_id = row
+                .get::<_, String>(1)?
+                .trim()
+                .to_string();
+            Ok(CloudRecord {
+                uuid: row.get(0)?,
+                source_device_id: if source_device_id.is_empty() { device_id.to_string() } else { source_device_id },
+                is_remote: false,
+                title: row.get(2)?,
+                content: row.get(3)?,
+                html_content: row.get(4)?,
+                content_type: row.get(5)?,
+                image_id: row.get(6)?,
+                group_name: row.get(7)?,
+                item_order: row.get(8)?,
+                paste_count: row.get(9)?,
+                char_count: row.get(10)?,
+                source_app: None,
+                source_icon_hash: None,
+                created_at: row.get(11)?,
+                updated_at: row.get(12)?,
+            })
+        })?;
+
+        Ok(rows.filter_map(|row| row.ok()).collect())
+    })
+}
+
+pub fn webdav_list_favorite_record_metas() -> Result<Vec<CloudRecordMeta>, String> {
+    with_connection(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id, updated_at, image_id
+             FROM favorites
+             ORDER BY item_order DESC, updated_at DESC, id DESC",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(CloudRecordMeta {
+                uuid: row.get(0)?,
+                updated_at: row.get(1)?,
+                image_id: row.get(2)?,
+            })
+        })?;
+
+        Ok(rows.filter_map(|row| row.ok()).collect())
+    })
+}
+
+pub fn webdav_get_favorite_record_by_uuid(uuid: &str, device_id: &str) -> Result<Option<CloudRecord>, String> {
+    with_connection(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id, COALESCE(source_device_id, ''), title, content, html_content, content_type,
+                    image_id, group_name, item_order, paste_count, char_count, created_at, updated_at
+             FROM favorites
+             WHERE id = ?1
+             LIMIT 1",
+        )?;
+
+        let record = stmt.query_row(params![uuid], |row| {
+            let source_device_id = row
+                .get::<_, String>(1)?
+                .trim()
+                .to_string();
+            Ok(CloudRecord {
+                uuid: row.get(0)?,
+                source_device_id: if source_device_id.is_empty() { device_id.to_string() } else { source_device_id },
+                is_remote: false,
+                title: row.get(2)?,
+                content: row.get(3)?,
+                html_content: row.get(4)?,
+                content_type: row.get(5)?,
+                image_id: row.get(6)?,
+                group_name: row.get(7)?,
+                item_order: row.get(8)?,
+                paste_count: row.get(9)?,
+                char_count: row.get(10)?,
+                source_app: None,
+                source_icon_hash: None,
+                created_at: row.get(11)?,
+                updated_at: row.get(12)?,
+            })
+        }).optional()?;
+
+        Ok(record)
+    })
+}
+
+pub fn webdav_list_own_favorite_records(device_id: &str) -> Result<Vec<CloudRecord>, String> {
+    with_connection(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id, title, content, html_content, content_type,
+                    image_id, group_name, item_order, paste_count, char_count, created_at, updated_at
+             FROM favorites
+             WHERE source_device_id IS NULL OR source_device_id = '' OR source_device_id = ?1
+             ORDER BY item_order DESC, updated_at DESC, id DESC",
+        )?;
+
+        let rows = stmt.query_map(params![device_id], |row| {
+            Ok(CloudRecord {
+                uuid: row.get(0)?,
+                source_device_id: device_id.to_string(),
+                is_remote: false,
+                title: row.get(1)?,
+                content: row.get(2)?,
+                html_content: row.get(3)?,
+                content_type: row.get(4)?,
+                image_id: row.get(5)?,
+                group_name: row.get(6)?,
+                item_order: row.get(7)?,
+                paste_count: row.get(8)?,
+                char_count: row.get(9)?,
+                source_app: None,
+                source_icon_hash: None,
+                created_at: row.get(10)?,
+                updated_at: row.get(11)?,
+            })
+        })?;
+
+        Ok(rows.filter_map(|row| row.ok()).collect())
+    })
+}
+
+pub fn webdav_favorite_record_states() -> Result<HashMap<String, i64>, String> {
+    with_connection(|conn| {
+        let mut stmt = conn.prepare("SELECT id, updated_at FROM favorites")?;
+        let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?;
+        let mut states = HashMap::new();
+        for row in rows {
+            let (id, updated_at) = row?;
+            states.insert(id, updated_at);
+        }
+        Ok(states)
+    })
+}
+
+pub fn lan_upsert_favorite_records(records: &[CloudRecord]) -> Result<Vec<CloudRecord>, String> {
+    upsert_favorite_records(records, false)
+}
+
+pub fn webdav_repair_favorite_records(records: &[CloudRecord]) -> Result<Vec<CloudRecord>, String> {
+    upsert_favorite_records(records, true)
+}
+
+fn upsert_favorite_records(records: &[CloudRecord], ignore_tombstones: bool) -> Result<Vec<CloudRecord>, String> {
+    if records.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    with_connection(|conn| {
+        let tx = conn.unchecked_transaction()?;
+        let mut changed = Vec::new();
+
+        for record in records {
+            if record.uuid.trim().is_empty() {
+                continue;
+            }
+            // 远端 content 不可信(files: 内路径可能指向本机任意文件),
+            // 写库前净化,不放行绝对路径/含父目录段的条目
+            let mut record = record.clone();
+            if record.content_type == "file" || record.content_type == "image" {
+                record.content =
+                    crate::services::sanitize_remote_files_content(&record.content);
+            }
+            let tombstone_deleted_at = super::tombstones::sync_tombstone_deleted_at_in_conn(
+                &tx,
+                super::tombstones::COLLECTION_FAVORITES,
+                &record.uuid,
+            )?;
+            if !ignore_tombstones && tombstone_deleted_at.map(|value| value >= record.updated_at).unwrap_or(false) {
+                continue;
+            }
+            let restored_updated_at = if ignore_tombstones {
+                super::tombstones::restored_record_updated_at(record.updated_at, tombstone_deleted_at)
+            } else {
+                record.updated_at
+            };
+
+            let existing = tx
+                .query_row(
+                    "SELECT COALESCE(source_device_id, ''), title, content, html_content, content_type,
+                            image_id, group_name, item_order, paste_count, char_count, created_at, updated_at
+                     FROM favorites WHERE id = ?1 LIMIT 1",
+                    params![record.uuid],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, Option<String>>(3)?,
+                            row.get::<_, String>(4)?,
+                            row.get::<_, Option<String>>(5)?,
+                            row.get::<_, String>(6)?,
+                            row.get::<_, i64>(7)?,
+                            row.get::<_, i64>(8)?,
+                            row.get::<_, Option<i64>>(9)?,
+                            row.get::<_, i64>(10)?,
+                            row.get::<_, i64>(11)?,
+                        ))
+                    },
+                )
+                .optional()?;
+
+            if let Some((
+                source_device_id,
+                title,
+                content,
+                html_content,
+                content_type,
+                image_id,
+                group_name,
+                item_order,
+                paste_count,
+                char_count,
+                created_at,
+                updated_at,
+            )) = existing {
+                let same = source_device_id == record.source_device_id
+                    && title == record.title
+                    && content == record.content
+                    && html_content == record.html_content
+                    && content_type == record.content_type
+                    && image_id == record.image_id
+                    && group_name == record.group_name
+                    && item_order == record.item_order
+                    && paste_count == record.paste_count
+                    && char_count == record.char_count
+                    && created_at == record.created_at
+                    && updated_at == restored_updated_at;
+
+                if updated_at >= restored_updated_at || same {
+                    if tombstone_deleted_at.map(|deleted_at| deleted_at < updated_at).unwrap_or(false) {
+                        super::tombstones::delete_sync_tombstone_in_conn(
+                            &tx,
+                            super::tombstones::COLLECTION_FAVORITES,
+                            &record.uuid,
+                        )?;
+                    }
+                    continue;
+                }
+
+                tx.execute(
+                    "UPDATE favorites SET
+                        source_device_id = ?1,
+                        title = ?2,
+                        content = ?3,
+                        html_content = ?4,
+                        content_type = ?5,
+                        image_id = ?6,
+                        group_name = ?7,
+                        item_order = ?8,
+                        paste_count = ?9,
+                        char_count = ?10,
+                        created_at = ?11,
+                        updated_at = ?12
+                     WHERE id = ?13",
+                    params![
+                        record.source_device_id,
+                        record.title,
+                        record.content,
+                        record.html_content,
+                        record.content_type,
+                        record.image_id,
+                        record.group_name,
+                        record.item_order,
+                        record.paste_count,
+                        record.char_count,
+                        record.created_at,
+                        restored_updated_at,
+                        record.uuid,
+                    ],
+                )?;
+                if tombstone_deleted_at.map(|deleted_at| deleted_at < restored_updated_at).unwrap_or(false) {
+                    super::tombstones::delete_sync_tombstone_in_conn(
+                        &tx,
+                        super::tombstones::COLLECTION_FAVORITES,
+                        &record.uuid,
+                    )?;
+                }
+                let mut changed_record = record.clone();
+                changed_record.updated_at = restored_updated_at;
+                changed.push(changed_record);
+                continue;
+            }
+
+            tx.execute(
+                "INSERT INTO favorites (
+                    id, source_device_id, title, content, html_content, content_type,
+                    image_id, group_name, item_order, paste_count, char_count, created_at, updated_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                params![
+                    record.uuid,
+                    record.source_device_id,
+                    record.title,
+                    record.content,
+                    record.html_content,
+                    record.content_type,
+                    record.image_id,
+                    record.group_name,
+                    record.item_order,
+                    record.paste_count,
+                    record.char_count,
+                    record.created_at,
+                    restored_updated_at,
+                ],
+            )?;
+            if tombstone_deleted_at.map(|deleted_at| deleted_at < restored_updated_at).unwrap_or(false) {
+                super::tombstones::delete_sync_tombstone_in_conn(
+                    &tx,
+                    super::tombstones::COLLECTION_FAVORITES,
+                    &record.uuid,
+                )?;
+            }
+            let mut changed_record = record.clone();
+            changed_record.updated_at = restored_updated_at;
+            changed.push(changed_record);
+        }
+
+        tx.commit()?;
+        Ok(changed)
+    })
+}
+
+// 分页查询收藏列表
+pub fn query_favorites(params: FavoritesQueryParams) -> Result<PaginatedResult<FavoriteItem>, String> {
+    let search_keyword = params.search.clone();
+    
+    with_connection(|conn| {
+        // where_clauses 改 Vec<String>,不再 Box::leak 泄漏字符串
+        let mut where_clauses = vec![];
+        let mut count_params: Vec<Box<dyn rusqlite::ToSql>> = vec![];
+        let mut query_params: Vec<Box<dyn rusqlite::ToSql>> = vec![];
+
+        if let Some(ref group_name) = params.group_name {
+            if group_name != "全部" {
+                where_clauses.push("group_name = ?".to_string());
+                count_params.push(Box::new(group_name.clone()));
+                query_params.push(Box::new(group_name.clone()));
+            }
+        }
+
+        if let Some(ref search_query) = search_keyword {
+            if !search_query.is_empty() {
+                where_clauses.push("(title LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\' OR html_content LIKE ? ESCAPE '\\')".to_string());
+                let search_pattern = super::like_pattern(search_query);
+                count_params.push(Box::new(search_pattern.clone()));
+                count_params.push(Box::new(search_pattern.clone()));
+                count_params.push(Box::new(search_pattern.clone()));
+                query_params.push(Box::new(search_pattern.clone()));
+                query_params.push(Box::new(search_pattern.clone()));
+                query_params.push(Box::new(search_pattern));
+            }
+        }
+
+        if let Some(content_type) = params.content_type {
+            let types: Vec<_> = content_type.split(',').map(str::trim).filter(|t| !t.is_empty()).collect();
+            if !types.is_empty() && content_type != "all" {
+                // 与搜索词路径一致:转义 %/_/\ + ESCAPE,避免 content_type 含通配符时误匹配(安全修复)
+                let clauses = types.iter().map(|_| "content_type LIKE ? ESCAPE '\\'").collect::<Vec<_>>().join(" OR ");
+                where_clauses.push(format!("({})", clauses));
+                for content_type in types {
+                    let pattern = super::like_pattern(content_type);
+                    count_params.push(Box::new(pattern.clone()));
+                    query_params.push(Box::new(pattern));
+                }
+            }
+        }
+        if let Some(ref paste_status) = params.paste_status {
+            let statuses: Vec<_> = paste_status.split(',').map(str::trim).filter(|status| *status == "pasted" || *status == "unpasted").collect();
+            if statuses.len() == 1 {
+                where_clauses.push(if statuses[0] == "pasted" { "paste_count > 0".to_string() } else { "paste_count = 0".to_string() });
+            }
+        }
+
+        let where_sql = if where_clauses.is_empty() {
+            String::new()
+        } else {
+            format!("WHERE {}", where_clauses.join(" AND "))
+        };
+
+        let total_count_sql = format!("SELECT COUNT(*) FROM favorites {}", where_sql);
+        let total_count: i64 = conn.query_row(&total_count_sql, rusqlite::params_from_iter(count_params), |row| row.get(0))?;
+
+        let query_sql = format!(
+            "SELECT id, title, content, html_content, content_type, image_id, group_name, item_order, paste_count, created_at, updated_at, char_count 
+             FROM favorites {} ORDER BY item_order DESC, updated_at DESC LIMIT ? OFFSET ?",
+            where_sql
+        );
+
+        query_params.push(Box::new(params.limit));
+        query_params.push(Box::new(params.offset));
+
+        let mut stmt = conn.prepare(&query_sql)?;
+
+        let mut items_to_update: Vec<(String, String, String)> = vec![];
+        
+        let items = stmt.query_map(rusqlite::params_from_iter(query_params), |row| {
+            let id: String = row.get(0)?;
+            let content: String = row.get(2)?;
+            let html_content: Option<String> = row.get(3)?;
+            let content_type: String = row.get(4)?;
+            let char_count: Option<i64> = row.get(11)?;
+
+            let (truncated_content, truncated_html) = if is_textual_content_type(&content_type) {
+                let truncated_content = if content.len() > MAX_CONTENT_LENGTH {
+                    if let Some(ref keyword) = search_keyword {
+                        if !keyword.trim().is_empty() {
+                            truncate_around_keyword(content.clone(), keyword, MAX_CONTENT_LENGTH)
+                        } else {
+                            truncate_string(content.clone(), MAX_CONTENT_LENGTH)
+                        }
+                    } else {
+                        truncate_string(content.clone(), MAX_CONTENT_LENGTH)
+                    }
+                } else {
+                    content.clone()
+                };
+                let truncated_html = html_content.map(|html| {
+                    if html.len() > MAX_CONTENT_LENGTH {
+                        truncate_html(html, MAX_CONTENT_LENGTH)
+                    } else {
+                        html
+                    }
+                });
+                (truncated_content, truncated_html)
+            } else {
+                (content.clone(), html_content)
+            };
+
+            // 计算字符数
+            let calculated_char_count = calculate_char_count(&content, &content_type);
+            let needs_update = char_count.is_none() && calculated_char_count.is_some();
+            let final_char_count = char_count.or(calculated_char_count);
+
+            Ok((FavoriteItem {
+                id: id.clone(),
+                title: row.get(1)?,
+                content: truncated_content,
+                html_content: truncated_html,
+                content_type: content_type.clone(),
+                image_id: row.get(5)?,
+                group_name: row.get(6)?,
+                item_order: row.get(7)?,
+                paste_count: row.get(8)?,
+                char_count: final_char_count,
+                created_at: row.get(9)?,
+                updated_at: row.get(10)?,
+            }, char_count.is_none() && calculated_char_count.is_some(), id, content, content_type))
+        })?
+        .collect::<Result<Vec<_>, rusqlite::Error>>()?;
+
+        let mut result_items = vec![];
+        for (item, needs_update, id, content, content_type) in items {
+            if needs_update {
+                items_to_update.push((id, content, content_type));
+            }
+            result_items.push(item);
+        }
+
+        if !items_to_update.is_empty() {
+            update_missing_favorite_char_counts(items_to_update);
+        }
+        
+        Ok(PaginatedResult::new(total_count, result_items, params.offset, params.limit))
+    })
+}
+
+// 按逗号拆分图片ID,丢弃空段
+fn split_image_ids(s: &str) -> Vec<String> {
+    s.split(',')
+        .map(|x| x.trim())
+        .filter(|x| !x.is_empty())
+        .map(|x| x.to_string())
+        .collect()
+}
+
+// 检查图片ID是否仍被 clipboard 或 favorites 引用
+fn is_image_id_referenced(conn: &rusqlite::Connection, image_id: &str) -> Result<bool, rusqlite::Error> {
+    let exact = image_id;
+    let p1 = format!("{},%", image_id);
+    let p2 = format!("%,{},%", image_id);
+    let p3 = format!("%,{}", image_id);
+
+    let q = |table: &str| -> Result<bool, rusqlite::Error> {
+        let sql = format!(
+            "SELECT EXISTS(SELECT 1 FROM {} WHERE image_id = ?1 OR image_id LIKE ?2 OR image_id LIKE ?3 OR image_id LIKE ?4)",
+            table
+        );
+        let exists: i64 = conn.query_row(&sql, params![exact, p1, p2, p3], |row| row.get(0))?;
+        Ok(exists != 0)
+    };
+
+    Ok(q("clipboard")? || q("favorites")?)
+}
+
+// 删除图片文件。id 需先通过白名单校验,否则恶意 `../` 会被拒之门外
+fn delete_image_files(image_ids: Vec<String>) -> Result<(), String> {
+    if image_ids.is_empty() { return Ok(()); }
+    let data_dir = crate::services::get_data_directory()?;
+    let images_dir = data_dir.join("clipboard_images");
+    for iid in image_ids {
+        if !crate::services::webdav_sync::image_id::is_valid_image_id(&iid) {
+            continue;
+        }
+        let p = images_dir.join(format!("{}.png", iid));
+        if p.exists() {
+            let _ = std::fs::remove_file(&p);
+        }
+    }
+    Ok(())
+}
+
+// 获取收藏总数
+pub fn get_favorites_count(group_name: Option<String>) -> Result<i64, String> {
+    with_connection(|conn| {
+        let (sql, params): (String, Vec<Box<dyn rusqlite::ToSql>>) = if let Some(group) = group_name {
+            if group == "全部" {
+                ("SELECT COUNT(*) FROM favorites".to_string(), vec![])
+            } else {
+                ("SELECT COUNT(*) FROM favorites WHERE group_name = ?".to_string(), vec![Box::new(group)])
+            }
+        } else {
+            ("SELECT COUNT(*) FROM favorites".to_string(), vec![])
+        };
+        
+        conn.query_row(&sql, rusqlite::params_from_iter(params), |row| row.get(0))
+    })
+}
+
+// 根据ID获取收藏项（完整内容，不截断）
+pub fn get_favorite_by_id(id: &str) -> Result<Option<FavoriteItem>, String> {
+    get_favorite_by_id_with_limit(id, None)
+}
+
+// 根据ID获取收藏项（指定截断长度）
+pub fn get_favorite_by_id_with_limit(id: &str, max_content_length: Option<usize>) -> Result<Option<FavoriteItem>, String> {
+    with_connection(|conn| {
+        conn.query_row(
+            "SELECT id, title, content, html_content, content_type, image_id, group_name, item_order, paste_count, created_at, updated_at, char_count 
+             FROM favorites WHERE id = ?",
+            params![id],
+            |row| {
+                let content: String = row.get(2)?;
+                let html_content: Option<String> = row.get(3)?;
+                let content_type: String = row.get(4)?;
+                let char_count: Option<i64> = row.get(11)?;
+                let final_content = if let Some(max_len) = max_content_length {
+                    let is_text_type = is_textual_content_type(&content_type);
+                    if is_text_type && content.len() > max_len {
+                        truncate_string(content.clone(), max_len)
+                    } else {
+                        content.clone()
+                    }
+                } else {
+                    content.clone()
+                };
+                
+                // 计算字符数
+                let final_char_count = char_count.or_else(|| calculate_char_count(&content, &content_type));
+                
+                Ok(FavoriteItem {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    content: final_content,
+                    html_content,
+                    content_type,
+                    image_id: row.get(5)?,
+                    group_name: row.get(6)?,
+                    item_order: row.get(7)?,
+                    paste_count: row.get(8)?,
+                    char_count: final_char_count,
+                    created_at: row.get(9)?,
+                    updated_at: row.get(10)?,
+                })
+            }
+        )
+        .optional()
+        .map_err(|e| e.into())
+    })
+}
+
+pub fn increment_favorite_paste_count(id: &str) -> Result<(), String> {
+    with_connection(|conn| {
+        conn.execute(
+            "UPDATE favorites SET paste_count = paste_count + 1 WHERE id = ?",
+            params![id],
+        )?;
+        Ok(())
+    })
+}
+
+pub fn increment_favorite_paste_counts(ids: &[String]) -> Result<(), String> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+
+    with_connection(|conn| {
+        let tx = conn.unchecked_transaction()?;
+        for id in ids {
+            tx.execute(
+                "UPDATE favorites SET paste_count = paste_count + 1 WHERE id = ?",
+                params![id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    })
+}
+
+// 排序逻辑
+fn reorder_favorite_items(conn: &rusqlite::Connection, from_idx: usize, to_idx: usize, items: &[(String, i64)]) -> Result<(), rusqlite::Error> {
+    if from_idx == to_idx { return Ok(()); }
+    
+    let tx = conn.unchecked_transaction()?;
+    let now = chrono::Local::now().timestamp();
+    let moved_id = &items[from_idx].0;
+    let target_order = items[to_idx].1;
+
+    if from_idx < to_idx {
+        for i in (from_idx + 1)..=to_idx {
+            tx.execute("UPDATE favorites SET item_order = item_order + 1, updated_at = ?1 WHERE id = ?2", params![now, items[i].0])?;
+        }
+    } else {
+        for i in to_idx..from_idx {
+            tx.execute("UPDATE favorites SET item_order = item_order - 1, updated_at = ?1 WHERE id = ?2", params![now, items[i].0])?;
+        }
+    }
+    tx.execute("UPDATE favorites SET item_order = ?1, updated_at = ?2 WHERE id = ?3", params![target_order, now, moved_id])?;
+    tx.commit()
+}
+
+// 移动收藏项
+pub fn move_favorite_item(from_id: String, to_id: String) -> Result<(), String> {
+    if from_id == to_id { return Ok(()); }
+
+    with_connection(|conn| {
+        let items: Vec<(String, i64)> = conn
+            .prepare("SELECT id, item_order FROM favorites ORDER BY item_order DESC, updated_at DESC")?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let from_idx = items.iter().position(|(id, _)| id == &from_id)
+            .ok_or_else(|| rusqlite::Error::InvalidParameterName(format!("ID {} 不存在", from_id)))?;
+        let to_idx = items.iter().position(|(id, _)| id == &to_id)
+            .ok_or_else(|| rusqlite::Error::InvalidParameterName(format!("ID {} 不存在", to_id)))?;
+
+        reorder_favorite_items(conn, from_idx, to_idx, &items)
+    })
+}
+
+// 从剪贴板历史添加到收藏
+pub fn add_clipboard_to_favorites(clipboard_id: i64, group_name: Option<String>) -> Result<FavoriteItem, String> {
+    let group_name = group_name.unwrap_or_else(|| "全部".to_string());
+    let source_clipboard_uuid = super::clipboard::ensure_clipboard_item_uuid(clipboard_id)?;
+    let raw_formats = super::clipboard::get_clipboard_data_items("clipboard", &clipboard_id.to_string())?;
+    
+    let (favorite, created) = with_connection(|conn| {
+        let existing = conn.query_row(
+            "SELECT id, title, content, html_content, content_type, image_id, group_name,
+                    item_order, paste_count, char_count, created_at, updated_at
+             FROM favorites WHERE source_clipboard_uuid = ?1 LIMIT 1",
+            params![&source_clipboard_uuid],
+            |row| {
+                Ok(FavoriteItem {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    content: row.get(2)?,
+                    html_content: row.get(3)?,
+                    content_type: row.get(4)?,
+                    image_id: row.get(5)?,
+                    group_name: row.get(6)?,
+                    item_order: row.get(7)?,
+                    paste_count: row.get(8)?,
+                    char_count: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
+                })
+            },
+        ).optional()?;
+
+        if let Some(existing) = existing {
+            // 已收藏过的项:若用户对同一项再次「收藏到指定分组」,静默返回
+            // existing 会让前端 toast 成功而实际分组未变(用户以为已归入
+            // 目标组)。此时把收藏迁移到目标分组——同一条收藏可归属新分组,
+            // 保持单条语义(不复制出第二条同源收藏)。
+            let target_group = group_name.clone();
+            // 与 move_favorite_to_group 同对称:目标分组必须真实存在才迁移,
+            // 否则整条拒绝,不留下孤儿分组名(「全部」哨兵由前端 UI 构造,
+            // 不在此迁移路径内——迁移必然来自用户选择的分组菜单,均为真实组)。
+            if target_group != "全部" {
+                let group_exists = conn.query_row(
+                    "SELECT 1 FROM groups WHERE name = ?",
+                    params![&target_group],
+                    |_| Ok(()),
+                ).optional()?.is_some();
+                if !group_exists {
+                    return Err(rusqlite::Error::InvalidParameterName(
+                        "目标分组不存在".to_string(),
+                    ));
+                }
+            }
+            if existing.group_name != target_group {
+                conn.execute(
+                    "UPDATE favorites SET group_name = ?1, updated_at = ?2 WHERE id = ?3",
+                    params![target_group, chrono::Local::now().timestamp(), existing.id],
+                )?;
+                let mut moved = existing;
+                moved.group_name = target_group;
+                return Ok((moved, false));
+            }
+            return Ok((existing, false));
+        }
+
+        // 新收藏分支:目标分组必须真实存在(「全部」哨兵豁免,与迁移分支
+        // 同对称)——否则 INSERT 会落孤儿分组(UI 不可见但在库/同步)。
+        let new_target = group_name.clone();
+        if new_target != "全部" {
+            let group_exists = conn.query_row(
+                "SELECT 1 FROM groups WHERE name = ?",
+                params![&new_target],
+                |_| Ok(()),
+            ).optional()?.is_some();
+            if !group_exists {
+                return Err(rusqlite::Error::InvalidParameterName(
+                    "目标分组不存在".to_string(),
+                ));
+            }
+        }
+
+        let (content, html_content, content_type, image_id, char_count) = conn.query_row(
+            "SELECT content, html_content, content_type, image_id, char_count FROM clipboard WHERE id = ?",
+            params![clipboard_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<i64>>(4)?,
+                ))
+            }
+        )?;
+        
+        let title = String::new();
+
+        let final_char_count = char_count.or_else(|| calculate_char_count(&content, &content_type));
+        
+        let id = source_clipboard_uuid.clone();
+        let now = chrono::Local::now().timestamp();
+        
+        let max_order: i64 = conn.query_row(
+            "SELECT COALESCE(MAX(item_order), 0) FROM favorites",
+            [],
+            |row| row.get(0)
+        ).unwrap_or(0);
+        let new_order = max_order + 1;
+        
+        super::tombstones::delete_sync_tombstone_in_conn(
+            conn,
+            super::tombstones::COLLECTION_FAVORITES,
+            &id,
+        )?;
+
+        conn.execute(
+            "INSERT INTO favorites (id, title, content, html_content, content_type, image_id, source_clipboard_uuid, group_name, item_order, char_count, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                &id,
+                &title,
+                &content,
+                &html_content,
+                &content_type,
+                &image_id,
+                &source_clipboard_uuid,
+                &group_name,
+                new_order,
+                final_char_count,
+                now,
+                now,
+            ],
+        )?;
+        
+        Ok((FavoriteItem {
+            id,
+            title,
+            content,
+            html_content,
+            content_type,
+            image_id,
+            group_name,
+            item_order: new_order,
+            paste_count: 0,
+            char_count: final_char_count,
+            created_at: now,
+            updated_at: now,
+        }, true))
+    })?;
+
+    if created && !raw_formats.is_empty() {
+        let raw_seeds = raw_formats
+            .into_iter()
+            .map(|item| ClipboardDataSeed {
+                format_name: item.format_name,
+                raw_data: item.raw_data,
+                is_primary: item.is_primary,
+                format_order: item.format_order,
+            })
+            .collect::<Vec<_>>();
+
+        if let Err(e) = super::clipboard::save_clipboard_data_items("favorite", &favorite.id, &raw_seeds) {
+            eprintln!("保存收藏原始数据失败: {}", e);
+        }
+    }
+
+    Ok(favorite)
+}
+
+// 移动收藏项到指定分组
+pub fn move_favorite_to_group(id: String, group_name: String) -> Result<(), String> {
+    with_connection(|conn| {
+        let existing_item = conn.query_row(
+            "SELECT id, group_name FROM favorites WHERE id = ?",
+            params![&id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        )?;
+
+        let old_group_name = existing_item.1;
+
+        // 目标分组必须真实存在:收藏只能落到已创建的分组(后端「全部」哨兵
+        // 不存在于 groups 表,由前端 UI 构造;UI 移动菜单已过滤当前所在组)。
+        // 「全部」哨兵豁免——与 add_clipboard_to_favorites 迁移分支同款,
+        // 否则收藏在"某组"时移回"全部"会被误判为不存在分组而拒绝。
+        // 查询失败即"分组不存在"整条拒绝,不留下孤儿分组名。
+        if group_name != "全部" {
+            let group_exists = conn.query_row(
+                "SELECT 1 FROM groups WHERE name = ?",
+                params![&group_name],
+                |_| Ok(()),
+            ).optional()?.is_some();
+
+            if !group_exists {
+                return Err(rusqlite::Error::InvalidParameterName(
+                    "目标分组不存在".to_string(),
+                ));
+            }
+        }
+
+        if old_group_name == group_name {
+            return Ok(());
+        }
+        
+        let now = chrono::Local::now().timestamp();
+
+        conn.execute(
+            "UPDATE favorites SET group_name = ?1, updated_at = ?2 WHERE id = ?3",
+            params![&group_name, now, &id],
+        )?;
+        Ok(())
+    })
+}
+
+// 删除收藏项
+pub fn delete_favorite(id: String) -> Result<(), String> {
+    let images_to_delete: Vec<String> = with_connection(|conn| {
+        let image_ids_opt: Option<Option<String>> = conn
+            .query_row(
+                "SELECT image_id FROM favorites WHERE id = ?",
+                params![&id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?;
+        let Some(image_ids) = image_ids_opt else {
+            return Ok(Vec::new());
+        };
+
+        let tx = conn.unchecked_transaction()?;
+        super::tombstones::record_sync_tombstone_in_conn(
+            &tx,
+            super::tombstones::COLLECTION_FAVORITES,
+            &id,
+            &crate::services::sync_transfer::device_id(),
+            chrono::Local::now().timestamp(),
+        )?;
+        tx.execute("DELETE FROM favorites WHERE id = ?1", params![id])?;
+        tx.commit()?;
+
+        let mut to_delete = Vec::new();
+        if let Some(ids) = image_ids {
+            for iid in split_image_ids(&ids) {
+                if !is_image_id_referenced(conn, &iid)? {
+                    to_delete.push(iid);
+                }
+            }
+        }
+        Ok(to_delete)
+    })?;
+
+    // 与批量删除同构:单删也要清掉 clipboard_data 里该收藏的 raw formats,
+    // 否则留下孤儿行累积占空间(UI 不可见,merge 导入已有 EXISTS 守卫挡)。
+    let _ = super::clipboard::delete_clipboard_data_items("favorite", &id);
+    delete_image_files(images_to_delete)
+}
+
+pub fn delete_favorites(ids: &[String]) -> Result<(), String> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+
+    let unique_ids: Vec<String> = ids
+        .iter()
+        .cloned()
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    let images_to_delete: Vec<String> = with_connection(|conn| {
+        let mut image_id_set = std::collections::HashSet::new();
+        let mut existing_ids = Vec::new();
+        for id in &unique_ids {
+            let item_exists: Option<Option<String>> = conn
+                .query_row(
+                    "SELECT image_id FROM favorites WHERE id = ?",
+                    params![id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()?;
+
+            if let Some(image_ids) = item_exists {
+                if let Some(image_ids) = image_ids {
+                    for image_id in split_image_ids(&image_ids) {
+                        image_id_set.insert(image_id);
+                    }
+                }
+                existing_ids.push(id.clone());
+            }
+        }
+
+        let tx = conn.unchecked_transaction()?;
+        let deleted_at = chrono::Local::now().timestamp();
+        let local_device_id = crate::services::sync_transfer::device_id();
+        for id in &existing_ids {
+            super::tombstones::record_sync_tombstone_in_conn(
+                &tx,
+                super::tombstones::COLLECTION_FAVORITES,
+                id,
+                &local_device_id,
+                deleted_at,
+            )?;
+        }
+        for id in &unique_ids {
+            tx.execute("DELETE FROM favorites WHERE id = ?1", params![id])?;
+        }
+        tx.commit()?;
+
+        let mut to_delete = Vec::new();
+        for image_id in image_id_set {
+            if !is_image_id_referenced(conn, &image_id)? {
+                to_delete.push(image_id);
+            }
+        }
+
+        Ok(to_delete)
+    })?;
+
+    for id in &unique_ids {
+        let _ = super::clipboard::delete_clipboard_data_items("favorite", id);
+    }
+    delete_image_files(images_to_delete)
+}
+
+// 添加收藏项
+pub fn add_favorite(title: String, content: String, group_name: Option<String>) -> Result<FavoriteItem, String> {
+    use uuid::Uuid;
+
+    let group_name = group_name.unwrap_or_else(|| "全部".to_string());
+    // 目标分组必须真实存在(「全部」哨兵由前端 UI 构造、不在 groups 表,
+    // 豁免;其余分组名校验与 move_favorite_to_group 同对称)——收藏不得
+    // 落入不存在的分组(UI 不可见但在库/同步的数据孤儿)。
+    if group_name != "全部" {
+        let exists = with_connection(|conn| {
+            let row = conn.query_row(
+                "SELECT 1 FROM groups WHERE name = ?",
+                params![&group_name],
+                |_| Ok(()),
+            ).optional()?;
+            Ok(row.is_some())
+        })?;
+        if !exists {
+            return Err("目标分组不存在".to_string());
+        }
+    }
+    let (id, now) = (Uuid::new_v4().to_string(), chrono::Local::now().timestamp());
+
+    let char_count = Some(content.chars().count() as i64);
+    
+    with_connection(|conn| {
+        let max_order: i64 = conn.query_row(
+            "SELECT COALESCE(MAX(item_order), 0) FROM favorites",
+            [],
+            |row| row.get(0)
+        ).unwrap_or(0);
+        let new_order = max_order + 1;
+        
+        conn.execute(
+            "INSERT INTO favorites (id, title, content, html_content, content_type, image_id, group_name, item_order, char_count, created_at, updated_at) 
+             VALUES (?1, ?2, ?3, NULL, 'text', NULL, ?4, ?5, ?6, ?7, ?8)",
+            params![&id, &title, &content, &group_name, new_order, char_count, now, now],
+        )?;
+        
+        Ok(FavoriteItem {
+            id: id.clone(), title, content, html_content: None,
+            content_type: "text".to_string(), image_id: None, group_name,
+            item_order: new_order, paste_count: 0, char_count, created_at: now, updated_at: now,
+        })
+    })
+}
+
+// 更新收藏项
+pub fn update_favorite(
+    id: String,
+    title: String,
+    content: String,
+    group_name: Option<String>,
+    html_content: Option<String>,
+) -> Result<FavoriteItem, String> {
+    let group_name = group_name.unwrap_or_else(|| "全部".to_string());
+    // 目标分组必须真实存在(「全部」哨兵豁免,其余校验与 add_favorite/
+    // move_favorite_to_group 同对称)——收藏不得落入不存在的分组。
+    if group_name != "全部" {
+        let exists = with_connection(|conn| {
+            let row = conn.query_row(
+                "SELECT 1 FROM groups WHERE name = ?",
+                params![&group_name],
+                |_| Ok(()),
+            ).optional()?;
+            Ok(row.is_some())
+        })?;
+        if !exists {
+            return Err("目标分组不存在".to_string());
+        }
+    }
+
+    with_connection(|conn| {
+        // UPDATE + 旧格式 DELETE 必须在同一事务——旧实现在闭包外另起
+        // 连接 delete_clipboard_data_items,第二步失败时 content 已更新而旧 raw
+        // formats 残留,前端按新内容请求旧格式找不到对应 raw,内容回退错乱。
+        // 与 update_clipboard_item(clipboard.rs:1191+)同构:事务内直删。
+        let tx = conn.unchecked_transaction()?;
+        let (old_group_name, content_type, old_content, old_html_content) = tx.query_row(
+            "SELECT group_name, content_type, content, html_content FROM favorites WHERE id = ?",
+            params![&id],
+            |row| Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
+        ).optional()?.ok_or(rusqlite::Error::QueryReturnedNoRows)?;
+
+        let content_changed = old_content != content;
+        let html_changed = html_content
+            .as_ref()
+            .map(|new_html| old_html_content.as_deref() != Some(new_html.as_str()))
+            .unwrap_or(false);
+
+        let now = chrono::Local::now().timestamp();
+
+        let char_count = calculate_char_count(&content, &content_type);
+
+        if old_group_name != group_name {
+            if let Some(ref html_content) = html_content {
+                tx.execute(
+                    "UPDATE favorites SET title = ?1, content = ?2, html_content = ?3, group_name = ?4, char_count = ?5, updated_at = ?6 WHERE id = ?7",
+                    params![&title, &content, html_content, &group_name, char_count, now, &id],
+                )?;
+            } else {
+                // html_content=None 表示内容已变为纯文本,必须显式写 NULL——
+                // 否则 UPDATE 不含该列,旧 HTML 残留,前端仍按 HTML 渲染旧富文本。
+                tx.execute(
+                    "UPDATE favorites SET title = ?1, content = ?2, html_content = NULL, group_name = ?3, char_count = ?4, updated_at = ?5 WHERE id = ?6",
+                    params![&title, &content, &group_name, char_count, now, &id],
+                )?;
+            }
+        } else if let Some(ref html_content) = html_content {
+            tx.execute(
+                "UPDATE favorites SET title = ?1, content = ?2, html_content = ?3, char_count = ?4, updated_at = ?5 WHERE id = ?6",
+                params![&title, &content, html_content, char_count, now, &id],
+            )?;
+        } else {
+            // 同组分支与换组分支一致:纯文本更新必须清掉旧 HTML 列
+            tx.execute(
+                "UPDATE favorites SET title = ?1, content = ?2, html_content = NULL, char_count = ?3, updated_at = ?4 WHERE id = ?5",
+                params![&title, &content, char_count, now, &id],
+            )?;
+        }
+        if content_changed || html_changed {
+            // 旧 raw formats 同事务清理——UPDATE + DELETE 任一失败整体回滚
+            tx.execute(
+                "DELETE FROM clipboard_data WHERE target_kind = 'favorite' AND target_id = ?1",
+                [&id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }).map_err(|e| if e.contains("Query returned no rows") {
+        format!("收藏项不存在: {}", id)
+    } else { e })?;
+
+    get_favorite_by_id(&id)?.ok_or_else(|| format!("更新后无法获取收藏项: {}", id))
+}
+
+#[cfg(test)]
+mod content_type_like_tests {
+    use std::fs;
+
+    // 字符数补齐必须单飞:翻页命中缺失 char_count 的行会每页触发一次
+    // update_missing_favorite_char_counts,不加守卫则快速滚动时堆积互抢 DB
+    // 锁的线程群。单飞守卫要求 spawn 前 swap 置 true、线程收尾复位 false。
+    // 与 clipboard.rs 的 char_count_updater_has_in_flight_guard 同构。
+    #[test]
+    fn favorite_char_count_updater_has_in_flight_guard() {
+        use crate::test_utils::{fn_body, source_file, strip_line_comments};
+        let src = strip_line_comments(&source_file("src/services/database/favorites.rs"));
+        let body = fn_body(&src, "update_missing_favorite_char_counts");
+        let swap_pos = body
+            .find("FAVORITE_CHAR_COUNT_UPDATER_IN_FLIGHT.swap(true, Ordering::SeqCst)")
+            .expect("spawn 前必须单飞占用守卫");
+        let spawn_pos = body
+            .find("std::thread::spawn(move ||")
+            .expect("必须 spawn 后台线程");
+        assert!(swap_pos < spawn_pos, "必须先占用守卫再 spawn");
+        let reset_pos = body
+            .find("FAVORITE_CHAR_COUNT_UPDATER_IN_FLIGHT.store(false, Ordering::SeqCst)")
+            .expect("线程收尾必须复位守卫");
+        assert!(
+            reset_pos > spawn_pos,
+            "守卫复位必须在 spawn 之后(线程体内),否则复位立即执行失去单飞意义"
+        );
+    }
+
+    // 护栏:update_favorite 对 html_content=None 必须显式写 NULL 清旧 HTML,
+    // 与 update_clipboard_item 同构——否则纯文本更新残留旧富文本列。
+    #[test]
+    fn update_favorite_writes_null_html_when_none() {
+        use crate::test_utils::{fn_body, source_file, strip_line_comments};
+        let src = strip_line_comments(&source_file("src/services/database/favorites.rs"));
+        let body = fn_body(&src, "update_favorite");
+        assert!(
+            body.contains("html_content = NULL"),
+            "html_content=None 时必须显式写 NULL,不得让旧 HTML 残留"
+        );
+    }
+
+    /// 护栏:收藏 content_type 过滤必须 like_pattern + ESCAPE,与 clipboard 路径一致。
+    /// 防止未来有人退回到 format!("%{}%", content_type) 裸拼(通配符未转义)。
+    #[test]
+    fn query_favorites_content_type_uses_like_pattern_with_escape() {
+        let source = fs::read_to_string(format!(
+            "{}/src/services/database/favorites.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读 favorites.rs");
+
+        // 剥行注释,避免 §10.4 注释字面误命中
+        let body: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let start = body
+            .find("pub fn query_favorites")
+            .expect("找不到 query_favorites");
+        let after = &body[start..];
+        let end = after
+            .find("\npub fn ")
+            .or_else(|| after.find("\nfn "))
+            .map(|i| start + i)
+            .unwrap_or(body.len());
+        let fn_body = &body[start..end.min(start + 3000)];
+
+        assert!(
+            fn_body.contains("content_type LIKE ? ESCAPE"),
+            "content_type 过滤必须带 ESCAPE '\\\\'"
+        );
+        assert!(
+            fn_body.contains("super::like_pattern(&content_type)")
+                || fn_body.contains("super::like_pattern(content_type)")
+                || fn_body.contains("like_pattern(&content_type)")
+                || fn_body.contains("like_pattern(content_type)"),
+            "content_type 必须走 like_pattern,禁止 format!(\"%{{}}%\")"
+        );
+        // 负向:裸 format!("%{}%") 拼 content_type 不得再出现
+        let has_raw_format = fn_body
+            .lines()
+            .any(|l| l.contains("format!") && l.contains("%{}%") && l.contains("content_type"));
+        assert!(
+            !has_raw_format,
+            "content_type 不得再用 format!(\"%{{}}%\") 裸拼"
+        );
+    }
+
+    /// 护栏:where_clauses 必须是 Vec<String>,禁止 Box::leak 泄漏字符串。
+    #[test]
+    fn query_favorites_where_clauses_are_strings_not_leaked() {
+        let source = fs::read_to_string(format!(
+            "{}/src/services/database/favorites.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读 favorites.rs");
+        let body: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = body
+            .find("pub fn query_favorites")
+            .expect("找不到 query_favorites");
+        let after = &body[start..];
+        let end = after
+            .find("\npub fn ")
+            .or_else(|| after.find("\nfn "))
+            .map(|i| start + i)
+            .unwrap_or(body.len());
+        let fn_body = &body[start..end.min(start + 3000)];
+        assert!(
+            fn_body.contains("let mut where_clauses = vec![];"),
+            "where_clauses 必须用 Vec 收集"
+        );
+        assert!(
+            !fn_body.contains("Box::leak"),
+            "where_clauses 禁止 Box::leak 泄漏字符串,改为 Vec<String>"
+        );
+        assert!(
+            fn_body.contains("where_clauses.join(\" AND \")"),
+            "where_clauses 必须以 AND 拼接"
+        );
+    }
+
+    /// 护栏:update_favorite 的旧 raw formats 清理必须在同一事务内
+    /// (tx.execute 的 DELETE),禁止闭包外独立连接 delete_clipboard_data_items
+    /// ——否则 UPDATE 提交后第二步失败会留下"新 content 配旧 formats"不一致态。
+    /// 与 update_clipboard_item(clipboard.rs)同构。
+    #[test]
+    fn update_favorite_clears_raw_formats_in_same_transaction() {
+        let source = fs::read_to_string(format!(
+            "{}/src/services/database/favorites.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读 favorites.rs");
+        let body: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = body
+            .find("pub fn update_favorite")
+            .expect("找不到 update_favorite");
+        let after = &body[start..];
+        let end = after
+            .find("\nfn ")
+            .or_else(|| after.find("\n#[cfg(test)]"))
+            .map(|i| start + i)
+            .unwrap_or(body.len());
+        let fn_body = &body[start..end];
+        // 同一事务:unchecked_transaction + tx.execute 的 DELETE
+        assert!(
+            fn_body.contains("unchecked_transaction"),
+            "update_favorite 必须包 unchecked_transaction 保证原子性"
+        );
+        assert!(
+            fn_body.contains("tx.execute")
+                && fn_body.contains("DELETE FROM clipboard_data WHERE target_kind = 'favorite'"),
+            "旧 raw formats 清理必须在 update_favorite 内以 tx.execute 的 DELETE 完成"
+        );
+        // 负向:闭包外独立连接删除不得出现
+        assert!(
+            !fn_body.contains("delete_clipboard_data_items"),
+            "update_favorite 禁止闭包外独立连接删除旧格式,必须事务内直删"
+        );
+    }
+
+    /// 不存在项的友好错误映射必须匹配 rusqlite 的 Display 输出(小写 r),
+    /// 而不是 Error 变体名——with_connection 已把错误 format 成文本后,
+    /// contains 驼峰变体名永远不命中,用户拿不到"收藏项不存在: {id}"提示。
+    #[test]
+    fn update_favorite_maps_no_rows_to_friendly_message() {
+        let source = fs::read_to_string(format!(
+            "{}/src/services/database/favorites.rs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("读 favorites.rs");
+        let body: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = body
+            .find("pub fn update_favorite")
+            .expect("找不到 update_favorite");
+        let after = &body[start..];
+        let end = after
+            .find("\nfn ")
+            .or_else(|| after.find("\n#[cfg(test)]"))
+            .map(|i| start + i)
+            .unwrap_or(body.len());
+        let fn_body = &body[start..end];
+        assert!(
+            fn_body.contains("Query returned no rows"),
+            "必须匹配 rusqlite 对 QueryReturnedNoRows 的 Display 输出(小写 r)"
+        );
+        let map_pos = fn_body
+            .find("Query returned no rows")
+            .expect("找不到错误映射");
+        let map_seg = &fn_body[map_pos..];
+        assert!(
+            map_seg.contains("收藏项不存在"),
+            "不存在项必须映射为友好消息"
+        );
+        assert!(
+            !fn_body.contains("contains(\"QueryReturnedNoRows\")"),
+            "不得拿驼峰变体名做字符串匹配(永远为 false)——只能匹配 Display 输出"
+        );
+    }
+
+    // 已收藏项再次「收藏到指定分组」必须迁移分组:静默返回 existing 会让
+    // 前端 toast 成功而实际分组未变。收藏保持单条语义(不复制第二条同源
+    // 收藏),同源收藏归属由最后指定的分组决定。
+    #[test]
+    fn add_clipboard_to_favorites_moves_existing_to_target_group() {
+        use crate::test_utils::{fn_body, source_file, strip_line_comments};
+        let src = strip_line_comments(&source_file("src/services/database/favorites.rs"));
+        let body = fn_body(&src, "add_clipboard_to_favorites");
+        let existing_pos = body.find("if let Some(existing) = existing").unwrap();
+        let tail = &body[existing_pos..];
+        assert!(
+            tail.contains("existing.group_name != target_group"),
+            "已收藏项必须仅在目标分组不同时迁移"
+        );
+        assert!(
+            tail.contains("UPDATE favorites SET group_name"),
+            "迁移必须写 UPDATE favorites 改 group_name"
+        );
+        // 迁移前必须校验目标分组存在(与 move_favorite_to_group 同对称):
+        // 不存在的分组名会留下孤儿分组(UI 不可见但在库/同步),整条拒绝。
+        let select_pos = tail
+            .find("SELECT 1 FROM groups WHERE name = ?")
+            .expect("迁移前必须查询目标分组存在");
+        let update_pos = tail
+            .find("UPDATE favorites SET group_name")
+            .expect("迁移必须写 UPDATE");
+        assert!(
+            select_pos < update_pos,
+            "目标分组存在性校验必须先于迁移 UPDATE"
+        );
+        let insert_pos = body
+            .find("INSERT INTO favorites")
+            .unwrap_or(usize::MAX);
+        assert!(
+            update_pos < insert_pos,
+            "迁移 UPDATE 必须先于新收藏 INSERT 分支(避免重复收藏)"
+        );
+        // 新收藏分支也必须校验目标分组存在(INSERT 在 SELECT 之后)
+        let new_target_pos = tail
+            .find("let new_target = group_name.clone()")
+            .expect("新收藏分支必须声明 new_target 并校验分组");
+        let insert2_pos = tail
+            .find("INSERT INTO favorites")
+            .expect("新收藏分支必须有 INSERT");
+        assert!(
+            new_target_pos < insert2_pos,
+            "新收藏分支分组校验必须先于 INSERT(否则落孤儿分组)"
+        );
+    }
+
+    // add_favorite/update_favorite 手动添加/更新收藏:目标分组必须存在
+    // (「全部」豁免,与 move/add_clipboard_to_favorites 同对称)。
+    #[test]
+    fn add_and_update_favorite_validate_target_group_exists() {
+        use crate::test_utils::{fn_body, source_file, strip_line_comments};
+        let src = strip_line_comments(&source_file("src/services/database/favorites.rs"));
+        // add_favorite 是 pub 签名,fn_body 需要完整 pub 前缀匹配;
+        // 传 "fn add_favorite" 会匹配到测试模块内 fn 定义而非实现。
+        let add = fn_body(&src, "add_favorite");
+        let add_select = add.find("SELECT 1 FROM groups WHERE name = ?").expect("add_favorite 必须校验分组");
+        let add_insert = add.find("INSERT INTO favorites").expect("add_favorite 必须有 INSERT");
+        assert!(add_select < add_insert, "add_favorite 分组校验必须先于 INSERT");
+        assert!(add.contains("group_name != \"全部\""), "add_favorite 必须豁免「全部」哨兵");
+        // update_favorite 同理:pub 签名需完整前缀
+        let upd = fn_body(&src, "update_favorite");
+        let upd_select = upd.find("SELECT 1 FROM groups WHERE name = ?").expect("update_favorite 必须校验分组");
+        let upd_update = upd.find("UPDATE favorites").expect("update_favorite 必须有 UPDATE");
+        assert!(upd_select < upd_update, "update_favorite 分组校验必须先于 UPDATE");
+        assert!(upd.contains("group_name != \"全部\""), "update_favorite 必须豁免「全部」哨兵");
+    }
+
+    // move_favorite_to_group 必须校验目标分组存在:收藏不得落入不存在的
+    // 分组(UI 不可见但仍在库/同步的数据孤儿)。查询失败整条拒绝。
+    // 「全部」哨兵必须豁免——收藏在"某组"时移回"全部"是合法操作,
+    // 与 add_clipboard_to_favorites 迁移分支/新收藏分支同对称。
+    #[test]
+    fn move_favorite_to_group_validates_group_exists() {
+        use crate::test_utils::{fn_body, source_file, strip_line_comments};
+        let src = strip_line_comments(&source_file("src/services/database/favorites.rs"));
+        let body = fn_body(&src, "move_favorite_to_group");
+        assert!(
+            body.contains("FROM groups WHERE name ="),
+            "移动前必须查询分组存在性"
+        );
+        assert!(
+            body.contains("目标分组不存在"),
+            "不存在的分组必须拒绝(报友好错误)"
+        );
+        assert!(
+            body.contains("group_name != \"全部\""),
+            "「全部」哨兵必须豁免(移回全部是合法操作)"
+        );
+        let group_check = body.find("FROM groups WHERE name =").unwrap();
+        let update = body
+            .find("UPDATE favorites SET group_name")
+            .or_else(|| body.find("UPDATE favorites"))
+            .unwrap();
+        assert!(
+            group_check < update,
+            "分组存在性校验必须先于移动 UPDATE"
+        );
+    }
+}

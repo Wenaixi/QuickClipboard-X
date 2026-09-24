@@ -6,6 +6,24 @@ members = ["core", "gui"]
 version = "0.5.0"
 edition = "2021"
 
+# 各成员共享的依赖版本，避免 core 与 gui 版本漂移
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+once_cell = "1.18.0"
+parking_lot = "0.12"
+chrono = "0.4"
+uuid = { version = "1.0", features = ["v4"] }
+dirs = "5.0"
+regex = "1.11.1"
+sha2 = "0.10"
+hex = "0.4"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "rayon"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "time", "fs", "io-util", "net"] }
+base64 = "0.21"
+windows-core = "0.62"
+
 # 重构版发布剖面：根 manifest 的 [profile.release] 会作用于全部 workspace 成员
 #（成员 manifest 里的 [profile] 会被忽略，勿再下放）。fat LTO 面向最终产物，
 # CI Build job 用 thin-LTO env 提速。

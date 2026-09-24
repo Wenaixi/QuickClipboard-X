@@ -1,0 +1,122 @@
+mod models;
+pub mod connection;
+pub mod clipboard;
+pub mod favorites;
+pub mod groups;
+pub mod tombstones;
+
+pub use models::*;
+pub use connection::init_database;
+pub use clipboard::*;
+pub use favorites::*;
+pub use groups::*;
+pub use tombstones::*;
+
+/// 把用户搜索词转成带两侧 % 的 LIKE 模式,并转义 \, %, _ 三个通配符。
+/// 配合 SQL 端 `ESCAPE '\\'` 使用,避免用户输入 `%`/`_` 被当成通配符。
+// 增量 pull 的本地锚点:本地历史/收藏的 MAX(updated_at),作为下次
+// 拉取的 since——更早记录已落地,重拉幂等,只省带宽与会话时长。
+// 同秒漏拉配套:拉取端 since=MAX(updated_at) 时,服务端
+// list_*_records_since 必须用 >= 过滤才能带上同秒新增/更新的记录;
+// 锚点本身保持不变(MAX 语义,>= 由服务端负责)。
+pub fn lan_local_history_max_updated_at() -> Result<Option<i64>, String> {
+    connection::with_connection(|conn| {
+        Ok(conn.query_row("SELECT COALESCE(MAX(updated_at), 0) FROM clipboard", [], |row| {
+            row.get::<_, i64>(0)
+        })?)
+    })
+    .map(|max_ts| if max_ts > 0 { Some(max_ts) } else { None })
+}
+
+pub fn lan_local_favorites_max_updated_at() -> Result<Option<i64>, String> {
+    connection::with_connection(|conn| {
+        Ok(conn.query_row("SELECT COALESCE(MAX(updated_at), 0) FROM favorites", [], |row| {
+            row.get::<_, i64>(0)
+        })?)
+    })
+    .map(|max_ts| if max_ts > 0 { Some(max_ts) } else { None })
+}
+
+pub fn like_pattern(input: &str) -> String {
+    let escaped = input
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    format!("%{}%", escaped)
+}
+
+pub fn webdav_local_sync_parts_signature() -> Result<WebdavLocalSyncSignature, String> {
+    connection::with_connection(|conn| {
+        let clipboard: (i64, i64) = conn.query_row(
+            "SELECT COUNT(*), COALESCE(MAX(updated_at), 0) FROM clipboard",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let favorites: (i64, i64) = conn.query_row(
+            "SELECT COUNT(*), COALESCE(MAX(updated_at), 0) FROM favorites",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let groups: (i64, i64) = conn.query_row(
+            "SELECT COUNT(*), COALESCE(MAX(updated_at), 0) FROM groups",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let tombstones: (i64, i64) = conn.query_row(
+            "SELECT COUNT(*), COALESCE(MAX(deleted_at), 0) FROM sync_tombstones",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        Ok(WebdavLocalSyncSignature {
+            clipboard: format!("{}:{}", clipboard.0, clipboard.1),
+            favorites: format!("{}:{}", favorites.0, favorites.1),
+            groups: format!("{}:{}", groups.0, groups.1),
+            tombstones: format!("{}:{}", tombstones.0, tombstones.1),
+        })
+    })
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WebdavLocalSyncSignature {
+    pub clipboard: String,
+    pub favorites: String,
+    pub groups: String,
+    pub tombstones: String,
+}
+
+#[cfg(test)]
+mod like_pattern_tests {
+    use super::like_pattern;
+
+    #[test]
+    fn like_pattern_wraps_plain_text() {
+        assert_eq!(like_pattern("hello"), "%hello%");
+    }
+
+    #[test]
+    fn like_pattern_escapes_percent() {
+        assert_eq!(like_pattern("100%"), r"%100\%%");
+    }
+
+    #[test]
+    fn like_pattern_escapes_underscore() {
+        assert_eq!(like_pattern("a_b"), r"%a\_b%");
+    }
+
+    #[test]
+    fn like_pattern_escapes_backslash_first() {
+        // first escape backslash, then %/_
+        assert_eq!(like_pattern(r"a\b%c_d"), r"%a\\b\%c\_d%");
+    }
+
+    /// content_type 过滤也必须走 like_pattern(与搜索词同契约)。
+    #[test]
+    fn like_pattern_suitable_for_content_type_filter() {
+        // 常见 content_type 片段
+        assert_eq!(like_pattern("image"), "%image%");
+        assert_eq!(like_pattern("text"), "%text%");
+        // 若 content_type 含通配符字面,必须被转义
+        assert_eq!(like_pattern("rich_text"), r"%rich\_text%");
+        assert_eq!(like_pattern("100%"), r"%100\%%");
+    }
+}
