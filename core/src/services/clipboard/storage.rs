@@ -267,8 +267,65 @@ fn extract_file_paths(json: &Value) -> Vec<String> {
         .flat_map(|files| files.iter())
         .filter_map(|file| file["path"].as_str().map(String::from))
         .collect();
-    
+
     paths.sort();
     paths
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // 内容类型判定:文本/富文本/链接均属文本,图片/文件属文件,图片属图片。
+    #[test]
+    fn content_type_classifiers_cover_known_types() {
+        assert!(is_text_type("text"));
+        assert!(is_text_type("rich_text"));
+        assert!(is_text_type("link"));
+        assert!(!is_text_type("image"));
+        assert!(!is_text_type("file"));
+
+        assert!(is_file_type("image"));
+        assert!(is_file_type("file"));
+        assert!(!is_file_type("text"));
+
+        assert!(is_image_type("image"));
+        assert!(!is_image_type("text"));
+        assert!(!is_image_type("file"));
+    }
+
+    // 文件内容比较:files: JSON 忽略顺序与元数据,仅比路径集合(排序后等价)。
+    #[test]
+    fn compare_file_contents_ignores_order_and_metadata() {
+        let a = r#"files:{"files":[{"path":"clipboard_images/a.png","name":"a","size":1},{"path":"clipboard_images/b.png","name":"b","size":2}]}"#;
+        let b = r#"files:{"files":[{"path":"clipboard_images/b.png","name":"b","size":9},{"path":"clipboard_images/a.png","name":"a","size":8}]}"#;
+        assert!(compare_file_contents(a, b), "同路径集合不同顺序/元数据应相等");
+        let c = r#"files:{"files":[{"path":"clipboard_images/c.png","name":"c"}]}"#;
+        assert!(!compare_file_contents(a, c), "不同路径集合应不等");
+    }
+
+    // 非 files: 内容按整串比较。
+    #[test]
+    fn compare_non_files_content_by_whole_string() {
+        assert!(compare_file_contents("abc", "abc"));
+        assert!(!compare_file_contents("abc", "abd"));
+    }
+
+    // extract_file_paths 提取并排序路径。
+    #[test]
+    fn extract_file_paths_sorts_and_filters() {
+        let v = json!({
+            "files": [
+                {"path": "clipboard_images/b.png"},
+                {"path": "clipboard_images/a.png"},
+                {"path": "pin_images/x.png"},
+            ]
+        });
+        assert_eq!(
+            extract_file_paths(&v),
+            vec!["clipboard_images/a.png", "clipboard_images/b.png", "pin_images/x.png"]
+        );
+    }
 }
 
