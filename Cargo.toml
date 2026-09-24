@@ -6,8 +6,10 @@ members = ["core", "gui"]
 version = "0.5.0"
 edition = "2021"
 
-# 重构版发布剖面：fat LTO 面向最终产物，CI Build job 用 thin-LTO env 提速
-[workspace.profile.release]
+# 重构版发布剖面：根 manifest 的 [profile.release] 会作用于全部 workspace 成员
+#（成员 manifest 里的 [profile] 会被忽略，勿再下放）。fat LTO 面向最终产物，
+# CI Build job 用 thin-LTO env 提速。
+[profile.release]
 lto = "fat"
 opt-level = 3
 codegen-units = 1
@@ -17,6 +19,6 @@ debug = false
 incremental = false
 overflow-checks = false
 
-[workspace.profile.dev]
+[profile.dev]
 incremental = true
 debug = true

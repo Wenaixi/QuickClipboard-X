@@ -30,18 +30,17 @@ impl Default for RefactorShell {
 }
 
 impl eframe::App for RefactorShell {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("QuickClipboard 重构壳");
-            ui.label("阶段 0.5 骨架：gui 壳 + core 壳 + workspace + CI 改造已就位");
-            ui.label(format!(
-                "core 连接: {}",
-                if quickclipboard_core::placeholder_exists() {
-                    "OK"
-                } else {
-                    "MISSING"
-                }
-            ));
-        });
+    // eframe 0.34 起 App trait 拆为 logic + ui 两方法，update 不再要求实现
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        ui.heading("QuickClipboard 重构壳");
+        ui.label("阶段 0.5 骨架：gui 壳 + core 壳 + workspace + CI 改造已就位");
+        ui.label(format!(
+            "core 连接: {}",
+            if quickclipboard_core::placeholder_exists() {
+                "OK"
+            } else {
+                "MISSING"
+            }
+        ));
     }
 }
