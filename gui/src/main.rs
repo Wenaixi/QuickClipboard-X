@@ -45,6 +45,7 @@ struct RefactorShell {
     history_limit: u64,
     items: Vec<ClipboardItem>,
     search: String,
+    content_filter: String,
 }
 
 impl RefactorShell {
@@ -54,11 +55,17 @@ impl RefactorShell {
         } else {
             Some(self.search.trim().to_string())
         };
+        // 内容类型过滤:空串=全部,否则按所选类型(与 content_type 逗号语义一致)
+        let content_type = if self.content_filter.is_empty() {
+            None
+        } else {
+            Some(self.content_filter.clone())
+        };
         let params = QueryParams {
             offset: 0i64,
             limit: 50i64,
             search,
-            content_type: None,
+            content_type,
             paste_status: None,
         };
         match query_clipboard_items(params) {
@@ -74,6 +81,7 @@ impl Default for RefactorShell {
             history_limit: get_settings().history_limit,
             items: Vec::new(),
             search: String::new(),
+            content_filter: String::new(),
         }
     }
 }
@@ -84,7 +92,16 @@ impl eframe::App for RefactorShell {
         ui.heading("QuickClipboard 重构壳");
         ui.horizontal(|ui| {
             let edited = ui.text_edit_singleline(&mut self.search).changed();
-            if ui.button("搜索").clicked() || edited {
+            ui.label("类型:");
+            let types = ["", "text", "image", "file"];
+            let mut changed = false;
+            for t in types {
+                if ui.selectable_label(self.content_filter == t, if t.is_empty() { "全部" } else { t }).clicked() {
+                    self.content_filter = t.to_string();
+                    changed = true;
+                }
+            }
+            if ui.button("搜索").clicked() || edited || changed {
                 self.load_history();
             }
         });
