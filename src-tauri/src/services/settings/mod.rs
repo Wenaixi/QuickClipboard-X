@@ -1,13 +1,4 @@
-mod model;
-pub mod storage;
-mod state;
+//! 设置层 re-export core（生产代码逐字一致，避免双份源码漂移）。
+//! storage 子模块仍以 pub mod 暴露，命令/维护层经 storage::SettingsStorage 引用。
 
-pub use model::AppSettings;
-pub use state::{
-    get_settings, get_edge_monitor_settings, is_edge_hover_popup_enabled, update_settings, update_with, get_data_directory,
-};
-pub use storage::SettingsStorage;
-
-pub fn load_settings_from_file() -> Result<AppSettings, String> {
-    SettingsStorage::load()
-}
+pub use quickclipboard_core::services::settings::*;
