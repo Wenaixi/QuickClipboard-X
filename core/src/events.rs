@@ -83,16 +83,25 @@ pub fn emit_clipboard_updated(event: ClipboardUpdatedEvent) {
 mod tests {
     use super::*;
 
-    // 事件总线必须能跨线程投递并按 FIFO 排空
+    // 事件总线必须能跨线程投递并按 FIFO 排空。
+    // 注意:队列是进程级全局,其它测试(尤其 clipboard 相关)可能在同一
+    // 进程内投递过事件,不能假设 drained 只含本测试投递的两条——只断言
+    // 本测试投递的两条必定按序出现即可。
     #[test]
     fn events_round_trip_in_order() {
         post(AppEvent::PasteCountUpdated(1));
         post(AppEvent::FavoritePasteCountUpdated("fav".into()));
         let drained = drain();
         assert!(drained.len() >= 2, "投递的事件必须能被排空");
-        let tail = &drained[drained.len() - 2..];
-        assert!(matches!(tail[0], AppEvent::PasteCountUpdated(1)));
-        assert!(matches!(tail[1], AppEvent::FavoritePasteCountUpdated(_)));
+        let p1 = drained
+            .iter()
+            .position(|e| matches!(e, AppEvent::PasteCountUpdated(1)))
+            .expect("必须能找到 PasteCountUpdated(1)");
+        let fav = drained
+            .iter()
+            .position(|e| matches!(e, AppEvent::FavoritePasteCountUpdated(_)))
+            .expect("必须能找到 FavoritePasteCountUpdated");
+        assert!(p1 < fav, "FIFO:先投递的 PasteCountUpdated(1) 必须先被排空");
     }
 
     // drain 之后队列必须为空（不重复消费）
