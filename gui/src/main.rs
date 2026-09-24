@@ -44,14 +44,20 @@ fn init_runtime() -> Result<(), String> {
 struct RefactorShell {
     history_limit: u64,
     items: Vec<ClipboardItem>,
+    search: String,
 }
 
 impl RefactorShell {
     fn load_history(&mut self) {
+        let search = if self.search.trim().is_empty() {
+            None
+        } else {
+            Some(self.search.trim().to_string())
+        };
         let params = QueryParams {
             offset: 0i64,
             limit: 50i64,
-            search: None,
+            search,
             content_type: None,
             paste_status: None,
         };
@@ -67,6 +73,7 @@ impl Default for RefactorShell {
         Self {
             history_limit: get_settings().history_limit,
             items: Vec::new(),
+            search: String::new(),
         }
     }
 }
@@ -75,11 +82,19 @@ impl eframe::App for RefactorShell {
     // eframe 0.34 起 App trait 拆为 logic + ui 两方法，update 不再要求实现
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         ui.heading("QuickClipboard 重构壳");
-        if ui.button("刷新历史").clicked() {
-            self.load_history();
-        }
-        ui.label(format!("历史上限: {}", self.history_limit));
-        ui.label(format!("历史条数: {}", self.items.len()));
+        ui.horizontal(|ui| {
+            let edited = ui.text_edit_singleline(&mut self.search).changed();
+            if ui.button("搜索").clicked() || edited {
+                self.load_history();
+            }
+        });
+        ui.horizontal(|ui| {
+            if ui.button("刷新历史").clicked() {
+                self.load_history();
+            }
+            ui.label(format!("历史上限: {}", self.history_limit));
+            ui.label(format!("历史条数: {}", self.items.len()));
+        });
         ui.separator();
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
