@@ -202,9 +202,13 @@ impl eframe::App for RefactorShell {
                     });
             }
         }
-        // 每帧排空事件总线:收到事件(剪贴板监听器产生)后刷新当前页。
+        // 每帧排空事件总线:只在收到剪贴板更新事件时刷新当前页
+        // (过滤 TrayMenuRefresh 等非列表相关事件,避免每帧空转重载)。
         let events = quickclipboard_core::events::drain();
-        if !events.is_empty() {
+        let has_clipboard_update = events
+            .iter()
+            .any(|e| matches!(e, quickclipboard_core::events::AppEvent::ClipboardUpdated(_)));
+        if has_clipboard_update {
             match self.tab {
                 Tab::History => self.load_history(),
                 Tab::Favorites => self.load_favorites(),
