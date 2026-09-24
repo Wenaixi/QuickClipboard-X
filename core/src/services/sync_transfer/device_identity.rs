@@ -30,3 +30,27 @@ fn stored_device_id(key: &str) -> Option<String> {
         .map(|id| id.trim().to_string())
         .filter(|id| !id.is_empty())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // device_id 是进程级全局 Lazy,测试须串行化避免并发互踩。
+    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn lock_serial() -> std::sync::MutexGuard<'static, ()> {
+        SERIAL.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    // 首次调用返回 UUID 格式(v4 含 4 个连字符),进程内多次调用返回同一值。
+    #[test]
+    fn device_id_is_stable_uuid_within_process() {
+        let _g = lock_serial();
+        let first = device_id();
+        let second = device_id();
+        assert_eq!(first, second, "进程内 device_id 必须稳定");
+        assert_eq!(first.len(), 36, "UUID v4 字符串长度应为 36");
+        assert_eq!(first.chars().filter(|c| *c == '-').count(), 4, "UUID 应含 4 个连字符");
+        assert!(first.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'), "UUID 应仅含字母数字与连字符");
+    }
+}
