@@ -1,8 +1,3 @@
-use clipboard_rs::ClipboardContext;
-use super::clipboard_content::set_clipboard_text;
+//! paste/text re-export core（生产代码逐字一致，避免双份源码漂移）。
 
-
-// 粘贴纯文本
-pub fn paste_text(ctx: &ClipboardContext, text: &str) -> Result<(), String> {
-    set_clipboard_text(ctx, text)
-}
+pub use quickclipboard_core::services::paste::text::*;

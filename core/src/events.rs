@@ -10,7 +10,7 @@ use std::sync::{LazyLock, Mutex};
 use crate::services::database::ClipboardItem;
 
 /// 剪贴板更新事件的载荷（字段与旧 ClipboardUpdatedEventPayload 一致）
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ClipboardUpdatedEvent {
     pub kind: String,
     pub item: Option<ClipboardItem>,
@@ -19,7 +19,7 @@ pub struct ClipboardUpdatedEvent {
 }
 
 /// core 全域通知事件
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AppEvent {
     ClipboardUpdated(ClipboardUpdatedEvent),
     PasteCountUpdated(i64),

@@ -5,6 +5,7 @@ use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 mod commands;
+mod events_bridge;
 pub mod maintenance;
 mod security;
 mod services;
@@ -418,7 +419,11 @@ pub fn run() {
                 let _ = services::database::connection::with_connection(|conn| {
                     conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
                 });
-                
+
+                // 挂 core 事件总线 → tauri emit 桥:core 业务域(paste/clipboard)
+                // 统一经 core::events::post 发布事件,壳在此翻译成前端可收的 tauri emit。
+                events_bridge::start_event_bridge(app.handle().clone());
+
                 startup_diagnostics::set_startup_stage("执行 setup：加载设置");
                 let mut settings = get_settings();
                 
