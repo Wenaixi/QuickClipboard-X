@@ -1,7 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use eframe::egui;
-use quickclipboard_core::services::database::{init_database, query_clipboard_items, ClipboardItem, QueryParams};
+use quickclipboard_core::services::clipboard::start_clipboard_monitor;
+use quickclipboard_core::services::database::{
+    init_database, query_clipboard_items, ClipboardItem, QueryParams,
+};
 use quickclipboard_core::services::paste::copy_clipboard_item;
 use quickclipboard_core::services::settings::{get_data_directory, get_settings};
 
@@ -15,6 +18,11 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     let _ = init_runtime();
+    // 启动剪贴板监听（core 完全自洽：监视器线程 + 事件总线 + AppSounds 均在 core 内），
+    // 新复制内容经 core::events::post → gui 壳每帧 drain 收到 ClipboardUpdated 自动重载。
+    if let Err(e) = start_clipboard_monitor() {
+        eprintln!("启动剪贴板监听失败: {}", e);
+    }
     eframe::run_native(
         "QuickClipboard",
         options,
@@ -34,19 +42,20 @@ fn init_runtime() -> Result<(), String> {
 }
 
 struct RefactorShell {
-    history_limit: i64,
+    history_limit: u64,
     items: Vec<ClipboardItem>,
 }
 
 impl RefactorShell {
     fn load_history(&mut self) {
-        match query_clipboard_items(QueryParams {
-            offset: 0,
-            limit: 50,
+        let params = QueryParams {
+            offset: 0i64,
+            limit: 50i64,
             search: None,
             content_type: None,
             paste_status: None,
-        }) {
+        };
+        match query_clipboard_items(params) {
             Ok(result) => self.items = result.items,
             Err(e) => eprintln!("加载剪贴板历史失败: {}", e),
         }
@@ -94,6 +103,10 @@ impl eframe::App for RefactorShell {
                     });
                 }
             });
-        let _ = quickclipboard_core::events::drain();
+        // 每帧排空事件总线:收到事件(剪贴板监听器产生)后刷新历史。
+        let events = quickclipboard_core::events::drain();
+        if !events.is_empty() {
+            self.load_history();
+        }
     }
 }
