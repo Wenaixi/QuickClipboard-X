@@ -566,8 +566,29 @@ fn extract_image_id_from_path(path_str: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{fetch_image_data, merge_image_ids_prefer_clipboard_image};
+    use super::{fetch_image_data, is_url, merge_image_ids_prefer_clipboard_image};
 
+    // is_url:四种协议前缀命中,其余文本不命中。
+    #[test]
+    fn is_url_detects_recognized_protocol_prefixes() {
+        for url in ["http://example.com", "https://example.com", "ftp://files.example.com", "www.example.com"] {
+            assert!(is_url(url), "{} 应被识别为 URL", url);
+        }
+        assert!(!is_url("example.com"), "裸域名不算 URL");
+        assert!(!is_url("https:// 中间有空格"), "协议前缀后必须紧跟内容");
+        assert!(!is_url(""), "空串不是 URL");
+    }
+
+    // contains_links:URL_RE 命中 http/https/ftp/www 开头的链接即真。
+    #[test]
+    fn contains_links_matches_url_regex() {
+        assert!(contains_links("看这里 https://example.com/x"));
+        assert!(contains_links("邮件 www.qq.com"));
+        assert!(!contains_links("纯文本没有链接"));
+        assert!(!contains_links("a.b.c"));
+    }
+
+    // 剪贴板快照图片优先于 HTML 内联图:富文本含内联图时的 image_id 合并顺序。
     #[test]
     fn clipboard_image_id_should_be_first_for_rich_text_images() {
         let merged = merge_image_ids_prefer_clipboard_image(
