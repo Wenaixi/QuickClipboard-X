@@ -1,0 +1,7 @@
+[package]
+name = "quickclipboard-core"
+version.workspace = true
+edition.workspace = true
+description = "QuickClipboard 纯 Rust 重构核心库：业务服务域"
+
+[dependencies]

@@ -1,0 +1,13 @@
+[package]
+name = "quickclipboard"
+version.workspace = true
+edition.workspace = true
+description = "QuickClipboard 纯 Rust 重构版（egui/eframe）"
+
+[[bin]]
+name = "quickclipboard"
+path = "src/main.rs"
+
+[dependencies]
+quickclipboard-core = { path = "../core" }
+eframe = { version = "=0.34.3", default-features = false, features = ["glow", "default_fonts", "wayland", "x11"] }

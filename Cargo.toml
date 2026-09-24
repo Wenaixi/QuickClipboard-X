@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = ["core", "gui"]
+
+[workspace.package]
+version = "0.5.0"
+edition = "2021"
+
+# 重构版发布剖面：fat LTO 面向最终产物，CI Build job 用 thin-LTO env 提速
+[workspace.profile.release]
+lto = "fat"
+opt-level = 3
+codegen-units = 1
+panic = "abort"
+strip = "debuginfo"
+debug = false
+incremental = false
+overflow-checks = false
+
+[workspace.profile.dev]
+incremental = true
+debug = true

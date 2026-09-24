@@ -115,6 +115,10 @@ keyring = { version = "3.6.3", features = ["sync-secret-service", "crypto-rust"]
 [dev-dependencies]
 wiremock = "0.6"
 
+# 根 workspace 出现后 src-tauri 成为非成员，须 opt-out 避免
+# "current package believes it's in a workspace" 报错
+[workspace]
+
 [features]
 default = []
 custom-protocol = ["tauri/custom-protocol"]
