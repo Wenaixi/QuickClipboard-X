@@ -52,8 +52,10 @@ mod tests {
     use crate::services::system::hotkey::test_utils::{source_file, strip_line_comments};
 
     fn bare_source(rel: &str) -> String {
-        // 路径以 ../../ 开头时直接拼接(读 core 内源码),否则走 src/ 前缀。
-        if rel.starts_with("../../") {
+        // 路径以 ../core/ 开头时直接拼接(读 core crate 源码):
+        // source_file 拼接基准是 CARGO_MANIFEST_DIR(src-tauri/),
+        // core 是其兄弟目录,即 ../core/... = <仓库根>/core/... 。
+        if rel.starts_with("../core/") {
             strip_line_comments(&source_file(rel))
         } else {
             strip_line_comments(&source_file(&format!("src/{rel}")))
@@ -64,7 +66,7 @@ mod tests {
     fn is_portable_runtime_is_single_source_of_truth() {
         // 1. helper 自身必须同时检查 flag + txt(语义完整);
         // is_portable_runtime 已 re-export core,源码在 core crate。
-        let helper = bare_source("../../core/src/services/mod.rs");
+        let helper = bare_source("../core/src/services/mod.rs");
         let fn_start = helper
             .find("pub fn is_portable_runtime")
             .expect("找不到 is_portable_runtime");
@@ -93,7 +95,7 @@ mod tests {
         // storage.rs: 私有 is_portable_mode 必须委托 helper,不得内联 join
         // (storage.rs 已 re-export core,源码在 core crate)。
         {
-            let s = bare_source("../../core/src/services/settings/storage.rs");
+            let s = bare_source("../core/src/services/settings/storage.rs");
             let start = s.find("fn is_portable_mode").expect("storage 缺 is_portable_mode");
             let end = s[start..]
                 .find("\n    fn ")
@@ -164,7 +166,7 @@ mod tests {
     // 提取 resolve_stored_path 的函数体(剥注释后):本地实现已 re-export core,
     // 源码在 core crate,护栏改读 core 内实现。
     fn resolve_stored_path_body() -> String {
-        let src = bare_source("../../core/src/services/mod.rs");
+        let src = bare_source("../core/src/services/mod.rs");
         let start = src
             .find("pub fn resolve_stored_path")
             .expect("缺 resolve_stored_path");
@@ -180,7 +182,7 @@ mod tests {
         // 以固定子目录开头的输入必须解析回 data_dir 之下;含父目录段时回退原样
         // 注意 get_data_directory 依赖 app 状态,测试环境可能不可用,
         // 这里只验证纯函数式的分支决策(无 data_dir 时返回原串)。
-        let source = source_file("../../core/src/services/mod.rs");
+        let source = source_file("../core/src/services/mod.rs");
         // 防御护栏:三个子目录前缀必须保持 starts_with(data_dir) 校验
         let count = source.matches(".starts_with(&data_dir)").count();
         assert!(
@@ -198,7 +200,7 @@ mod tests {
         // 读到 data_dir 之外任意文件。修复必须在拼接前拦截独立成段的
         // `.`/`..`(用 Component::ParentDir/CurDir,避免误伤 file..txt),
         // 拒绝时返回空串视为不存在。
-        let whole = bare_source("../../core/src/services/mod.rs");
+        let whole = bare_source("../core/src/services/mod.rs");
         let helper_start = whole
             .find("fn contains_parent_segments")
             .expect("必须提供父目录段检测函数");

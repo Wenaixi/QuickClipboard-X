@@ -32,7 +32,7 @@ mod lan_same_second_guard {
     #[test]
     fn pull_anchor_stays_max_updated_at() {
         // database 已 re-export core,源码在 core crate。
-        let src = strip_line_comments(&source_file("../../core/src/services/database/mod.rs"));
+        let src = strip_line_comments(&source_file("../core/src/services/database/mod.rs"));
         for (fn_name, table) in [
             ("lan_local_history_max_updated_at", "FROM clipboard"),
             ("lan_local_favorites_max_updated_at", "FROM favorites"),
