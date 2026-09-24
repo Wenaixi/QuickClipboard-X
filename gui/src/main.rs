@@ -3,9 +3,10 @@
 use eframe::egui;
 use quickclipboard_core::services::clipboard::start_clipboard_monitor;
 use quickclipboard_core::services::database::{
-    init_database, query_clipboard_items, ClipboardItem, QueryParams,
+    init_database, query_clipboard_items, query_favorites, ClipboardItem, FavoriteItem,
+    FavoritesQueryParams, QueryParams,
 };
-use quickclipboard_core::services::paste::copy_clipboard_item;
+use quickclipboard_core::services::paste::{copy_clipboard_item, copy_favorite_item};
 use quickclipboard_core::services::settings::{get_data_directory, get_settings};
 
 fn main() -> eframe::Result {
@@ -44,8 +45,16 @@ fn init_runtime() -> Result<(), String> {
 struct RefactorShell {
     history_limit: u64,
     items: Vec<ClipboardItem>,
+    favorites: Vec<FavoriteItem>,
     search: String,
     content_filter: String,
+    tab: Tab,
+}
+
+#[derive(PartialEq, Clone, Copy)]
+enum Tab {
+    History,
+    Favorites,
 }
 
 impl RefactorShell {
@@ -73,6 +82,21 @@ impl RefactorShell {
             Err(e) => eprintln!("加载剪贴板历史失败: {}", e),
         }
     }
+
+    fn load_favorites(&mut self) {
+        let params = FavoritesQueryParams {
+            offset: 0i64,
+            limit: 50i64,
+            group_name: None,
+            search: None,
+            content_type: None,
+            paste_status: None,
+        };
+        match query_favorites(params) {
+            Ok(result) => self.favorites = result.items,
+            Err(e) => eprintln!("加载收藏失败: {}", e),
+        }
+    }
 }
 
 impl Default for RefactorShell {
@@ -80,8 +104,10 @@ impl Default for RefactorShell {
         Self {
             history_limit: get_settings().history_limit,
             items: Vec::new(),
+            favorites: Vec::new(),
             search: String::new(),
             content_filter: String::new(),
+            tab: Tab::History,
         }
     }
 }
@@ -106,39 +132,83 @@ impl eframe::App for RefactorShell {
             }
         });
         ui.horizontal(|ui| {
-            if ui.button("刷新历史").clicked() {
+            if ui.selectable_label(self.tab == Tab::History, "历史").clicked() {
+                self.tab = Tab::History;
                 self.load_history();
             }
+            if ui.selectable_label(self.tab == Tab::Favorites, "收藏").clicked() {
+                self.tab = Tab::Favorites;
+                self.load_favorites();
+            }
+            ui.separator();
+            if ui.button("刷新").clicked() {
+                match self.tab {
+                    Tab::History => self.load_history(),
+                    Tab::Favorites => self.load_favorites(),
+                }
+            }
             ui.label(format!("历史上限: {}", self.history_limit));
-            ui.label(format!("历史条数: {}", self.items.len()));
         });
         ui.separator();
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                for item in &self.items {
-                    ui.horizontal(|ui| {
-                        let preview = item.content.chars().take(40).collect::<String>();
-                        let preview = if preview.is_empty() { "(空内容)" } else { &preview };
-                        ui.label(format!(
-                            "[{:>3}] {}",
-                            item.content_type.split(',').next().unwrap_or("?"),
-                            preview
-                        ));
-                        if ui.small_button("复制").clicked() {
-                            let clone = item.clone();
-                            match copy_clipboard_item(&clone) {
-                                Ok(()) => eprintln!("已复制到系统剪贴板: id={}", item.id),
-                                Err(e) => eprintln!("复制失败: {}", e),
-                            }
+        match self.tab {
+            Tab::History => {
+                ui.label(format!("历史条数: {}", self.items.len()));
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        for item in &self.items {
+                            ui.horizontal(|ui| {
+                                let preview = item.content.chars().take(40).collect::<String>();
+                                let preview = if preview.is_empty() { "(空内容)" } else { &preview };
+                                ui.label(format!(
+                                    "[{:>3}] {}",
+                                    item.content_type.split(',').next().unwrap_or("?"),
+                                    preview
+                                ));
+                                if ui.small_button("复制").clicked() {
+                                    let clone = item.clone();
+                                    match copy_clipboard_item(&clone) {
+                                        Ok(()) => eprintln!("已复制到系统剪贴板: id={}", item.id),
+                                        Err(e) => eprintln!("复制失败: {}", e),
+                                    }
+                                }
+                            });
                         }
                     });
-                }
-            });
-        // 每帧排空事件总线:收到事件(剪贴板监听器产生)后刷新历史。
+            }
+            Tab::Favorites => {
+                ui.label(format!("收藏条数: {}", self.favorites.len()));
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        for item in &self.favorites {
+                            ui.horizontal(|ui| {
+                                let preview = item.content.chars().take(40).collect::<String>();
+                                let preview = if preview.is_empty() { "(空内容)" } else { &preview };
+                                ui.label(format!(
+                                    "[{:>3}] {}",
+                                    item.content_type.split(',').next().unwrap_or("?"),
+                                    preview
+                                ));
+                                if ui.small_button("复制").clicked() {
+                                    let clone = item.clone();
+                                    match copy_favorite_item(&clone, &item.id) {
+                                        Ok(()) => eprintln!("已复制收藏到系统剪贴板: id={}", item.id),
+                                        Err(e) => eprintln!("复制收藏失败: {}", e),
+                                    }
+                                }
+                            });
+                        }
+                    });
+            }
+        }
+        // 每帧排空事件总线:收到事件(剪贴板监听器产生)后刷新当前页。
         let events = quickclipboard_core::events::drain();
         if !events.is_empty() {
-            self.load_history();
+            match self.tab {
+                Tab::History => self.load_history(),
+                Tab::Favorites => self.load_favorites(),
+            }
         }
     }
 }
