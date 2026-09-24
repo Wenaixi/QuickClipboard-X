@@ -1,4 +1,6 @@
+pub mod cf_html;
 pub mod html;
+pub mod icon;
 pub mod image;
 pub mod text;
 
